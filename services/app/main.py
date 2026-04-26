@@ -66,6 +66,9 @@ def _serve_html(rel: str) -> Response:
     html = p.read_text(encoding="utf-8")
     base_tag = f'<base href="{ROOT_PATH}/" />'
     html = html.replace("<head>", f"<head>\n    {base_tag}", 1)
+    # Convert absolute paths to relative so <base> can resolve them
+    for prefix in ('"/js/', '"/css/', '"/images/'):
+        html = html.replace(prefix, prefix[0] + prefix[2:])  # '"/js/' -> '"js/'
     return Response(content=html, media_type="text/html")
 
 
