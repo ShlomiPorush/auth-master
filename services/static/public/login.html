@@ -48,7 +48,7 @@
           return;
         }
         writeCsrf(j.csrf || "");
-        window.location.href = "/login-mfa";
+        window.location.href = basePath() + "/login-mfa";
       });
     </script>
   </body>

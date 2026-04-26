@@ -701,7 +701,7 @@
       async function refreshServiceStatus() {
         setStatusChip("dbStatus", "DB", null); setStatusChip("redisStatus", "Redis", null);
         setHeaderDot("dbDot", null); setHeaderDot("redisDot", null);
-        var res = await fetch("/health", { credentials: "include" }).catch(function () { return null; });
+        var res = await fetch(basePath() + "/health", { credentials: "include" }).catch(function () { return null; });
         if (!res || !res.ok) {
           setStatusChip("dbStatus", "DB", false); setStatusChip("redisStatus", "Redis", false);
           setHeaderDot("dbDot", false); setHeaderDot("redisDot", false);
@@ -725,7 +725,7 @@
 
       async function loadMe() {
         var r = await adminApi("/admin/api/me"); var j = await r.json();
-        if (!j.user) { window.location.href = "/login"; return; }
+        if (!j.user) { window.location.href = basePath() + "/login"; return; }
         state.username = j.user.username; state.csrf = j.csrf || readCsrf(); writeCsrf(state.csrf);
         document.getElementById("user").textContent = state.username;
         await refreshAreasFromApi();
@@ -1105,7 +1105,7 @@
       });
 
       document.getElementById("refresh").addEventListener("click", async function () { await refreshActiveTabData(); await refreshServiceStatus(); });
-      document.getElementById("logout").addEventListener("click", async function () { await adminApi("/admin/api/logout", { method: "POST" }); writeCsrf(""); window.location.href = "/login"; });
+      document.getElementById("logout").addEventListener("click", async function () { await adminApi("/admin/api/logout", { method: "POST" }); writeCsrf(""); window.location.href = basePath() + "/login"; });
       document.getElementById("newtok").addEventListener("click", async function () {
         await refreshAreasFromApi();
         document.getElementById("areasBox").innerHTML = renderAreaRadios("c", {});
@@ -1352,7 +1352,7 @@
 
       (async function init() {
         var st = await adminApi("/admin/api/setup/status"); var sj = await st.json();
-        if (sj.needsSetup) { window.location.href = "/setup"; return; }
+        if (sj.needsSetup) { window.location.href = basePath() + "/setup"; return; }
         await loadMe(); await loadTokens(); await loadZonesTable(); await refreshServiceStatus();
         setInterval(refreshServiceStatus, 15000);
       })();

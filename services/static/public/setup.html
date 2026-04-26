@@ -59,7 +59,7 @@
           return;
         }
         writeCsrf(j.csrf || "");
-        window.location.href = "/setup-mfa";
+        window.location.href = basePath() + "/setup-mfa";
       });
     </script>
   </body>

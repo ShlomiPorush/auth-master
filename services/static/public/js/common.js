@@ -1,4 +1,5 @@
 (function (w) {
+  var B = w.__BASE_PATH__ || "";
   w.adminApi = async function (path, opts) {
     opts = opts || {};
     var headers = new Headers();
@@ -9,13 +10,14 @@
     }
     if (opts.csrf) headers.set("X-CSRF-Token", opts.csrf);
     if (opts.body !== undefined) headers.set("Content-Type", "application/json");
-    return fetch(path, {
+    return fetch(B + path, {
       method: opts.method || "GET",
       headers: headers,
       credentials: "include",
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
   };
+  w.basePath = function () { return B; };
   w.readCsrf = function () {
     return sessionStorage.getItem("csrf") || "";
   };

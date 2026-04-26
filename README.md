@@ -40,6 +40,7 @@ See [docker-compose.yml](docker-compose.yml)
 | `TOTP_ISSUER` | `AuthService` | Issuer name shown in authenticator apps |
 | `ENVIRONMENT` | `production` | Application environment (`production` or `development`) |
 | `VALIDATE_CACHE_TTL_SEC` | `300` | How long validated tokens are cached in Redis (seconds) |
+| `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
 
 ## Architecture
