@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auth Service — Dashboard</title>
+    <meta name="description" content="Token management dashboard for Auth Service" />
+    <script src="/js/head.js"></script>
+    <script src="/js/theme.js"></script>
+    <style>
+      /* badge styles */
+      .badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+      .badge-green { background: rgba(16,185,129,.12); color: #34d399; border: 1px solid rgba(16,185,129,.2); }
+      .badge-red { background: rgba(239,68,68,.12); color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+      .badge-amber { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.2); }
+      .badge-blue { background: rgba(59,130,246,.12); color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
+      .badge-slate { background: rgba(100,116,139,.12); color: #94a3b8; border: 1px solid rgba(100,116,139,.2); }
+      .badge-violet { background: rgba(139,92,246,.12); color: #a78bfa; border: 1px solid rgba(139,92,246,.2); }
+      /* action buttons */
+      .btn-action {
+        display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px;
+        border-radius: 8px; font-size: 12px; font-weight: 500;
+        transition: all .2s; cursor: pointer; border: 1px solid transparent;
+      }
+      .btn-action:hover { filter: brightness(1.15); }
+      .btn-outline { background: transparent; color: #94a3b8; border-color: #334155; }
+      .btn-outline:hover { background: rgba(59,130,246,.08); color: #e2e8f0; border-color: #3b82f6; }
+      .btn-danger { background: transparent; color: #f87171; border-color: rgba(239,68,68,.3); }
+      .btn-danger:hover { background: rgba(239,68,68,.1); }
+      .btn-success { background: transparent; color: #34d399; border-color: rgba(16,185,129,.3); }
+      .btn-success:hover { background: rgba(16,185,129,.1); }
+      .btn-warn { background: transparent; color: #fbbf24; border-color: rgba(245,158,11,.3); }
+      .btn-warn:hover { background: rgba(245,158,11,.1); }
+      /* dashboard input override — slightly smaller padding */
+      .input-dark { padding: 8px 14px; }
+      /* status dot */
+      .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+      .status-ok { background: #34d399; box-shadow: 0 0 6px rgba(16,185,129,.4); }
+      .status-err { background: #f87171; box-shadow: 0 0 6px rgba(239,68,68,.4); }
+      .status-pending { background: #94a3b8; }
+      /* tab nav */
+      .tab-btn {
+        display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+        font-size: 13px; font-weight: 500; color: #94a3b8;
+        border-bottom: 2px solid transparent; transition: all .2s; cursor: pointer;
+        background: transparent; border-top: none; border-left: none; border-right: none;
+        white-space: nowrap;
+      }
+      .tab-btn:hover { color: #e2e8f0; }
+      .tab-btn.active { color: #60a5fa; border-bottom-color: #3b82f6; }
+      /* scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: #111827; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+      /* toast animation */
+      @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      .toast-enter { animation: slideUp .25s ease-out; }
+      /* table — desktop */
+      .data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .data-table th { padding: 12px 16px; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; text-align: left; border-bottom: 1px solid #1a2332; overflow: hidden; text-overflow: ellipsis; }
+      .data-table td { padding: 14px 16px; font-size: 13px; color: #cbd5e1; border-bottom: 1px solid rgba(30,41,59,.5); vertical-align: top; overflow: hidden; text-overflow: ellipsis; }
+      .data-table tbody tr { transition: background .15s; }
+      .data-table tbody tr:hover { background: rgba(59,130,246,.03); }
+      /* token table column widths — 5 columns */
+      .col-name { width: 18%; } .col-grants { width: 28%; }
+      .col-status { width: 10%; } .col-last { width: 20%; } .col-actions { width: 24%; }
+      /* zone table column widths */
+      .zcol-name { width: 30%; } .zcol-desc { width: 30%; } .zcol-created { width: 20%; } .zcol-actions { width: 20%; }
+      /* api key table column widths */
+      .akcol-name { width: 22%; } .akcol-scopes { width: 38%; } .akcol-created { width: 20%; } .akcol-actions { width: 20%; }
+      /* modal backdrop */
+      .modal-backdrop { background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
+      /* modal inner */
+      .modal-inner {
+        max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem);
+        overflow-y: auto;
+      }
+      /* scrollable areas list inside modals */
+      .areas-scroll { max-height: 35vh; overflow-y: auto; padding-right: 4px; }
+      /* lock background scroll */
+      body.modal-open { overflow: hidden; }
+      /* ── Mobile card view for tokens ── */
+      .token-card { display: none; }
+      /* search bar */
+      .search-bar { position: relative; }
+      .search-bar svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+      .search-bar input { padding-left: 36px; }
+      .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+      .filter-pill {
+        display: inline-flex; align-items: center; padding: 5px 14px;
+        border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer;
+        border: 1px solid transparent; background: transparent; color: #94a3b8;
+        transition: all .2s; white-space: nowrap;
+      }
+      .filter-pill:hover { opacity: .85; }
+      /* colored filter pills */
+      .filter-pill[data-filter="all"] { border-color: #334155; color: #94a3b8; }
+      .filter-pill[data-filter="all"].active { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #60a5fa; }
+      .filter-pill[data-filter="active"] { border-color: rgba(16,185,129,.3); color: #34d399; }
+      .filter-pill[data-filter="active"].active { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.5); color: #34d399; }
+      .filter-pill[data-filter="disabled"] { border-color: rgba(239,68,68,.3); color: #f87171; }
+      .filter-pill[data-filter="disabled"].active { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.5); color: #f87171; }
+      /* clear filters */
+      .btn-clear-filter {
+        display: none; align-items: center; gap: 4px; padding: 5px 10px;
+        border-radius: 8px; font-size: 11px; font-weight: 500; cursor: pointer;
+        border: 1px dashed #475569; background: transparent; color: #64748b;
+        transition: all .2s; white-space: nowrap;
+      }
+      .btn-clear-filter:hover { border-color: #94a3b8; color: #94a3b8; }
+      .btn-clear-filter.visible { display: inline-flex; }
+      /* zone dropdown filter */
+      .filter-select {
+        padding: 5px 28px 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 500;
+        border: 1px solid #243044; background: #0b1120; color: #94a3b8; cursor: pointer;
+        transition: all .2s; outline: none;
+        appearance: none; -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 8px center;
+      }
+      .filter-select:hover { border-color: #3b82f6; color: #e2e8f0; }
+      .filter-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+      /* area grid in modals */
+      .areas-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+      @media (min-width: 480px) { .areas-grid { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 767px) {
+        .data-table-wrap { display: none; }
+        .token-cards { display: block !important; }
+        .zone-cards { display: block !important; }
+        .token-card {
+          display: block; padding: 16px;
+          border-bottom: 1px solid rgba(30,41,59,.5);
+        }
+        .token-card:last-child { border-bottom: none; }
+        .token-card-field { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; font-size: 13px; }
+        .token-card-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+        .token-card-value { color: #cbd5e1; text-align: right; }
+        .token-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(30,41,59,.3); }
+        .token-card-actions .btn-action { flex: 1; min-width: 70px; justify-content: center; padding: 8px 10px; }
+        /* zone card */
+        .zone-card {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 14px 16px; border-bottom: 1px solid rgba(30,41,59,.5); font-size: 13px;
+        }
+        .zone-card:last-child { border-bottom: none; }
+        /* stat cards compact */
+        .stat-card-compact { padding: 12px !important; }
+        .stat-card-compact .stat-val { font-size: 1.25rem !important; }
+        .stat-card-compact .stat-icon { display: none; }
+        /* header mobile */
+        .header-actions .btn-label { display: none; }
+        .header-user { display: none; }
+        /* footer stacking */
+        .footer-inner { flex-direction: column; gap: 8px; align-items: flex-start !important; }
+      }
+      @media (min-width: 768px) {
+        .token-cards { display: none !important; }
+        .zone-cards { display: none !important; }
+      }
+      /* body flex layout for sticky footer */
+      body { display: flex; flex-direction: column; }
+      main { flex: 1; }
+    </style>
+  </head>
+  <body class="min-h-screen font-sans text-slate-200 antialiased">
+    <!-- ─── HEADER ─── -->
+    <header class="border-b border-navy-600 bg-navy-800/80 backdrop-blur-sm sticky top-0 z-40">
+      <div class="max-w-[1600px] mx-auto px-3 sm:px-6">
+        <div class="flex items-center justify-between h-14">
+          <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <svg class="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+              <h1 class="text-sm sm:text-base font-semibold text-white whitespace-nowrap">Auth Service</h1>
+            </div>
+            <div class="flex items-center gap-1" id="serviceIndicators">
+              <span id="dbDot" class="status-dot status-pending" title="Database"></span>
+              <span id="redisDot" class="status-dot status-pending" title="Redis"></span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5 sm:gap-2 header-actions flex-shrink-0">
+            <span id="user" class="text-sm text-slate-400 mr-1 header-user truncate max-w-[100px]"></span>
+            <button type="button" id="refresh" class="btn-action btn-outline" title="Refresh">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
+              <span class="btn-label">Refresh</span>
+            </button>
+            <button type="button" id="logout" class="btn-action btn-outline"><span class="btn-label">Log out</span><svg class="w-3.5 h-3.5 sm:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ─── TAB NAV ─── -->
+    <nav class="border-b border-navy-600 bg-navy-800/50">
+      <div class="max-w-[1600px] mx-auto px-4 sm:px-6 flex gap-1">
+        <button type="button" id="tabTokens" class="tab-btn active">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+          Tokens
+        </button>
+        <button type="button" id="tabZones" class="tab-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
+          Zones
+        </button>
+        <button type="button" id="tabApiKeys" class="tab-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          API Keys
+        </button>
+      </div>
+    </nav>
+
+    <!-- ─── MAIN ─── -->
+    <main class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
+      <!-- ─── STAT CARDS ─── -->
+      <div class="grid grid-cols-3 gap-2 sm:gap-4 mb-6" id="statsRow">
+        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Tokens</span>
+            <svg class="w-5 h-5 text-blue-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+          </div>
+          <p id="statTotal" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
+        </div>
+        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Active</span>
+            <svg class="w-5 h-5 text-emerald-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <p id="statActive" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
+        </div>
+        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Zones</span>
+            <svg class="w-5 h-5 text-violet-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z"/></svg>
+          </div>
+          <p id="statZones" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
+        </div>
+      </div>
+
+      <!-- ─── TOKEN CREATED BANNER ─── -->
+      <div id="once" class="hidden mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+        <p class="font-medium text-emerald-300 text-sm">✓ Token created — copy it now, you can reveal it later with MFA.</p>
+        <pre id="rawtok" class="mt-2 text-sm break-all bg-navy-950 text-emerald-200 p-3 rounded-lg font-mono"></pre>
+        <div class="mt-3 flex gap-3 items-center">
+          <button type="button" id="copyNewToken" class="btn-action btn-success text-xs">Copy token</button>
+          <button type="button" id="dismissOnce" class="text-xs text-blue-400 underline hover:text-blue-300 cursor-pointer">Dismiss</button>
+        </div>
+      </div>
+
+      <!-- ─── TOKENS PANEL ─── -->
+      <section id="panelTokens">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-white">API Tokens</h2>
+          <button type="button" id="newtok" class="btn-action btn-primary">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            New Token
+          </button>
+        </div>
+        <!-- Search & Filter -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+          <div class="search-bar flex-1">
+            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+            <input id="tokenSearch" class="input-dark" placeholder="Search tokens by name or description…" />
+          </div>
+          <div class="filter-pills" id="tokenFilters">
+            <button type="button" class="filter-pill active" data-filter="all">All</button>
+            <button type="button" class="filter-pill" data-filter="active">Active</button>
+            <button type="button" class="filter-pill" data-filter="disabled">Disabled</button>
+            <select id="zoneFilter" class="filter-select">
+              <option value="">All zones</option>
+            </select>
+            <select id="levelFilter" class="filter-select">
+              <option value="">All levels</option>
+              <option value="read">Read</option>
+              <option value="write">Write</option>
+              <option value="delete">Delete</option>
+              <option value="all">All perms</option>
+            </select>
+            <button type="button" id="clearFilters" class="btn-clear-filter" title="Clear all filters">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+              Clear
+            </button>
+          </div>
+        </div>
+        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
+          <!-- Desktop table view -->
+          <div class="overflow-x-auto data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="col-name">Name</th>
+                  <th class="col-grants">Grants</th>
+                  <th class="col-status">Status</th>
+                  <th class="col-last">Last Used</th>
+                  <th class="col-actions text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+          <!-- Mobile card view -->
+          <div id="tokenCards" class="token-cards" style="display:none"></div>
+          <div id="emptyTokens" class="hidden text-center py-12 text-slate-500 text-sm">
+            <svg class="w-10 h-10 mx-auto mb-3 text-slate-600" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+            No tokens yet. Click <strong class="text-blue-400">New Token</strong> to create one.
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── ZONES PANEL ─── -->
+      <section id="panelZones" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-white">Zones</h2>
+        </div>
+        <p class="text-sm text-slate-400 mb-4">Zones define allowed API areas for new tokens. If the list is empty, <code class="text-xs bg-navy-700 text-blue-300 px-1.5 py-0.5 rounded">ALLOWED_AREAS</code> from the environment is used.</p>
+        <form id="zoneAdd" class="flex flex-wrap gap-3 mb-5 items-end">
+          <div class="flex-1 min-w-[140px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Zone name</label>
+            <input name="name" placeholder="e.g. orders" class="input-dark" required />
+          </div>
+          <div class="flex-1 min-w-[140px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Description (optional)</label>
+            <input name="description" placeholder="What this zone controls" class="input-dark" />
+          </div>
+          <button type="submit" class="btn-action btn-primary h-[38px]">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add
+          </button>
+        </form>
+        <p id="zoneErr" class="text-sm text-red-400 hidden mb-3"></p>
+        <!-- Zone search -->
+        <div class="search-bar mb-4">
+          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+          <input id="zoneSearch" class="input-dark" placeholder="Search zones…" />
+        </div>
+        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
+          <div class="overflow-x-auto data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="zcol-name">Name</th>
+                  <th class="zcol-desc">Description</th>
+                  <th class="zcol-created">Created</th>
+                  <th class="zcol-actions text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="zoneRows"></tbody>
+            </table>
+          </div>
+          <!-- Mobile zone cards -->
+          <div id="zoneCards" class="zone-cards" style="display:none"></div>
+        </div>
+      </section>
+
+      <!-- ─── API KEYS PANEL ─── -->
+      <section id="panelApiKeys" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-white">API Keys</h2>
+          <button type="button" id="newApiKeyBtn" class="btn-action btn-primary"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg> New Key</button>
+        </div>
+        <p class="text-sm text-slate-400 mb-4">API keys allow programmatic access to the Auth Service (e.g. from n8n). Each key can have specific permission scopes.</p>
+        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
+          <div class="overflow-x-auto data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="akcol-name">Name</th>
+                  <th class="akcol-scopes">Scopes</th>
+                  <th class="akcol-created">Created</th>
+                  <th class="akcol-actions text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="apiKeyRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ─── FOOTER ─── -->
+    <footer class="border-t border-navy-600 bg-navy-800/80 backdrop-blur-sm mt-auto">
+      <div class="max-w-[1600px] mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between text-xs footer-inner">
+        <span class="text-slate-500">Service status</span>
+        <div class="flex items-center gap-3 sm:gap-5 flex-wrap">
+          <span id="dbStatus" class="flex items-center gap-1.5 text-slate-400">
+            <span class="status-dot status-pending"></span> DB: checking…
+          </span>
+          <span id="redisStatus" class="flex items-center gap-1.5 text-slate-400">
+            <span class="status-dot status-pending"></span> Redis: checking…
+          </span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- ─── CREATE TOKEN MODAL ─── -->
+    <div id="modal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
+      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-3xl w-full p-4 sm:p-6 border border-navy-600 modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-4">New Token</h2>
+        <form id="createForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
+            <input name="name" required class="input-dark" placeholder="My API token" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description (optional)</label>
+            <input name="description" class="input-dark" placeholder="What this token is used for" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Existing token (optional)</label>
+            <input name="existingToken" class="input-dark" placeholder="Leave empty to auto-generate" />
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-slate-300">Zone permissions</label>
+              <div class="flex gap-2">
+                <button type="button" id="bulkNone" class="btn-action btn-outline text-xs">None</button>
+                <button type="button" id="bulkRead" class="btn-action btn-outline text-xs">Read</button>
+                <button type="button" id="bulkWrite" class="btn-action btn-outline text-xs">Write</button>
+                <button type="button" id="bulkDelete" class="btn-action btn-outline text-xs">Delete</button>
+                <button type="button" id="bulkAll" class="btn-action btn-outline text-xs">All</button>
+              </div>
+            </div>
+            <div class="search-bar mb-2">
+              <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+              <input id="createAreaSearch" class="input-dark text-xs" placeholder="Filter zones…" style="padding-top:6px;padding-bottom:6px" />
+            </div>
+            <div id="areasBox" class="areas-grid areas-scroll"></div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Expires (optional)</label>
+            <input name="expires" type="datetime-local" class="input-dark" />
+          </div>
+          <p id="cerr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Create</button>
+            <button type="button" id="cancelModal" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── MFA MODAL ─── -->
+    <div id="mfaModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
+      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-sm w-full p-4 sm:p-6 border border-navy-600 modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-2">MFA Verification</h2>
+        <p class="text-sm text-slate-400 mb-4">Enter your 6-digit authenticator code to copy the token.</p>
+        <form id="mfaForm" class="space-y-4">
+          <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" class="input-dark text-center text-xl tracking-[.3em] font-mono" placeholder="000000" required />
+          <p id="mfaErr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Verify & copy</button>
+            <button type="button" id="mfaCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── EDIT TOKEN MODAL ─── -->
+    <div id="editModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
+      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 border border-navy-600 modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-4">Edit Token</h2>
+        <form id="editForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
+            <input id="editName" required class="input-dark" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description (optional)</label>
+            <input id="editDescription" class="input-dark" placeholder="Token description" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Replace token (optional)</label>
+            <input id="editToken" class="input-dark" placeholder="Leave empty to keep current token" />
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-slate-300">Zone permissions</label>
+              <div class="flex gap-2">
+                <button type="button" id="editBulkNone" class="btn-action btn-outline text-xs">None</button>
+                <button type="button" id="editBulkRead" class="btn-action btn-outline text-xs">Read</button>
+                <button type="button" id="editBulkWrite" class="btn-action btn-outline text-xs">Write</button>
+                <button type="button" id="editBulkDelete" class="btn-action btn-outline text-xs">Delete</button>
+                <button type="button" id="editBulkAll" class="btn-action btn-outline text-xs">All</button>
+              </div>
+            </div>
+            <div class="search-bar mb-2">
+              <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+              <input id="editAreaSearch" class="input-dark text-xs" placeholder="Filter zones…" style="padding-top:6px;padding-bottom:6px" />
+            </div>
+            <div id="editAreasBox" class="areas-grid areas-scroll"></div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Expires (optional)</label>
+            <input id="editExpires" type="datetime-local" class="input-dark" />
+          </div>
+          <p id="editErr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
+            <button type="button" id="editCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── EDIT ZONE MODAL ─── -->
+    <div id="editZoneModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
+      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-md w-full p-4 sm:p-6 border border-navy-600 modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-4">Edit Zone</h2>
+        <form id="editZoneForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
+            <input id="editZoneName" required class="input-dark" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description</label>
+            <input id="editZoneDesc" class="input-dark" placeholder="What this zone controls" />
+          </div>
+          <p id="editZoneErr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
+            <button type="button" id="editZoneCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── CREATE API KEY MODAL ─── -->
+    <div id="apiKeyModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
+      <div class="w-full max-w-md mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-4">New API Key</h2>
+        <form id="apiKeyForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
+            <input name="akName" required class="input-dark" placeholder="e.g. n8n integration" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">Scopes</label>
+            <div class="grid grid-cols-1 gap-2">
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="validate" checked class="rounded"> <span class="badge badge-green">validate</span> — Validate tokens</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="tokens:read" checked class="rounded"> <span class="badge badge-blue">tokens:read</span> — List tokens &amp; zones</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="tokens:write" class="rounded"> <span class="badge badge-amber">tokens:write</span> — Create/edit/delete tokens</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="zones:read" checked class="rounded"> <span class="badge badge-blue">zones:read</span> — List zones</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="zones:write" class="rounded"> <span class="badge badge-amber">zones:write</span> — Create zones</label>
+            </div>
+          </div>
+          <p id="akErr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Create</button>
+            <button type="button" id="akCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── API KEY REVEAL MODAL ─── -->
+    <div id="akRevealModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
+      <div class="w-full max-w-lg mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
+        <h2 id="akRevealTitle" class="text-lg font-semibold text-white mb-2">API Key</h2>
+        <p id="akRevealNote" class="text-sm text-amber-300/80 mb-4">Copy this key now — it will not be shown again.</p>
+        <div class="rounded-lg bg-navy-900 border border-navy-600 p-4 mb-4">
+          <code id="akRevealKey" class="text-sm text-emerald-300 break-all select-all font-mono"></code>
+        </div>
+        <button type="button" id="akRevealCopy" class="btn-action btn-primary w-full justify-center py-2.5 text-sm">Copy to clipboard</button>
+        <button type="button" id="akRevealClose" class="btn-action btn-outline w-full justify-center py-2.5 text-sm mt-2">Close</button>
+      </div>
+    </div>
+
+
+    <!-- ─── EDIT API KEY MODAL ─── -->
+    <div id="editAkModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
+      <div class="w-full max-w-md mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
+        <h2 class="text-lg font-semibold text-white mb-4">Edit API Key</h2>
+        <form id="editAkForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
+            <input id="editAkName" required class="input-dark" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-2">Scopes</label>
+            <div class="grid grid-cols-1 gap-2" id="editAkScopes">
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="validate" class="rounded"> <span class="badge badge-green">validate</span> — Validate tokens</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="tokens:read" class="rounded"> <span class="badge badge-blue">tokens:read</span> — List tokens &amp; zones</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="tokens:write" class="rounded"> <span class="badge badge-amber">tokens:write</span> — Create/edit/delete tokens</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="zones:read" class="rounded"> <span class="badge badge-blue">zones:read</span> — List zones</label>
+              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="zones:write" class="rounded"> <span class="badge badge-amber">zones:write</span> — Create zones</label>
+            </div>
+          </div>
+          <p id="editAkErr" class="text-sm text-red-400 hidden"></p>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
+            <button type="button" id="editAkCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── TOAST ─── -->
+    <div id="toast" class="hidden fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 rounded-xl text-sm px-4 py-3 shadow-lg z-50 border toast-enter"></div>
+
+    <script src="/js/common.js"></script>
+    <script>
+      var state = { areas: [], csrf: "", username: "", zonesList: [], activeTab: "tokens", pendingRevealTokenId: "", pendingRevealAkId: "", editTokenId: "", editZoneId: "", tokenRows: [] };
+
+      function esc(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+
+      function fmtDateUTC(iso) {
+        if (!iso) return "-";
+        var d = new Date(iso);
+        var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
+        return pad(d.getDate()) + "." + pad(d.getMonth() + 1) + "." + d.getFullYear() +
+          ", " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+
+      function isoToLocalInput(iso) {
+        // Convert UTC ISO string to local datetime-local value (YYYY-MM-DDTHH:MM)
+        var d = new Date(iso);
+        var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+          "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+
+      function lockScroll() { document.body.classList.add("modal-open"); }
+      function unlockScroll() { document.body.classList.remove("modal-open"); }
+
+      function showToast(message, isError) {
+        var toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.className =
+          "fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 rounded-xl text-sm px-4 py-3 shadow-lg z-50 border toast-enter " +
+          (isError
+            ? "bg-red-500/10 text-red-300 border-red-500/30"
+            : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30");
+        setTimeout(function () { toast.classList.add("hidden"); }, 2500);
+      }
+
+      async function copyTextToClipboard(text) {
+        if (!text) return false;
+        try { await navigator.clipboard.writeText(text); return true; } catch (_e) {
+          var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          var ok = false; try { ok = document.execCommand("copy"); } catch (_i) {}
+          document.body.removeChild(ta); return ok;
+        }
+      }
+
+      function openEditModal(tokenRow) {
+        state.editTokenId = tokenRow.id;
+        document.getElementById("editErr").classList.add("hidden");
+        document.getElementById("editName").value = tokenRow.name || "";
+        document.getElementById("editDescription").value = tokenRow.description || "";
+        document.getElementById("editToken").value = "";
+        document.getElementById("editExpires").value = tokenRow.expiresAt ? isoToLocalInput(tokenRow.expiresAt) : "";
+        document.getElementById("editAreasBox").innerHTML = renderAreaRadios("m", mapGrantsFromRow(tokenRow.grants || []));
+        document.getElementById("editAreaSearch").value = "";
+        document.getElementById("editModal").classList.remove("hidden");
+        lockScroll();
+        bindAllToggles();
+      }
+
+      function closeEditModal() { state.editTokenId = ""; document.getElementById("editModal").classList.add("hidden"); unlockScroll(); }
+
+      function setTab(which) {
+        state.activeTab = which;
+        var tok = document.getElementById("panelTokens"), zon = document.getElementById("panelZones"), ak = document.getElementById("panelApiKeys");
+        var bt = document.getElementById("tabTokens"), bz = document.getElementById("tabZones"), bk = document.getElementById("tabApiKeys");
+        var newBtn = document.getElementById("newtok");
+        [tok, zon, ak].forEach(function(p) { p.classList.add("hidden"); });
+        [bt, bz, bk].forEach(function(b) { b.classList.remove("active"); });
+        newBtn.classList.add("hidden");
+        if (which === "tokens") {
+          tok.classList.remove("hidden"); bt.classList.add("active");
+          newBtn.classList.remove("hidden");
+        } else if (which === "zones") {
+          zon.classList.remove("hidden"); bz.classList.add("active");
+        } else {
+          ak.classList.remove("hidden"); bk.classList.add("active");
+        }
+      }
+
+      async function refreshActiveTabData() {
+        if (state.activeTab === "tokens") { await refreshAreasFromApi(); await loadTokens(); }
+        else if (state.activeTab === "zones") { await loadZonesTable(); await refreshAreasFromApi(); }
+        else { await loadApiKeys(); }
+      }
+
+      function setStatusChip(id, label, ok) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var dotClass = ok === null ? "status-pending" : ok ? "status-ok" : "status-err";
+        var textClass = ok === null ? "text-slate-400" : ok ? "text-emerald-400" : "text-red-400";
+        var statusText = ok === null ? "checking…" : ok ? "connected" : "down";
+        el.className = "flex items-center gap-1.5 " + textClass;
+        el.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + label + ": " + statusText;
+      }
+
+      function setHeaderDot(id, ok) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.className = "status-dot " + (ok === null ? "status-pending" : ok ? "status-ok" : "status-err");
+      }
+
+      async function refreshServiceStatus() {
+        setStatusChip("dbStatus", "DB", null); setStatusChip("redisStatus", "Redis", null);
+        setHeaderDot("dbDot", null); setHeaderDot("redisDot", null);
+        var res = await fetch("/health", { credentials: "include" }).catch(function () { return null; });
+        if (!res || !res.ok) {
+          setStatusChip("dbStatus", "DB", false); setStatusChip("redisStatus", "Redis", false);
+          setHeaderDot("dbDot", false); setHeaderDot("redisDot", false);
+          return;
+        }
+        var j = await res.json().catch(function () { return {}; });
+        setStatusChip("dbStatus", "DB", !!j.db); setStatusChip("redisStatus", "Redis", !!j.redis);
+        setHeaderDot("dbDot", !!j.db); setHeaderDot("redisDot", !!j.redis);
+      }
+
+      document.getElementById("tabTokens").addEventListener("click", function () { setTab("tokens"); refreshActiveTabData(); refreshServiceStatus(); });
+      document.getElementById("tabZones").addEventListener("click", function () { setTab("zones"); refreshActiveTabData(); refreshServiceStatus(); });
+
+      async function refreshAreasFromApi() {
+        var zr = await adminApi("/admin/api/zones"); var zj = await zr.json();
+        state.zonesList = zj;
+        if (zj.length) { state.areas = zj.map(function (z) { return z.name; }); }
+        else { var mr = await adminApi("/admin/api/me"); var mj = await mr.json(); state.areas = mj.allowedAreas && mj.allowedAreas.length ? mj.allowedAreas : ["default"]; }
+        if (typeof populateZoneFilter === "function") populateZoneFilter();
+      }
+
+      async function loadMe() {
+        var r = await adminApi("/admin/api/me"); var j = await r.json();
+        if (!j.user) { window.location.href = "/login"; return; }
+        state.username = j.user.username; state.csrf = j.csrf || readCsrf(); writeCsrf(state.csrf);
+        document.getElementById("user").textContent = state.username;
+        await refreshAreasFromApi();
+      }
+
+      function renderAreaRadios(prefix, selected) {
+        var areas = state.areas, html = "";
+        var flags = ["read", "write", "delete"];
+        var flagColors = { read: "accent-green-500", write: "accent-blue-500", delete: "accent-red-500" };
+        var flagLabels = { read: "Read", write: "Write", delete: "Delete" };
+        for (var i = 0; i < areas.length; i++) {
+          var a = areas[i], selStr = selected && selected[a] ? selected[a] : "";
+          var selFlags = selStr ? selStr.split(",") : [];
+          var allChecked = flags.every(function(fl) { return selFlags.indexOf(fl) !== -1; });
+          html += '<div class="rounded-lg border border-navy-600 bg-navy-900 p-3" data-area="' + esc(a).toLowerCase() + '">' +
+            '<div class="font-medium text-sm text-slate-300 mb-1.5">' + esc(a) + '</div>' +
+            '<div class="flex gap-5 text-xs text-slate-400">';
+          for (var f = 0; f < flags.length; f++) {
+            var chk = selFlags.indexOf(flags[f]) !== -1 ? " checked" : "";
+            html += '<label class="flex items-center gap-1 cursor-pointer hover:text-slate-200">' +
+              '<input type="checkbox" name="' + prefix + '_' + esc(a) + '" value="' + flags[f] + '"' + chk + ' class="' + flagColors[flags[f]] + '" /> ' + flagLabels[flags[f]] + '</label>';
+          }
+          html += '<label class="flex items-center gap-1 cursor-pointer hover:text-slate-200">' +
+            '<input type="checkbox" data-all-toggle="' + prefix + '_' + esc(a) + '"' + (allChecked ? ' checked' : '') + ' class="accent-violet-500" /> All</label>';
+          html += '</div></div>';
+        }
+        return html;
+      }
+
+      function bindAllToggles() {
+        document.querySelectorAll('[data-all-toggle]').forEach(function(allCb) {
+          allCb.addEventListener('change', function() {
+            var name = allCb.getAttribute('data-all-toggle');
+            var cbs = document.querySelectorAll('input[name="' + name + '"]');
+            cbs.forEach(function(cb) { cb.checked = allCb.checked; });
+          });
+        });
+        document.querySelectorAll('.areas-scroll input[type="checkbox"]').forEach(function(cb) {
+          if (cb.hasAttribute('data-all-toggle')) return;
+          cb.addEventListener('change', function() {
+            var name = cb.getAttribute('name');
+            if (!name) return;
+            var cbs = document.querySelectorAll('input[name="' + name + '"]');
+            var allCb = document.querySelector('[data-all-toggle="' + name + '"]');
+            if (!allCb) return;
+            var allChecked = true;
+            cbs.forEach(function(c) { if (!c.checked) allChecked = false; });
+            allCb.checked = allChecked;
+          });
+        });
+      }
+
+      function filterAreasList(searchId, boxId) {
+        var q = (document.getElementById(searchId).value || "").trim().toLowerCase();
+        var items = document.getElementById(boxId).querySelectorAll("[data-area]");
+        for (var i = 0; i < items.length; i++) {
+          items[i].style.display = (!q || items[i].getAttribute("data-area").indexOf(q) !== -1) ? "" : "none";
+        }
+      }
+
+      function grantsFromForm(prefix) {
+        var grants = [];
+        for (var i = 0; i < state.areas.length; i++) {
+          var a = state.areas[i], els = document.getElementsByName(prefix + "_" + a), flags = [];
+          for (var j = 0; j < els.length; j++) { if (els[j].checked) flags.push(els[j].value); }
+          if (flags.length) grants.push({ area: a, level: flags.join(",") });
+        }
+        return grants;
+      }
+
+      function applyBulkLevel(prefix, level) {
+        var checkFlags = level === "all" ? ["read", "write", "delete"] : level === "none" ? [] : [level];
+        for (var i = 0; i < state.areas.length; i++) {
+          var area = state.areas[i];
+          var els = document.getElementsByName(prefix + "_" + area);
+          for (var j = 0; j < els.length; j++) {
+            els[j].checked = checkFlags.indexOf(els[j].value) !== -1;
+          }
+        }
+      }
+
+      function mapGrantsFromRow(grants) { var m = {}; for (var i = 0; i < grants.length; i++) m[grants[i].area] = grants[i].level; return m; }
+
+      function renderGrantsBadges(grants) {
+        if (!grants || !grants.length) return '<span class="badge badge-slate">No grants</span>';
+        var html = '<div class="flex flex-wrap gap-1.5">';
+        for (var i = 0; i < grants.length; i++) {
+          var lvl = grants[i].level;
+          var flags = lvl.split(",");
+          var isAll = flags.indexOf("read") !== -1 && flags.indexOf("write") !== -1 && flags.indexOf("delete") !== -1;
+          var cls = isAll ? "badge-violet" : flags.length > 1 ? "badge-blue" : flags[0] === "delete" ? "badge-red" : flags[0] === "write" ? "badge-blue" : "badge-green";
+          var label = isAll ? "all" : lvl.replace(/,/g, "+");
+          html += '<span class="badge ' + cls + '">' + esc(grants[i].area) + ': ' + esc(label) + '</span>';
+        }
+        return html + '</div>';
+      }
+
+      function openMfaModalForToken(tokenId) {
+        state.pendingRevealTokenId = tokenId;
+        document.getElementById("mfaCode").value = "";
+        document.getElementById("mfaErr").classList.add("hidden");
+        document.getElementById("mfaModal").classList.remove("hidden");
+        lockScroll();
+        setTimeout(function () { document.getElementById("mfaCode").focus(); }, 20);
+      }
+
+      function closeMfaModal() { state.pendingRevealTokenId = ""; state.pendingRevealAkId = ""; document.getElementById("mfaModal").classList.add("hidden"); unlockScroll(); }
+
+      function updateStats() {
+        var total = state.tokenRows.length;
+        var active = state.tokenRows.filter(function (t) { return t.isActive; }).length;
+        var zones = state.zonesList.length;
+        document.getElementById("statTotal").textContent = total;
+        document.getElementById("statActive").textContent = active;
+        document.getElementById("statZones").textContent = zones || state.areas.length;
+      }
+
+      function bindZoneDeleteButtons(container) {
+        container.querySelectorAll("[data-del-zone]").forEach(function (btn) {
+          btn.addEventListener("click", async function () {
+            var id = btn.getAttribute("data-del-zone");
+            if (!confirm("Delete this zone? Tokens referencing it may need updating.")) return;
+            var r2 = await adminApi("/admin/api/zones/" + id, { method: "DELETE", csrf: state.csrf });
+            if (!r2.ok) { var ej = await r2.json().catch(function () { return {}; }); alert(ej.detail || "Delete failed"); return; }
+            await refreshAreasFromApi(); await loadZonesTable();
+            if (state.activeTab === "tokens") await loadTokens();
+            updateStats();
+          });
+        });
+        container.querySelectorAll("[data-edit-zone]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-edit-zone");
+            var zone = state.zonesList.find(function (z) { return z.id === id; });
+            if (!zone) return;
+            openEditZone(zone);
+          });
+        });
+      }
+
+      function openEditZone(zone) {
+        state.editZoneId = zone.id;
+        document.getElementById("editZoneErr").classList.add("hidden");
+        document.getElementById("editZoneName").value = zone.name || "";
+        document.getElementById("editZoneDesc").value = zone.description || "";
+        document.getElementById("editZoneModal").classList.remove("hidden");
+        lockScroll();
+      }
+
+      function closeEditZone() { state.editZoneId = ""; document.getElementById("editZoneModal").classList.add("hidden"); unlockScroll(); }
+
+      async function loadZonesTable() {
+        var zr = await adminApi("/admin/api/zones"); if (!zr.ok) return;
+        var rows = await zr.json(); state.zonesList = rows;
+        // Desktop table
+        var tb = document.getElementById("zoneRows"); tb.innerHTML = "";
+        // Mobile cards
+        var mc = document.getElementById("zoneCards"); mc.innerHTML = "";
+        for (var i = 0; i < rows.length; i++) {
+          var z = rows[i];
+          var created = z.createdAt ? fmtDateUTC(z.createdAt) : "—";
+          var desc = z.description || '';
+          // Desktop row
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td><span class="text-white font-medium">' + esc(z.name) + '</span></td>' +
+            '<td class="text-slate-400 text-xs">' + esc(desc) + '</td>' +
+            '<td>' + esc(created) + '</td>' +
+            '<td class="text-right"><div class="flex gap-2 justify-end">' +
+            '<button type="button" class="btn-action btn-outline text-xs" data-edit-zone="' + esc(z.id) + '">Edit</button>' +
+            '<button type="button" class="btn-action btn-danger text-xs" data-del-zone="' + esc(z.id) + '">Delete</button>' +
+            '</div></td>';
+          tb.appendChild(tr);
+          // Mobile card
+          mc.innerHTML += '<div class="zone-card"><div style="flex:1"><span class="text-white font-medium">' + esc(z.name) + '</span>' +
+            (desc ? '<div class="text-xs text-slate-500 mt-0.5">' + esc(desc) + '</div>' : '') +
+            '<div class="text-xs text-slate-600 mt-0.5">' + esc(created) + '</div></div>' +
+            '<div class="flex gap-2">' +
+            '<button type="button" class="btn-action btn-outline text-xs" data-edit-zone="' + esc(z.id) + '">Edit</button>' +
+            '<button type="button" class="btn-action btn-danger text-xs" data-del-zone="' + esc(z.id) + '">Delete</button>' +
+            '</div></div>';
+        }
+        bindZoneDeleteButtons(tb);
+        bindZoneDeleteButtons(mc);
+        updateStats();
+      }
+
+      function bindTokenButtons(container) {
+        container.querySelectorAll("[data-toggle-active]").forEach(function (btn) {
+          btn.addEventListener("click", async function () {
+            var id = btn.getAttribute("data-toggle-active"), nextActive = btn.getAttribute("data-next-active") === "true";
+            if (!confirm(nextActive ? "Enable this token?" : "Disable this token?")) return;
+            var r2 = await adminApi("/admin/api/tokens/" + id, { method: "PATCH", body: { isActive: nextActive }, csrf: state.csrf });
+            if (r2.ok) await loadTokens();
+          });
+        });
+        container.querySelectorAll("[data-del-token]").forEach(function (btn) {
+          btn.addEventListener("click", async function () {
+            var id = btn.getAttribute("data-del-token");
+            if (!confirm("Delete this token permanently?")) return;
+            var r2 = await adminApi("/admin/api/tokens/" + id, { method: "DELETE", csrf: state.csrf });
+            if (!r2.ok) { alert("Delete failed"); return; }
+            await loadTokens();
+          });
+        });
+        container.querySelectorAll("[data-copy-token]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            if (btn.disabled) return;
+            openMfaModalForToken(btn.getAttribute("data-copy-token"));
+          });
+        });
+        container.querySelectorAll("[data-edit-token]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-edit-token"), row = null;
+            for (var i = 0; i < state.tokenRows.length; i++) { if (state.tokenRows[i].id === id) { row = state.tokenRows[i]; break; } }
+            if (row) openEditModal(row);
+          });
+        });
+      }
+
+      function renderTokenActions(t) {
+        var toggleLabel = t.isActive ? "Disable" : "Enable";
+        var toggleBtnCls = t.isActive ? "btn-warn" : "btn-success";
+        return '<button type="button" class="btn-action ' + toggleBtnCls + ' text-xs" data-toggle-active="' + esc(t.id) + '" data-next-active="' + (t.isActive ? "false" : "true") + '">' + toggleLabel + '</button>' +
+          '<button type="button" class="btn-action btn-outline text-xs" data-copy-token="' + esc(t.id) + '"' + (t.canReveal ? '' : ' disabled style="opacity:.4;cursor:not-allowed"') + '>' + (t.canReveal ? 'Copy' : 'N/A') + '</button>' +
+          '<button type="button" class="btn-action btn-outline text-xs" data-edit-token="' + esc(t.id) + '">Edit</button>' +
+          '<button type="button" class="btn-action btn-danger text-xs" data-del-token="' + esc(t.id) + '">Delete</button>';
+      }
+
+      async function loadTokens() {
+        var r = await adminApi("/admin/api/tokens"); if (!r.ok) return;
+        var rows = await r.json(); state.tokenRows = rows;
+        var tb = document.getElementById("rows"); tb.innerHTML = "";
+        var mc = document.getElementById("tokenCards"); mc.innerHTML = "";
+        var empty = document.getElementById("emptyTokens");
+        if (!rows.length) { empty.classList.remove("hidden"); updateStats(); return; }
+        empty.classList.add("hidden");
+        for (var i = 0; i < rows.length; i++) {
+          var t = rows[i];
+          var exp = t.expiresAt ? fmtDateUTC(t.expiresAt) : "";
+          var lu = t.lastUsedAt ? fmtDateUTC(t.lastUsedAt) : "-";
+          var activeBadge = t.isActive ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Disabled</span>';
+          var descHtml = t.description ? '<div class="text-xs text-slate-500 mt-0.5">' + esc(t.description) + '</div>' : '';
+          var expLine = exp ? '<div class="text-xs text-slate-500 mt-1">Exp: ' + esc(exp) + '</div>' : '';
+          // Desktop row
+          var tr = document.createElement("tr");
+          tr.innerHTML =
+            '<td><span class="font-medium text-white">' + esc(t.name) + '</span>' + descHtml + '</td>' +
+            '<td>' + renderGrantsBadges(t.grants) + '</td>' +
+            '<td>' + activeBadge + '</td>' +
+            '<td>' + esc(lu) + expLine + '</td>' +
+            '<td class="text-right"><div class="flex gap-2 justify-end whitespace-nowrap">' + renderTokenActions(t) + '</div></td>';
+          tb.appendChild(tr);
+          // Mobile card
+          mc.innerHTML += '<div class="token-card">' +
+            '<div class="token-card-field"><span class="token-card-label">Name</span><span class="font-medium text-white">' + esc(t.name) + '</span></div>' +
+            (t.description ? '<div class="token-card-field"><span class="token-card-label">Description</span><span class="token-card-value">' + esc(t.description) + '</span></div>' : '') +
+            '<div class="token-card-field"><span class="token-card-label">Status</span><span>' + activeBadge + '</span></div>' +
+            '<div class="token-card-field"><span class="token-card-label">Grants</span><span class="token-card-value">' + renderGrantsBadges(t.grants) + '</span></div>' +
+            '<div class="token-card-field"><span class="token-card-label">Last Used</span><span class="token-card-value">' + esc(lu) + (exp ? '<br><span class="text-xs text-slate-500">Exp: ' + esc(exp) + '</span>' : '') + '</span></div>' +
+            '<div class="token-card-actions">' + renderTokenActions(t) + '</div></div>';
+        }
+        bindTokenButtons(tb);
+        bindTokenButtons(mc);
+        updateStats();
+        applyTokenFilters();
+      }
+
+      /* ── Search & Filter Logic ── */
+      var tokenFilterState = { search: "", status: "all", zone: "", level: "" };
+
+      function populateZoneFilter() {
+        var sel = document.getElementById("zoneFilter");
+        var current = sel.value;
+        sel.innerHTML = '<option value="">All zones</option>';
+        for (var i = 0; i < state.areas.length; i++) {
+          sel.innerHTML += '<option value="' + esc(state.areas[i]) + '">' + esc(state.areas[i]) + '</option>';
+        }
+        sel.value = current;
+      }
+
+      function applyTokenFilters() {
+        var query = tokenFilterState.search.toLowerCase();
+        var filter = tokenFilterState.status;
+        var zoneFilter = tokenFilterState.zone;
+        // Desktop rows
+        var desktopRows = document.getElementById("rows").querySelectorAll("tr");
+        // Mobile cards
+        var mobileCards = document.getElementById("tokenCards").querySelectorAll(".token-card");
+        var visibleCount = 0;
+        for (var i = 0; i < state.tokenRows.length; i++) {
+          var t = state.tokenRows[i];
+          var nameMatch = !query || t.name.toLowerCase().indexOf(query) !== -1 || (t.description && t.description.toLowerCase().indexOf(query) !== -1);
+          var statusMatch = filter === "all" || (filter === "active" && t.isActive) || (filter === "disabled" && !t.isActive);
+          var zoneMatch = !zoneFilter;
+          if (zoneFilter && t.grants) {
+            for (var g = 0; g < t.grants.length; g++) {
+              if (t.grants[g].area === zoneFilter) { zoneMatch = true; break; }
+            }
+          }
+          var levelMatch = !tokenFilterState.level;
+          if (tokenFilterState.level && t.grants) {
+            var lf = tokenFilterState.level;
+            for (var g = 0; g < t.grants.length; g++) {
+              var gflags = t.grants[g].level.split(",");
+              if (lf === "all") {
+                if (gflags.indexOf("read") !== -1 && gflags.indexOf("write") !== -1 && gflags.indexOf("delete") !== -1) { levelMatch = true; break; }
+              } else {
+                if (gflags.indexOf(lf) !== -1) { levelMatch = true; break; }
+              }
+            }
+          }
+          var show = nameMatch && statusMatch && zoneMatch && levelMatch;
+          if (desktopRows[i]) desktopRows[i].style.display = show ? "" : "none";
+          if (mobileCards[i]) mobileCards[i].style.display = show ? "" : "none";
+          if (show) visibleCount++;
+        }
+        // Show/hide clear button
+        var hasFilters = tokenFilterState.search || tokenFilterState.status !== "all" || tokenFilterState.zone || tokenFilterState.level;
+        var clearBtn = document.getElementById("clearFilters");
+        if (clearBtn) clearBtn.className = 'btn-clear-filter' + (hasFilters ? ' visible' : '');
+        var empty = document.getElementById("emptyTokens");
+        if (state.tokenRows.length && !visibleCount) {
+          empty.textContent = "No tokens match your search.";
+          empty.classList.remove("hidden");
+        } else if (!state.tokenRows.length) {
+          empty.classList.remove("hidden");
+        } else {
+          empty.classList.add("hidden");
+        }
+      }
+
+      document.getElementById("tokenSearch").addEventListener("input", function (e) {
+        tokenFilterState.search = (e.target.value || "").trim();
+        applyTokenFilters();
+      });
+
+      document.getElementById("tokenFilters").addEventListener("click", function (e) {
+        var pill = e.target.closest(".filter-pill");
+        if (!pill) return;
+        document.querySelectorAll("#tokenFilters .filter-pill").forEach(function (p) { p.classList.remove("active"); });
+        pill.classList.add("active");
+        tokenFilterState.status = pill.getAttribute("data-filter");
+        applyTokenFilters();
+      });
+
+      document.getElementById("zoneFilter").addEventListener("change", function (e) {
+        tokenFilterState.zone = e.target.value;
+        applyTokenFilters();
+      });
+
+      document.getElementById("levelFilter").addEventListener("change", function (e) {
+        tokenFilterState.level = e.target.value;
+        applyTokenFilters();
+      });
+
+      document.getElementById("clearFilters").addEventListener("click", function () {
+        tokenFilterState.search = ""; tokenFilterState.status = "all"; tokenFilterState.zone = ""; tokenFilterState.level = "";
+        document.getElementById("tokenSearch").value = "";
+        document.getElementById("zoneFilter").value = "";
+        document.getElementById("levelFilter").value = "";
+        document.querySelectorAll("#tokenFilters .filter-pill").forEach(function (p) { p.classList.remove("active"); });
+        document.querySelector('#tokenFilters .filter-pill[data-filter="all"]').classList.add("active");
+        applyTokenFilters();
+      });
+
+      document.getElementById("zoneSearch").addEventListener("input", function (e) {
+        var query = (e.target.value || "").trim().toLowerCase();
+        // Desktop
+        var desktopRows = document.getElementById("zoneRows").querySelectorAll("tr");
+        // Mobile
+        var mobileCards = document.getElementById("zoneCards").querySelectorAll(".zone-card");
+        for (var i = 0; i < state.zonesList.length; i++) {
+          var z = state.zonesList[i];
+          var show = !query || z.name.toLowerCase().indexOf(query) !== -1 || (z.description && z.description.toLowerCase().indexOf(query) !== -1);
+          if (desktopRows[i]) desktopRows[i].style.display = show ? "" : "none";
+          if (mobileCards[i]) mobileCards[i].style.display = show ? "" : "none";
+        }
+      });
+
+      document.getElementById("refresh").addEventListener("click", async function () { await refreshActiveTabData(); await refreshServiceStatus(); });
+      document.getElementById("logout").addEventListener("click", async function () { await adminApi("/admin/api/logout", { method: "POST" }); writeCsrf(""); window.location.href = "/login"; });
+      document.getElementById("newtok").addEventListener("click", async function () {
+        await refreshAreasFromApi();
+        document.getElementById("areasBox").innerHTML = renderAreaRadios("c", {});
+        document.getElementById("createAreaSearch").value = "";
+        document.getElementById("modal").classList.remove("hidden");
+        lockScroll();
+        bindAllToggles();
+      });
+      document.getElementById("bulkNone").addEventListener("click", function () { applyBulkLevel("c", "none"); });
+      document.getElementById("bulkRead").addEventListener("click", function () { applyBulkLevel("c", "read"); });
+      document.getElementById("bulkWrite").addEventListener("click", function () { applyBulkLevel("c", "write"); });
+      document.getElementById("bulkDelete").addEventListener("click", function () { applyBulkLevel("c", "delete"); });
+      document.getElementById("bulkAll").addEventListener("click", function () { applyBulkLevel("c", "all"); });
+      document.getElementById("createAreaSearch").addEventListener("input", function () { filterAreasList("createAreaSearch", "areasBox"); });
+      document.getElementById("editBulkNone").addEventListener("click", function () { applyBulkLevel("m", "none"); });
+      document.getElementById("editBulkRead").addEventListener("click", function () { applyBulkLevel("m", "read"); });
+      document.getElementById("editBulkWrite").addEventListener("click", function () { applyBulkLevel("m", "write"); });
+      document.getElementById("editBulkDelete").addEventListener("click", function () { applyBulkLevel("m", "delete"); });
+      document.getElementById("editBulkAll").addEventListener("click", function () { applyBulkLevel("m", "all"); });
+      document.getElementById("editAreaSearch").addEventListener("input", function () { filterAreasList("editAreaSearch", "editAreasBox"); });
+      document.getElementById("cancelModal").addEventListener("click", function () { document.getElementById("modal").classList.add("hidden"); unlockScroll(); });
+      document.getElementById("dismissOnce").addEventListener("click", function () { document.getElementById("once").classList.add("hidden"); });
+      document.getElementById("copyNewToken").addEventListener("click", async function () {
+        var token = document.getElementById("rawtok").textContent || "";
+        if (!token) return;
+        var ok = await copyTextToClipboard(token);
+        showToast(ok ? "Token copied to clipboard" : "Failed to copy token", !ok);
+      });
+      document.getElementById("mfaCancel").addEventListener("click", function () { closeMfaModal(); });
+      document.getElementById("mfaForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var code = (document.getElementById("mfaCode").value || "").trim();
+        var err = document.getElementById("mfaErr"); err.classList.add("hidden");
+
+        if (state.pendingRevealAkId) {
+          // API key reveal
+          var r = await adminApi("/admin/api/api-keys/" + state.pendingRevealAkId + "/reveal", { method: "POST", body: { code: code }, csrf: state.csrf });
+          var j = await r.json().catch(function () { return {}; });
+          if (!r.ok) { err.textContent = j.detail || "Verification failed"; err.classList.remove("hidden"); return; }
+          var ok = await copyTextToClipboard(j.key || ""); closeMfaModal();
+          showToast(ok ? "API key copied to clipboard" : "Failed to copy", !ok);
+        } else if (state.pendingRevealTokenId) {
+          // Token reveal
+          var r = await adminApi("/admin/api/tokens/" + state.pendingRevealTokenId + "/reveal", { method: "POST", body: { code: code }, csrf: state.csrf });
+          var j = await r.json().catch(function () { return {}; });
+          if (!r.ok) { err.textContent = j.detail || "Verification failed"; err.classList.remove("hidden"); return; }
+          var ok = await copyTextToClipboard(j.token || ""); closeMfaModal();
+          showToast(ok ? "Token copied to clipboard" : "Failed to copy token", !ok);
+        }
+      });
+      document.getElementById("editCancel").addEventListener("click", function () { closeEditModal(); });
+      document.getElementById("editForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        if (!state.editTokenId) return;
+        var err = document.getElementById("editErr"); err.classList.add("hidden");
+        var body = {};
+        var nm = (document.getElementById("editName").value || "").trim();
+        if (!nm) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
+        body.name = nm;
+        body.description = (document.getElementById("editDescription").value || "").trim();
+        var replacement = (document.getElementById("editToken").value || "").trim();
+        if (replacement) body.token = replacement;
+        var grants = grantsFromForm("m");
+        if (!grants.length) { err.textContent = "Select at least one area"; err.classList.remove("hidden"); return; }
+        body.grants = grants;
+        var expv = document.getElementById("editExpires").value;
+        body.expiresAt = expv ? new Date(expv).toISOString() : "";
+        var r = await adminApi("/admin/api/tokens/" + state.editTokenId, { method: "PATCH", body: body, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
+        closeEditModal(); await loadTokens(); showToast("Token updated", false);
+      });
+      document.getElementById("createForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var fd = new FormData(e.target);
+        var grants = grantsFromForm("c");
+        if (!grants.length) { document.getElementById("cerr").textContent = "Select at least one area"; document.getElementById("cerr").classList.remove("hidden"); return; }
+        var body = { name: fd.get("name"), grants: grants, description: (fd.get("description") || "").trim() };
+        var existingToken = (fd.get("existingToken") || "").trim();
+        if (existingToken) body.token = existingToken;
+        if (fd.get("expires")) body.expiresAt = new Date(fd.get("expires")).toISOString();
+        var r = await adminApi("/admin/api/tokens", { method: "POST", body: body, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { document.getElementById("cerr").textContent = j.detail || j.error || "Failed"; document.getElementById("cerr").classList.remove("hidden"); return; }
+        document.getElementById("modal").classList.add("hidden");
+        unlockScroll();
+        document.getElementById("rawtok").textContent = j.token;
+        document.getElementById("once").classList.remove("hidden");
+        e.target.reset(); await loadTokens();
+      });
+      document.getElementById("zoneAdd").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var fd = new FormData(e.target), name = (fd.get("name") || "").trim();
+        var err = document.getElementById("zoneErr"); err.classList.add("hidden");
+        var r = await adminApi("/admin/api/zones", { method: "POST", body: { name: name, description: (fd.get("description") || "").trim() }, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { err.textContent = j.detail || "Failed to add zone"; err.classList.remove("hidden"); return; }
+        e.target.reset(); await refreshAreasFromApi(); await loadZonesTable();
+      });
+      document.getElementById("editZoneCancel").addEventListener("click", function () { closeEditZone(); });
+      document.getElementById("editZoneForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        if (!state.editZoneId) return;
+        var err = document.getElementById("editZoneErr"); err.classList.add("hidden");
+        var nm = (document.getElementById("editZoneName").value || "").trim();
+        if (!nm) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
+        var body = { name: nm, description: (document.getElementById("editZoneDesc").value || "").trim() };
+        var r = await adminApi("/admin/api/zones/" + state.editZoneId, { method: "PATCH", body: body, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
+        closeEditZone();
+        await refreshAreasFromApi(); await loadZonesTable();
+        if (state.activeTab === "tokens") await loadTokens();
+        showToast("Zone updated", false);
+      });
+
+      /* ── API Keys ── */
+      function scopeBadge(s) {
+        var cls = "badge-slate";
+        if (s === "validate") cls = "badge-green";
+        else if (s.endsWith(":read")) cls = "badge-blue";
+        else if (s.endsWith(":write")) cls = "badge-amber";
+        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+      }
+
+      var state_apiKeys = [];
+      var state_editAkId = "";
+
+      async function loadApiKeys() {
+        var r = await adminApi("/admin/api/api-keys");
+        if (!r.ok) return;
+        state_apiKeys = await r.json();
+        var tb = document.getElementById("apiKeyRows");
+        if (!state_apiKeys.length) {
+          tb.innerHTML = '<tr><td colspan="4" class="text-center text-slate-500 py-8">No API keys yet</td></tr>';
+          return;
+        }
+        tb.innerHTML = state_apiKeys.map(function (k) {
+          var scopes = (k.scopes || "").split(",").filter(Boolean).map(scopeBadge).join(" ");
+          return '<tr>' +
+            '<td class="akcol-name font-medium text-white">' + esc(k.name) + '</td>' +
+            '<td class="akcol-scopes"><div class="flex flex-wrap gap-1">' + scopes + '</div></td>' +
+            '<td class="akcol-created text-slate-400">' + fmtDateUTC(k.createdAt) + '</td>' +
+            '<td class="akcol-actions text-right"><div class="flex gap-1 justify-end">' +
+              '<button type="button" class="btn-action btn-outline" onclick="editApiKey(\'' + k.id + '\')">Edit</button>' +
+              '<button type="button" class="btn-action btn-success" onclick="revealApiKey(\'' + k.id + '\')">Copy</button>' +
+              '<button type="button" class="btn-action btn-danger" onclick="deleteApiKey(\'' + k.id + '\',\'' + esc(k.name) + '\')">Delete</button>' +
+            '</div></td>' +
+            '</tr>';
+        }).join("");
+      }
+
+      async function deleteApiKey(id, name) {
+        if (!confirm("Delete API key \"" + name + "\"?")) return;
+        var r = await adminApi("/admin/api/api-keys/" + id, { method: "DELETE", csrf: state.csrf });
+        if (r.ok) { showToast("API key deleted", false); await loadApiKeys(); }
+        else { showToast("Failed to delete key", true); }
+      }
+
+      function editApiKey(id) {
+        var k = state_apiKeys.find(function(x) { return x.id === id; });
+        if (!k) return;
+        state_editAkId = id;
+        document.getElementById("editAkName").value = k.name;
+        document.getElementById("editAkErr").classList.add("hidden");
+        var scopes = (k.scopes || "").split(",");
+        document.getElementById("editAkScopes").querySelectorAll('input[name="escope"]').forEach(function(cb) {
+          cb.checked = scopes.indexOf(cb.value) !== -1;
+        });
+        document.getElementById("editAkModal").classList.remove("hidden");
+        lockScroll();
+      }
+
+      function revealApiKey(id) {
+        state.pendingRevealAkId = id;
+        document.getElementById("mfaCode").value = "";
+        document.getElementById("mfaErr").classList.add("hidden");
+        document.getElementById("mfaModal").classList.remove("hidden");
+        lockScroll();
+        setTimeout(function () { document.getElementById("mfaCode").focus(); }, 20);
+      }
+
+      function showRevealModal(key) {
+        document.getElementById("akRevealTitle").textContent = "API Key Created";
+        document.getElementById("akRevealNote").textContent = "Copy the key. You can also copy it later from the API Keys table.";
+        document.getElementById("akRevealKey").textContent = key;
+        document.getElementById("akRevealModal").classList.remove("hidden");
+        lockScroll();
+      }
+
+      document.getElementById("tabApiKeys").addEventListener("click", function () { setTab("apikeys"); loadApiKeys(); });
+      document.getElementById("newApiKeyBtn").addEventListener("click", function () {
+        document.getElementById("akErr").classList.add("hidden");
+        document.getElementById("apiKeyForm").reset();
+        document.getElementById("apiKeyModal").classList.remove("hidden");
+        lockScroll();
+      });
+      document.getElementById("akCancel").addEventListener("click", function () {
+        document.getElementById("apiKeyModal").classList.add("hidden"); unlockScroll();
+      });
+      document.getElementById("apiKeyForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var err = document.getElementById("akErr"); err.classList.add("hidden");
+        var name = e.target.akName.value.trim();
+        var checks = e.target.querySelectorAll('input[name="scope"]:checked');
+        var scopes = []; checks.forEach(function(c) { scopes.push(c.value); });
+        if (!scopes.length) { err.textContent = "Select at least one scope"; err.classList.remove("hidden"); return; }
+        var r = await adminApi("/admin/api/api-keys", { method: "POST", body: { name: name, scopes: scopes }, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { err.textContent = j.detail || "Failed"; err.classList.remove("hidden"); return; }
+        document.getElementById("apiKeyModal").classList.add("hidden"); unlockScroll();
+        showRevealModal(j.key);
+        await loadApiKeys();
+      });
+      document.getElementById("akRevealCopy").addEventListener("click", async function () {
+        var key = document.getElementById("akRevealKey").textContent;
+        var ok = await copyTextToClipboard(key);
+        showToast(ok ? "Copied to clipboard" : "Failed to copy", !ok);
+      });
+      document.getElementById("akRevealClose").addEventListener("click", function () {
+        document.getElementById("akRevealModal").classList.add("hidden"); unlockScroll();
+      });
+
+      /* Edit API Key */
+      document.getElementById("editAkCancel").addEventListener("click", function () {
+        document.getElementById("editAkModal").classList.add("hidden"); unlockScroll(); state_editAkId = "";
+      });
+      document.getElementById("editAkForm").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        if (!state_editAkId) return;
+        var err = document.getElementById("editAkErr"); err.classList.add("hidden");
+        var name = document.getElementById("editAkName").value.trim();
+        if (!name) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
+        var checks = document.getElementById("editAkScopes").querySelectorAll('input[name="escope"]:checked');
+        var scopes = []; checks.forEach(function(c) { scopes.push(c.value); });
+        if (!scopes.length) { err.textContent = "Select at least one scope"; err.classList.remove("hidden"); return; }
+        var r = await adminApi("/admin/api/api-keys/" + state_editAkId, { method: "PATCH", body: { name: name, scopes: scopes }, csrf: state.csrf });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
+        document.getElementById("editAkModal").classList.add("hidden"); unlockScroll(); state_editAkId = "";
+        showToast("API key updated", false);
+        await loadApiKeys();
+      });
+
+      (async function init() {
+        var st = await adminApi("/admin/api/setup/status"); var sj = await st.json();
+        if (sj.needsSetup) { window.location.href = "/setup"; return; }
+        await loadMe(); await loadTokens(); await loadZonesTable(); await refreshServiceStatus();
+        setInterval(refreshServiceStatus, 15000);
+      })();
+    </script>
+  </body>
+</html>

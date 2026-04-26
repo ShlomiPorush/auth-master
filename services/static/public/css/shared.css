@@ -1,0 +1,28 @@
+/* ─── Auth Service — shared styles ─── */
+body { background: #0b1120; }
+
+/* input styling */
+.input-dark {
+  width: 100%; padding: 10px 14px; border-radius: 10px;
+  background: #0b1120; border: 1px solid #243044; color: #e2e8f0;
+  transition: border-color .2s, box-shadow .2s; outline: none; font-size: 14px;
+}
+.input-dark:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+.input-dark::placeholder { color: #475569; }
+
+/* primary button */
+.btn-primary {
+  padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 600;
+  background: #3b82f6; color: #fff; border: none; cursor: pointer;
+  transition: background .2s, box-shadow .2s;
+}
+.btn-primary:hover { background: #2563eb; box-shadow: 0 0 20px rgba(59,130,246,.2); }
+/* Full-width buttons on auth pages (login, setup) */
+.auth-page .btn-primary { width: 100%; }
+
+/* card glow */
+.card-glow {
+  background: #111827; border: 1px solid #243044; border-radius: 20px;
+  box-shadow: 0 0 40px rgba(59,130,246,.04); transition: box-shadow .3s;
+}
+.card-glow:hover { box-shadow: 0 0 20px rgba(59,130,246,.08); border-color: rgba(59,130,246,.25); }

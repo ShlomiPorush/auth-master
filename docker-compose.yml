@@ -1,0 +1,47 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-service:
+    image: auth-service:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # DATABASE_URL defaults to sqlite:///data/auth.db (no Postgres needed)
+      # To use PostgreSQL instead, uncomment and set:
+      # DATABASE_URL: postgres://auth:authpass@postgres:5432/authdb
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-in-production}
+      SESSION_SECRET: ${SESSION_SECRET:-min-32-chars-secret-change-me!!}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health').read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    networks:
+      - internal
+    env_file:
+      - .env
+
+networks:
+  internal:
+    driver: bridge

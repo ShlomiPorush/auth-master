@@ -1,0 +1,22 @@
+.env
+*.log
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+docker-compose-dev.yml
+services/auth/styles/node_modules/
+
+# Docker Desktop writes these next to config.json — do not commit
+.docker-build/.token_seed
+.docker-build/.token_seed.lock
+.docker-build/buildx/
+
+data
+scripts
+.vscode
+.docker-build

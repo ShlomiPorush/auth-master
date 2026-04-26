@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MFA Setup — Auth Service</title>
+    <meta name="description" content="Set up two-factor authentication for your admin account" />
+    <script src="/js/head.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
+    <style>
+      #qr canvas, #qr img { border-radius: 12px; }
+    </style>
+  </head>
+  <body class="auth-page min-h-screen font-sans flex items-center justify-center p-4 text-slate-200 antialiased">
+    <div class="w-full max-w-lg card-glow p-8">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+          <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-semibold text-white">Two-Factor Authentication</h1>
+          <p class="text-xs text-slate-500">Scan the QR code with your authenticator app</p>
+        </div>
+      </div>
+      <div id="qr" class="flex justify-center mb-5 p-4 bg-white rounded-xl w-fit mx-auto"></div>
+      <div class="rounded-lg bg-navy-700 border border-navy-600 p-3 mb-6">
+        <p class="text-xs text-slate-400 mb-1">Manual entry secret:</p>
+        <p id="sec" class="text-sm font-mono text-blue-300 break-all select-all"></p>
+      </div>
+      <form id="f" class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-slate-400 mb-1.5">6-digit code</label>
+          <input name="code" inputmode="numeric" autocomplete="one-time-code" required class="input-dark text-center text-xl tracking-[.3em] font-mono" placeholder="000000" />
+        </div>
+        <p id="err" class="text-sm text-red-400 hidden"></p>
+        <button type="submit" class="btn-primary">Verify & Finish</button>
+      </form>
+    </div>
+    <script src="/js/common.js"></script>
+    <script>
+      (async function () {
+        var r = await adminApi("/admin/api/bootstrap/mfa-enroll");
+        if (!r.ok) {
+          document.body.innerHTML =
+            '<div class="min-h-screen flex items-center justify-center"><p class="text-center text-slate-400">Session expired. <a href="/setup" class="text-blue-400 underline hover:text-blue-300">Start over</a></p></div>';
+          return;
+        }
+        var d = await r.json();
+        document.getElementById("sec").textContent = d.secretBase32;
+        new QRCode(document.getElementById("qr"), { width: 180, height: 180, text: d.otpauthUrl });
+      })();
+      document.getElementById("f").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var code = new FormData(e.target).get("code");
+        var r = await adminApi("/admin/api/bootstrap/mfa-verify", { method: "POST", body: { code: code }, csrf: readCsrf() });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          document.getElementById("err").textContent = j.detail || j.error || "Failed";
+          document.getElementById("err").classList.remove("hidden");
+          return;
+        }
+        writeCsrf(j.csrf || "");
+        window.location.href = "/";
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Authenticator — Auth Service</title>
+    <meta name="description" content="Enter your authenticator code to sign in" />
+    <script src="/js/head.js"></script>
+    <script src="/js/theme.js"></script>
+  </head>
+  <body class="auth-page min-h-screen font-sans flex items-center justify-center p-4 text-slate-200 antialiased">
+    <div class="w-full max-w-md card-glow p-8">
+      <div class="flex items-center gap-3 mb-8">
+        <div class="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+          <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-semibold text-white">Authenticator Code</h1>
+          <p class="text-xs text-slate-500">Enter your 6-digit code to continue</p>
+        </div>
+      </div>
+      <form id="f" class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-slate-400 mb-1.5">6-digit code</label>
+          <input name="code" id="mfaInput" inputmode="numeric" autocomplete="one-time-code" required autofocus class="input-dark text-center text-xl tracking-[.3em] font-mono" placeholder="000000" />
+        </div>
+        <p id="err" class="text-sm text-red-400 hidden"></p>
+        <button type="submit" class="btn-primary">Sign In</button>
+      </form>
+    </div>
+    <script src="/js/common.js"></script>
+    <script>
+      // Ensure focus for password manager autofill
+      window.addEventListener("DOMContentLoaded", function () {
+        var inp = document.getElementById("mfaInput");
+        if (inp) { inp.focus(); inp.select(); }
+      });
+      document.getElementById("f").addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var code = new FormData(e.target).get("code");
+        var r = await adminApi("/admin/api/login/mfa", { method: "POST", body: { code: code }, csrf: readCsrf() });
+        var j = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          document.getElementById("err").textContent = j.detail || j.error || "Failed";
+          document.getElementById("err").classList.remove("hidden");
+          return;
+        }
+        writeCsrf(j.csrf || "");
+        window.location.href = "/";
+      });
+    </script>
+  </body>
+</html>
