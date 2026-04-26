@@ -17,32 +17,7 @@ A self-hosted token authentication and authorization service. Manage API tokens,
 
 ### Docker Compose
 
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  auth-service:
-    image: auth-service:latest
-    ports:
-      - "8080:8080"
-    environment:
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-in-production}
-      SESSION_SECRET: ${SESSION_SECRET:-min-32-chars-secret-change-me!!}
-      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
-```
+See [docker-compose.yml](docker-compose.yml)
 
 ### First Run
 
