@@ -3,6 +3,8 @@ import uuid as uuid_mod
 from datetime import datetime
 from typing import Any
 
+from app.datetime_utils import fmt_datetime
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 import pyotp
@@ -55,14 +57,6 @@ async def _normalize_grants(request: Request, raw: list[dict[str, Any]]) -> list
     return grants
 
 
-def _iso_or_str(val: Any) -> str | None:
-    """Return an ISO string whether *val* is already a string (SQLite) or a datetime (PG)."""
-    if val is None:
-        return None
-    if isinstance(val, str):
-        return val
-    return val.isoformat()
-
 
 @router.get("/tokens")
 async def admin_list_tokens(request: Request, _sess: FullSession):
@@ -81,11 +75,11 @@ async def admin_list_tokens(request: Request, _sess: FullSession):
                 "name": row["name"],
                 "description": row["description"] or "",
                 "grants": g,
-                "expiresAt": _iso_or_str(row["expires_at"]),
+                "expiresAt": fmt_datetime(row["expires_at"]),
                 "isActive": bool(row["is_active"]),
                 "canReveal": bool(row["token_enc"]),
-                "createdAt": _iso_or_str(row["created_at"]),
-                "lastUsedAt": _iso_or_str(row["last_used_at"]),
+                "createdAt": fmt_datetime(row["created_at"]),
+                "lastUsedAt": fmt_datetime(row["last_used_at"]),
             }
         )
     return out

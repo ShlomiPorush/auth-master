@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, sha256_hex
 from app.crypto_totp import decrypt_totp_secret
+from app.datetime_utils import fmt_datetime
 from app.db import UniqueViolationError
 from app.deps import ALL_SCOPES
 from app.admin_deps import FullSession, csrf_check
@@ -31,10 +32,6 @@ class RevealBody(BaseModel):
     code: str
 
 
-def _iso_or_str(val):
-    if val is None:
-        return None
-    return val if isinstance(val, str) else val.isoformat()
 
 
 @router.get("")
@@ -47,7 +44,7 @@ async def list_api_keys(request: Request, _sess: FullSession):
             "name": r["name"],
             "scopes": r["scopes"],
             "canReveal": bool(r["key_enc"]),
-            "createdAt": _iso_or_str(r["created_at"]),
+            "createdAt": fmt_datetime(r["created_at"]),
         }
         for r in rows
     ]

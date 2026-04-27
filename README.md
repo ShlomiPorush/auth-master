@@ -42,6 +42,7 @@ See [docker-compose.yml](docker-compose.yml)
 | `VALIDATE_CACHE_TTL_SEC` | `300` | How long validated tokens are cached in Redis (seconds) |
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
+| `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
 
 ## Architecture
 

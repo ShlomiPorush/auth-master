@@ -3,6 +3,8 @@ import re
 import uuid as uuid_mod
 from typing import Any
 
+from app.datetime_utils import fmt_datetime
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -26,12 +28,6 @@ class ZonePatch(BaseModel):
     description: str | None = None
 
 
-def _iso_or_str(val: Any) -> str | None:
-    if val is None:
-        return None
-    if isinstance(val, str):
-        return val
-    return val.isoformat()
 
 
 @router.get("/zones")
@@ -43,7 +39,7 @@ async def list_zones(request: Request, _sess: FullSession):
             "id": str(r["id"]),
             "name": r["name"],
             "description": r["description"] or "",
-            "createdAt": _iso_or_str(r["created_at"]),
+            "createdAt": fmt_datetime(r["created_at"]),
         }
         for r in rows
     ]

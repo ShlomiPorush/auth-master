@@ -26,6 +26,7 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
       ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
+      TZ: ${TZ:-UTC}
     volumes:
       - ./data:/app/data
     depends_on:

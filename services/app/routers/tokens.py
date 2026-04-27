@@ -4,6 +4,8 @@ import uuid as uuid_mod
 from datetime import datetime
 from typing import Any
 
+from app.datetime_utils import fmt_datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -111,10 +113,10 @@ async def list_tokens(request: Request):
                 "id": str(row["id"]),
                 "name": row["name"],
                 "grants": g,
-                "expiresAt": row["expires_at"] if isinstance(row["expires_at"], str) else (row["expires_at"].isoformat() if row["expires_at"] else None),
+                "expiresAt": fmt_datetime(row["expires_at"]),
                 "isActive": bool(row["is_active"]),
-                "createdAt": row["created_at"] if isinstance(row["created_at"], str) else (row["created_at"].isoformat() if row["created_at"] else None),
-                "lastUsedAt": row["last_used_at"] if isinstance(row["last_used_at"], str) else (row["last_used_at"].isoformat() if row["last_used_at"] else None),
+                "createdAt": fmt_datetime(row["created_at"]),
+                "lastUsedAt": fmt_datetime(row["last_used_at"]),
             }
         )
     return out
