@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     root_path: str = Field(default="", validation_alias="ROOT_PATH")
     # Must be explicit: True breaks session cookies on plain http://localhost (Secure not sent).
     cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
+    rate_limit_window_ms: int = Field(default=60_000, validation_alias="RATE_LIMIT_WINDOW_MS")
+    rate_limit_max_req: int = Field(default=120, validation_alias="RATE_LIMIT_MAX_REQ")
 
     @property
     def allowed_areas_list(self) -> list[str]:

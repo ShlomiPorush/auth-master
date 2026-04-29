@@ -43,6 +43,8 @@ See [docker-compose.yml](docker-compose.yml)
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
+| `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute) |
 
 ## Architecture
 

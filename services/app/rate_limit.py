@@ -1,8 +1,11 @@
 import time
 from collections import defaultdict
 
-WINDOW_MS = 60_000
-MAX_REQ = 120
+from app.config import get_settings
+
+settings = get_settings()
+WINDOW_MS = settings.rate_limit_window_ms
+MAX_REQ = settings.rate_limit_max_req
 
 _buckets: dict[str, tuple[int, float]] = defaultdict(lambda: (0, 0.0))
 
