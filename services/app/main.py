@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -6,9 +7,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from app.config import get_settings
+from app.datetime_utils import is_expired
 from app.db import create_database
 from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate
 from app.schema import ensure_database_schema
+from app.token_cache import cache_delete
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
 
@@ -18,13 +21,67 @@ _root = _settings.root_path.strip("/")
 ROOT_PATH = f"/{_root}" if _root else ""
 
 
+async def cleanup_expired_tokens(db, r) -> None:
+    try:
+        if db.is_sqlite:
+            rows = await db.fetch("SELECT id, token_hash, expires_at FROM tokens WHERE expires_at IS NOT NULL")
+            expired_ids = []
+            expired_hashes = []
+            for row in rows:
+                if is_expired(row["expires_at"]):
+                    expired_ids.append(row["id"])
+                    expired_hashes.append(row["token_hash"])
+            
+            if expired_ids:
+                placeholders = ", ".join(f"${i+1}" for i in range(len(expired_ids)))
+                await db.execute(f"DELETE FROM tokens WHERE id IN ({placeholders})", *expired_ids)
+                for h in expired_hashes:
+                    await cache_delete(r, h)
+        else:
+            rows = await db.fetch("SELECT token_hash FROM tokens WHERE expires_at < now()")
+            if rows:
+                expired_hashes = [row["token_hash"] for row in rows]
+                await db.execute("DELETE FROM tokens WHERE expires_at < now()")
+                for h in expired_hashes:
+                    await cache_delete(r, h)
+    except Exception as e:
+        print(f"Error in cleanup_expired_tokens: {e}")
+
+
+async def expired_tokens_cleanup_loop(db, r) -> None:
+    while True:
+        try:
+            await asyncio.sleep(60)
+            await cleanup_expired_tokens(db, r)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Error in expired_tokens_cleanup_loop: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     s = get_settings()
     app.state.db = await create_database(s.database_url)
     await ensure_database_schema(app.state.db)
     app.state.redis = redis.from_url(s.redis_url, decode_responses=True)
+    
+    # Start cleanup background task
+    cleanup_task = asyncio.create_task(
+        expired_tokens_cleanup_loop(app.state.db, app.state.redis)
+    )
+    app.state.cleanup_task = cleanup_task
+    # Trigger one cleanup immediately in the background
+    asyncio.create_task(cleanup_expired_tokens(app.state.db, app.state.redis))
+    
     yield
+    
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+        
     await app.state.redis.aclose()
     await app.state.db.close()
 

@@ -4,7 +4,7 @@ import uuid as uuid_mod
 from datetime import datetime
 from typing import Any
 
-from app.datetime_utils import fmt_datetime
+from app.datetime_utils import fmt_datetime, is_expired
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -115,6 +115,7 @@ async def list_tokens(request: Request):
                 "grants": g,
                 "expiresAt": fmt_datetime(row["expires_at"]),
                 "isActive": bool(row["is_active"]),
+                "isExpired": is_expired(row["expires_at"]),
                 "createdAt": fmt_datetime(row["created_at"]),
                 "lastUsedAt": fmt_datetime(row["last_used_at"]),
             }

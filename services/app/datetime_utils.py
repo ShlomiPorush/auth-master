@@ -43,3 +43,34 @@ def fmt_datetime(val: Any) -> str | None:
         return val.astimezone(tz).isoformat()
 
     return str(val)
+
+
+def is_expired(expires_at: Any) -> bool:
+    """Check if a datetime value (str or datetime) is in the past (UTC comparison)."""
+    if expires_at is None:
+        return False
+
+    if isinstance(expires_at, str):
+        # Handle SQLite storing strings, replace Z for compatibility
+        val = expires_at.replace("Z", "+00:00")
+        # Handle possible space instead of T in SQLite datetime representation
+        if " " in val and "T" not in val:
+            val = val.replace(" ", "T")
+        try:
+            dt = datetime.fromisoformat(val)
+        except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                try:
+                    dt = datetime.strptime(expires_at, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return False
+    else:
+        dt = expires_at
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp() <= datetime.now(timezone.utc).timestamp()
+

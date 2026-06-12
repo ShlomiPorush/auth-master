@@ -836,7 +836,7 @@
 
       function updateStats() {
         var total = state.tokenRows.length;
-        var active = state.tokenRows.filter(function (t) { return t.isActive; }).length;
+        var active = state.tokenRows.filter(function (t) { return t.isActive && !t.isExpired; }).length;
         var zones = state.zonesList.length;
         document.getElementById("statTotal").textContent = total;
         document.getElementById("statActive").textContent = active;
@@ -965,7 +965,7 @@
           var t = rows[i];
           var exp = t.expiresAt ? fmtDateUTC(t.expiresAt) : "";
           var lu = t.lastUsedAt ? fmtDateUTC(t.lastUsedAt) : "-";
-          var activeBadge = t.isActive ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Disabled</span>';
+          var activeBadge = !t.isActive ? '<span class="badge badge-red">Disabled</span>' : t.isExpired ? '<span class="badge badge-amber">Expired</span>' : '<span class="badge badge-green">Active</span>';
           var descHtml = t.description ? '<div class="text-xs text-slate-500 mt-0.5">' + esc(t.description) + '</div>' : '';
           var expLine = exp ? '<div class="text-xs text-slate-500 mt-1">Exp: ' + esc(exp) + '</div>' : '';
           // Desktop row
@@ -1017,7 +1017,7 @@
         for (var i = 0; i < state.tokenRows.length; i++) {
           var t = state.tokenRows[i];
           var nameMatch = !query || t.name.toLowerCase().indexOf(query) !== -1 || (t.description && t.description.toLowerCase().indexOf(query) !== -1);
-          var statusMatch = filter === "all" || (filter === "active" && t.isActive) || (filter === "disabled" && !t.isActive);
+          var statusMatch = filter === "all" || (filter === "active" && t.isActive && !t.isExpired) || (filter === "disabled" && (!t.isActive || t.isExpired));
           var zoneMatch = !zoneFilter;
           if (zoneFilter && t.grants) {
             for (var g = 0; g < t.grants.length; g++) {
@@ -1355,6 +1355,14 @@
         if (sj.needsSetup) { window.location.href = basePath() + "/setup"; return; }
         await loadMe(); await loadTokens(); await loadZonesTable(); await refreshServiceStatus();
         setInterval(refreshServiceStatus, 15000);
+        setInterval(async function () {
+          if (document.hidden) return;
+          try {
+            await refreshActiveTabData();
+          } catch (e) {
+            console.error("Auto-refresh active tab failed:", e);
+          }
+        }, 5000);
       })();
     </script>
   </body>

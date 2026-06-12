@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from app.crypto_tokens import sha256_hex
+from app.datetime_utils import is_expired
 from app.grants import grant_covers, parse_grants
 from app.rate_limit import allow_validate
 from app.token_cache import cache_delete, cache_get, cache_set
@@ -19,18 +20,6 @@ class ValidateBody(BaseModel):
     token: str
     area: str
     level: str
-
-
-def _expired(expires_at: Any) -> bool:
-    if expires_at is None:
-        return False
-    if isinstance(expires_at, str):
-        dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-    else:
-        dt = expires_at
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.timestamp() <= datetime.now(timezone.utc).timestamp()
 
 
 @router.post("/validate")
@@ -84,7 +73,7 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     is_active = row.get("is_active")
     if isinstance(is_active, int):
         is_active = bool(is_active)
-    if not is_active or _expired(row.get("expires_at")):
+    if not is_active or is_expired(row.get("expires_at")):
         return JSONResponse(content={"result": False}, media_type="application/json")
 
     ok = grant_covers(row["grants"], area.strip(), level)  # type: ignore[arg-type]
