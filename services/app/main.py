@@ -4,6 +4,7 @@ from pathlib import Path
 
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from app.config import get_settings
@@ -86,7 +87,28 @@ async def lifespan(app: FastAPI):
     await app.state.db.close()
 
 
-app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan)
+app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - Swagger UI",
+        oauth2_redirect_url=app.swagger_ui_oauth2_redirect_url,
+        swagger_js_url=f"{ROOT_PATH}/js/swagger-ui-bundle.js",
+        swagger_css_url=f"{ROOT_PATH}/css/swagger-ui.css",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc_html():
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " - ReDoc",
+        redoc_js_url=f"{ROOT_PATH}/js/redoc.standalone.js",
+    )
+
 
 app.include_router(health.router)
 app.include_router(validate.router)
@@ -168,19 +190,12 @@ async def legacy_admin_js(filename: str):
     return RedirectResponse(_prefixed(f"/js/{filename}"), status_code=302)
 
 
-@app.get("/css/tailwind.css")
-async def tailwind_css():
+@app.get("/css/{filename}")
+async def static_css(filename: str):
+    if filename not in ("shared.css", "tailwind.css", "swagger-ui.css", "inter.css"):
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(
-        _safe_static_file("css/tailwind.css"),
-        media_type="text/css",
-        headers={"Cache-Control": "public, max-age=86400"},
-    )
-
-
-@app.get("/css/shared.css")
-async def shared_css():
-    return FileResponse(
-        _safe_static_file("css/shared.css"),
+        _safe_static_file(f"css/{filename}"),
         media_type="text/css",
         headers={"Cache-Control": "public, max-age=86400"},
     )
@@ -188,7 +203,7 @@ async def shared_css():
 
 @app.get("/js/{filename}")
 async def static_js(filename: str):
-    if filename not in ("common.js", "theme.js", "head.js"):
+    if filename not in ("common.js", "theme.js", "head.js", "swagger-ui-bundle.js", "redoc.standalone.js", "qrcode.min.js"):
         raise HTTPException(status_code=404, detail="Not found")
 
     # head.js is served dynamically with BASE_PATH injected
@@ -198,6 +213,17 @@ async def static_js(filename: str):
         return Response(content=script, media_type="application/javascript")
 
     return FileResponse(_safe_static_file(f"js/{filename}"))
+
+
+@app.get("/fonts/{filename}")
+async def static_fonts(filename: str):
+    if not filename.endswith(".woff2") or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(
+        _safe_static_file(f"fonts/{filename}"),
+        media_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @app.get("/images/{filename}")
