@@ -121,7 +121,22 @@ async def get_access_logs(
 
     # Fetch rows
     args.extend([limit, offset])
-    q = f"SELECT id, token_id, token_name, area, level, result, ip_address, created_at FROM access_logs {where_clause} ORDER BY created_at DESC LIMIT ${n} OFFSET ${n+1}"
+    q = f"""
+        SELECT 
+            al.id, 
+            al.token_id, 
+            COALESCE(al.token_name, t.name) AS token_name, 
+            al.area, 
+            al.level, 
+            al.result, 
+            al.ip_address, 
+            al.created_at 
+        FROM access_logs al
+        LEFT JOIN tokens t ON al.token_id = t.id
+        {where_clause} 
+        ORDER BY al.created_at DESC 
+        LIMIT ${n} OFFSET ${n+1}
+    """
     rows = await db.fetch(q, *args)
 
     logs = []

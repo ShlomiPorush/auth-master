@@ -52,6 +52,10 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     r: Redis = request.app.state.redis
 
     row = await cache_get(r, h)
+    if row is not None and "name" not in row:
+        await cache_delete(r, h)
+        row = None
+
     if row is None:
         rec = await db.fetchrow(
             "SELECT id, name, grants, expires_at, is_active FROM tokens WHERE token_hash = $1",
