@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from app.admin_deps import FullSession, csrf_check
 from app.db import UniqueViolationError
 from app.token_cache import cache_delete
+from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/admin/api", tags=["admin-zones"])
 
@@ -72,6 +73,20 @@ async def create_zone(
             )
     except UniqueViolationError as e:
         raise HTTPException(409, "Zone already exists") from e
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="zone_create",
+        entity_type="zone",
+        entity_id=str(zid),
+        entity_name=name,
+        details={"description": (body.description or "").strip()},
+        ip_address=ip,
+    )
+
     return {"id": str(zid), "name": name, "description": (body.description or "").strip()}
 
 
@@ -90,6 +105,11 @@ async def patch_zone(
         uid = uuid_mod.UUID(zone_id)
     except ValueError as e:
         raise HTTPException(400, "Invalid id") from e
+
+    row = await db.fetchrow("SELECT name FROM zones WHERE id = $1", str(uid))
+    if row is None:
+        raise HTTPException(404, "Not found")
+    old_name = row["name"]
 
     parts: list[str] = []
     args: list[Any] = []
@@ -113,6 +133,23 @@ async def patch_zone(
         await _patch_zone_pg(db, r, uid, body, parts, args, n)
     else:
         await _patch_zone_sqlite(db, r, uid, body, parts, args, n)
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="zone_patch",
+        entity_type="zone",
+        entity_id=zone_id,
+        entity_name=body.name.strip() if body.name is not None else old_name,
+        details={
+            "updates": {
+                k: v for k, v in {"name": body.name, "description": body.description}.items() if v is not None
+            }
+        },
+        ip_address=ip,
+    )
 
     return {"ok": True}
 
@@ -202,10 +239,27 @@ async def delete_zone(
     except ValueError as e:
         raise HTTPException(400, "Invalid id") from e
 
+    row = await db.fetchrow("SELECT name FROM zones WHERE id = $1", str(uid))
+    if row is None:
+        raise HTTPException(404, "Not found")
+    zone_name = row["name"]
+
     if db.is_pg:
         await _delete_zone_pg(db, r, uid)
     else:
         await _delete_zone_sqlite(db, r, uid)
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="zone_delete",
+        entity_type="zone",
+        entity_id=zone_id,
+        entity_name=zone_name,
+        ip_address=ip,
+    )
 
     return {"ok": True}
 

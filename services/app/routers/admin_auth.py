@@ -19,6 +19,8 @@ from app.sessions import (
     set_sid_cookie,
 )
 from app.zones import allowed_area_names
+from app.logger import log_activity
+
 
 router = APIRouter(prefix="/admin/api", tags=["admin-auth"])
 
@@ -81,6 +83,20 @@ async def login_mfa(request: Request, response: Response, body: MfaBody, x_csrf_
     totp = pyotp.TOTP(secret)
     if not totp.verify(body.code.replace(" ", ""), valid_window=1):
         raise HTTPException(400, "Invalid code")
+    
+    username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
+    actor = username or f"admin:{sess['adminId']}"
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="login",
+        entity_type="admin_user",
+        entity_id=sess["adminId"],
+        entity_name=username,
+        ip_address=ip,
+    )
+    
     await delete_session(r, sid)
     new_sid_v = new_sid()
     csrf = new_csrf()
@@ -92,8 +108,23 @@ async def login_mfa(request: Request, response: Response, body: MfaBody, x_csrf_
 @router.post("/logout")
 async def logout(request: Request, response: Response):
     r: Redis = request.app.state.redis
+    db = request.app.state.db
     sid = request.cookies.get(COOKIE_NAME)
     if sid:
+        sess = await get_session(r, sid)
+        if sess and sess.get("kind") == "full":
+            username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
+            actor = username or f"admin:{sess['adminId']}"
+            ip = request.client.host if request.client else "unknown"
+            await log_activity(
+                db,
+                actor=actor,
+                action="logout",
+                entity_type="admin_user",
+                entity_id=sess["adminId"],
+                entity_name=username,
+                ip_address=ip,
+            )
         await delete_session(r, sid)
     clear_sid_cookie(response)
     return {"ok": True}

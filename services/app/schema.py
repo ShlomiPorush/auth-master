@@ -79,6 +79,36 @@ async def _ensure_pg(db: "Database") -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys (key_hash)")
     await db.execute("ALTER TABLE IF EXISTS api_keys ADD COLUMN IF NOT EXISTS key_enc TEXT NULL")
 
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS activity_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            actor TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entity_type TEXT NULL,
+            entity_id TEXT NULL,
+            entity_name TEXT NULL,
+            details TEXT NULL,
+            ip_address TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs (created_at DESC)")
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            token_id TEXT NULL,
+            token_name TEXT NULL,
+            area TEXT NOT NULL,
+            level TEXT NOT NULL,
+            result BOOLEAN NOT NULL,
+            ip_address TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at DESC)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
+
 
 async def _ensure_sqlite(db: "Database") -> None:
     await db.execute("""
@@ -135,3 +165,33 @@ async def _ensure_sqlite(db: "Database") -> None:
     rows = await db.fetch("PRAGMA table_info(api_keys)")
     if "key_enc" not in {r["name"] for r in rows}:
         await db.execute("ALTER TABLE api_keys ADD COLUMN key_enc TEXT")
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS activity_logs (
+            id TEXT PRIMARY KEY,
+            actor TEXT NOT NULL,
+            action TEXT NOT NULL,
+            entity_type TEXT NULL,
+            entity_id TEXT NULL,
+            entity_name TEXT NULL,
+            details TEXT NULL,
+            ip_address TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs (created_at)")
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_logs (
+            id TEXT PRIMARY KEY,
+            token_id TEXT NULL,
+            token_name TEXT NULL,
+            area TEXT NOT NULL,
+            level TEXT NOT NULL,
+            result INTEGER NOT NULL,
+            ip_address TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at)")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")

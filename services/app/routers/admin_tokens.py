@@ -17,6 +17,7 @@ from app.db import UniqueViolationError
 from app.grants import assert_grants_allowed, parse_grants
 from app.token_cache import cache_delete
 from app.zones import allowed_area_names
+from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/admin/api", tags=["admin-tokens"])
 
@@ -119,6 +120,20 @@ async def admin_create_token(
             )
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_create",
+        entity_type="token",
+        entity_id=str(rid),
+        entity_name=body.name.strip(),
+        details={"grants": grants, "expiresAt": exp.isoformat() if exp else None},
+        ip_address=ip,
+    )
+
     return {
         "id": str(rid),
         "token": raw,
@@ -139,7 +154,7 @@ async def admin_patch_token(
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
     th_old = row["token_hash"]
@@ -201,6 +216,31 @@ async def admin_patch_token(
     await cache_delete(r, th_old)
     if body.token is not None:
         await cache_delete(r, sha256_hex(body.token.strip()))
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    t_name = body.name.strip() if body.name is not None else row["name"]
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_patch",
+        entity_type="token",
+        entity_id=token_id,
+        entity_name=t_name,
+        details={
+            "updates": {
+                k: v for k, v in {
+                    "name": body.name,
+                    "description": body.description,
+                    "grants": body.grants,
+                    "isActive": body.isActive,
+                    "expiresAt": body.expiresAt
+                }.items() if v is not None
+            }
+        },
+        ip_address=ip,
+    )
+
     return {"ok": True}
 
 
@@ -214,12 +254,25 @@ async def admin_delete_token(
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
     th = row["token_hash"]
     await db.execute("DELETE FROM tokens WHERE id = $1", token_id)
     await cache_delete(r, th)
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_delete",
+        entity_type="token",
+        entity_id=token_id,
+        entity_name=row["name"],
+        ip_address=ip,
+    )
+
     return {"ok": True}
 
 
@@ -244,7 +297,7 @@ async def admin_reveal_token(
         "SELECT totp_secret_enc, totp_enabled FROM admin_users WHERE id = $1",
         str(admin_id),
     )
-    token_row = await db.fetchrow("SELECT token_enc FROM tokens WHERE id = $1", str(token_uuid))
+    token_row = await db.fetchrow("SELECT name, token_enc FROM tokens WHERE id = $1", str(token_uuid))
     if not admin_row or not admin_row["totp_enabled"] or not admin_row["totp_secret_enc"]:
         raise HTTPException(403, "MFA not configured")
     if not token_row:
@@ -263,4 +316,17 @@ async def admin_reveal_token(
         token_value = decrypt_token_value(token_enc)
     except Exception as e:
         raise HTTPException(500, "Failed to decrypt token") from e
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_reveal",
+        entity_type="token",
+        entity_id=str(token_uuid),
+        entity_name=token_row["name"],
+        ip_address=ip,
+    )
+
     return {"token": token_value}

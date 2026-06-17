@@ -191,7 +191,7 @@
 
     <!-- ─── TAB NAV ─── -->
     <nav class="border-b border-navy-600 bg-navy-800/50">
-      <div class="max-w-[1600px] mx-auto px-4 sm:px-6 flex gap-1">
+      <div class="max-w-[1600px] mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto whitespace-nowrap">
         <button type="button" id="tabTokens" class="tab-btn active">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
           Tokens
@@ -203,6 +203,14 @@
         <button type="button" id="tabApiKeys" class="tab-btn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
           API Keys
+        </button>
+        <button type="button" id="tabActivityLog" class="tab-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
+          Activity Log
+        </button>
+        <button type="button" id="tabAccessLogs" class="tab-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Access Logs
         </button>
       </div>
     </nav>
@@ -369,6 +377,120 @@
               </thead>
               <tbody id="apiKeyRows"></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── ACTIVITY LOG PANEL ─── -->
+      <section id="panelActivityLog" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-white">Activity Log</h2>
+        </div>
+        <p class="text-sm text-slate-400 mb-4">History of all administrative actions performed on this Auth Service.</p>
+        
+        <!-- Filters -->
+        <div class="flex flex-wrap gap-3 mb-4 items-end bg-navy-900/50 p-4 rounded-xl border border-navy-600">
+          <div class="flex-1 min-w-[200px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Search (Actor or Entity Name)</label>
+            <div class="search-bar">
+              <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+              <input id="actSearch" class="input-dark text-sm" placeholder="Filter actor, entity name..." style="padding-left: 2.25rem;" />
+            </div>
+          </div>
+          <div class="w-[180px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Action Type</label>
+            <select id="actActionFilter" class="input-dark text-sm bg-navy-800 border-navy-600 text-white rounded-lg h-[38px] w-full px-3">
+              <option value="">All actions</option>
+              <option value="token_create">Token Create</option>
+              <option value="token_patch">Token Patch</option>
+              <option value="token_delete">Token Delete</option>
+              <option value="token_reveal">Token Reveal</option>
+              <option value="zone_create">Zone Create</option>
+              <option value="zone_patch">Zone Patch</option>
+              <option value="zone_delete">Zone Delete</option>
+              <option value="api_key_create">API Key Create</option>
+              <option value="api_key_patch">API Key Patch</option>
+              <option value="api_key_reveal">API Key Reveal</option>
+              <option value="api_key_delete">API Key Delete</option>
+              <option value="login">Login</option>
+              <option value="logout">Logout</option>
+            </select>
+          </div>
+          <button type="button" id="btnFilterActivity" class="btn-action btn-primary h-[38px] px-5 text-sm font-medium">Filter</button>
+          <button type="button" id="btnResetActivity" class="btn-action btn-outline h-[38px] px-5 text-sm font-medium">Reset</button>
+        </div>
+
+        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
+          <div class="overflow-x-auto data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Entity Type</th>
+                  <th>Entity Name</th>
+                  <th>Details</th>
+                  <th>IP Address</th>
+                </tr>
+              </thead>
+              <tbody id="activityLogRows"></tbody>
+            </table>
+          </div>
+          <div id="emptyActivity" class="hidden text-center py-12 text-slate-500 text-sm">No activity logs found.</div>
+          <div class="p-4 flex justify-center border-t border-navy-600" id="activityLoadMoreContainer">
+            <button type="button" id="btnActivityLoadMore" class="btn-action btn-outline text-xs">Load More</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── ACCESS LOGS PANEL ─── -->
+      <section id="panelAccessLogs" class="hidden">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-white">Access Logs</h2>
+        </div>
+        <p class="text-sm text-slate-400 mb-4">History of all token validation requests verified by the `/validate` endpoint.</p>
+        
+        <!-- Filters -->
+        <div class="flex flex-wrap gap-3 mb-4 items-end bg-navy-900/50 p-4 rounded-xl border border-navy-600">
+          <div class="flex-1 min-w-[200px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Search (Token Name or Zone)</label>
+            <div class="search-bar">
+              <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+              <input id="accSearch" class="input-dark text-sm" placeholder="Filter token, area/zone..." style="padding-left: 2.25rem;" />
+            </div>
+          </div>
+          <div class="w-[180px]">
+            <label class="block text-xs font-medium text-slate-400 mb-1.5">Result</label>
+            <select id="accResultFilter" class="input-dark text-sm bg-navy-800 border-navy-600 text-white rounded-lg h-[38px] w-full px-3">
+              <option value="">All results</option>
+              <option value="true">Allowed (Success)</option>
+              <option value="false">Denied (Failure)</option>
+            </select>
+          </div>
+          <button type="button" id="btnFilterAccess" class="btn-action btn-primary h-[38px] px-5 text-sm font-medium">Filter</button>
+          <button type="button" id="btnResetAccess" class="btn-action btn-outline h-[38px] px-5 text-sm font-medium">Reset</button>
+        </div>
+
+        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
+          <div class="overflow-x-auto data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Token Name</th>
+                  <th>Area (Zone)</th>
+                  <th>Level</th>
+                  <th>Result</th>
+                  <th>IP Address</th>
+                </tr>
+              </thead>
+              <tbody id="accessLogRows"></tbody>
+            </table>
+          </div>
+          <div id="emptyAccess" class="hidden text-center py-12 text-slate-500 text-sm">No access logs found.</div>
+          <div class="p-4 flex justify-center border-t border-navy-600" id="accessLoadMoreContainer">
+            <button type="button" id="btnAccessLoadMore" class="btn-action btn-outline text-xs">Load More</button>
           </div>
         </div>
       </section>
@@ -660,26 +782,48 @@
 
       function setTab(which) {
         state.activeTab = which;
-        var tok = document.getElementById("panelTokens"), zon = document.getElementById("panelZones"), ak = document.getElementById("panelApiKeys");
-        var bt = document.getElementById("tabTokens"), bz = document.getElementById("tabZones"), bk = document.getElementById("tabApiKeys");
+        var tok = document.getElementById("panelTokens"),
+            zon = document.getElementById("panelZones"),
+            ak = document.getElementById("panelApiKeys"),
+            act = document.getElementById("panelActivityLog"),
+            acc = document.getElementById("panelAccessLogs");
+        var bt = document.getElementById("tabTokens"),
+            bz = document.getElementById("tabZones"),
+            bk = document.getElementById("tabApiKeys"),
+            bact = document.getElementById("tabActivityLog"),
+            bacc = document.getElementById("tabAccessLogs");
         var newBtn = document.getElementById("newtok");
-        [tok, zon, ak].forEach(function(p) { p.classList.add("hidden"); });
-        [bt, bz, bk].forEach(function(b) { b.classList.remove("active"); });
+        [tok, zon, ak, act, acc].forEach(function(p) { if (p) p.classList.add("hidden"); });
+        [bt, bz, bk, bact, bacc].forEach(function(b) { if (b) b.classList.remove("active"); });
         newBtn.classList.add("hidden");
         if (which === "tokens") {
           tok.classList.remove("hidden"); bt.classList.add("active");
           newBtn.classList.remove("hidden");
         } else if (which === "zones") {
           zon.classList.remove("hidden"); bz.classList.add("active");
-        } else {
+        } else if (which === "apiKeys") {
           ak.classList.remove("hidden"); bk.classList.add("active");
+        } else if (which === "activityLog") {
+          act.classList.remove("hidden"); bact.classList.add("active");
+        } else if (which === "accessLogs") {
+          acc.classList.remove("hidden"); bacc.classList.add("active");
         }
       }
 
       async function refreshActiveTabData() {
         if (state.activeTab === "tokens") { await refreshAreasFromApi(); await loadTokens(); }
         else if (state.activeTab === "zones") { await loadZonesTable(); await refreshAreasFromApi(); }
-        else { await loadApiKeys(); }
+        else if (state.activeTab === "apiKeys") { await loadApiKeys(); }
+        else if (state.activeTab === "activityLog") {
+          if (state.activityPage === 1) {
+            await loadActivityLogs(true);
+          }
+        }
+        else if (state.activeTab === "accessLogs") {
+          if (state.accessPage === 1) {
+            await loadAccessLogs(true);
+          }
+        }
       }
 
       function setStatusChip(id, label, ok) {
@@ -712,8 +856,7 @@
         setHeaderDot("dbDot", !!j.db); setHeaderDot("redisDot", !!j.redis);
       }
 
-      document.getElementById("tabTokens").addEventListener("click", function () { setTab("tokens"); refreshActiveTabData(); refreshServiceStatus(); });
-      document.getElementById("tabZones").addEventListener("click", function () { setTab("zones"); refreshActiveTabData(); refreshServiceStatus(); });
+
 
       async function refreshAreasFromApi() {
         var zr = await adminApi("/admin/api/zones"); var zj = await zr.json();
@@ -1104,7 +1247,16 @@
         }
       });
 
-      document.getElementById("refresh").addEventListener("click", async function () { await refreshActiveTabData(); await refreshServiceStatus(); });
+      document.getElementById("refresh").addEventListener("click", async function () {
+        if (state.activeTab === "activityLog") {
+          await loadActivityLogs(true);
+        } else if (state.activeTab === "accessLogs") {
+          await loadAccessLogs(true);
+        } else {
+          await refreshActiveTabData();
+        }
+        await refreshServiceStatus();
+      });
       document.getElementById("logout").addEventListener("click", async function () { await adminApi("/admin/api/logout", { method: "POST" }); writeCsrf(""); window.location.href = basePath() + "/login"; });
       document.getElementById("newtok").addEventListener("click", async function () {
         await refreshAreasFromApi();
@@ -1296,7 +1448,244 @@
         lockScroll();
       }
 
-      document.getElementById("tabApiKeys").addEventListener("click", function () { setTab("apikeys"); loadApiKeys(); });
+      // --- LOG LOADING LOGIC ---
+      state.activityPage = 1;
+      state.activityHasMore = true;
+      state.accessPage = 1;
+      state.accessHasMore = true;
+
+      function formatLogDetails(log) {
+        if (!log.details) return '<span class="text-slate-500">—</span>';
+        
+        var act = log.action;
+        var det = log.details;
+        
+        function formatGrantsList(grants) {
+          if (!grants || !grants.length) return "None";
+          return grants.map(function(g) {
+            return g.area + ": " + g.level.replace(/,/g, "+");
+          }).join(", ");
+        }
+
+        try {
+          if (act === "token_create") {
+            var items = [];
+            if (det.grants) items.push("<strong>Grants:</strong> " + formatGrantsList(det.grants));
+            if (det.expiresAt) items.push("<strong>Expires:</strong> " + fmtDateUTC(det.expiresAt));
+            else items.push("<strong>Expires:</strong> Never");
+            return '<div class="text-xs text-slate-300 space-y-0.5">' + items.join("<br>") + '</div>';
+          }
+          
+          if (act === "token_patch") {
+            var updates = det.updates || {};
+            var items = [];
+            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
+            if (updates.description !== undefined) items.push("Description: \"" + esc(updates.description) + "\"");
+            if (updates.isActive !== undefined) items.push("Status: " + (updates.isActive ? "Enabled" : "Disabled"));
+            if (updates.grants !== undefined) items.push("Grants: " + formatGrantsList(updates.grants));
+            if (updates.expiresAt !== undefined) {
+              items.push("Expires: " + (updates.expiresAt ? fmtDateUTC(updates.expiresAt) : "Never"));
+            }
+            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
+            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
+          }
+          
+          if (act === "zone_create") {
+            if (det.description) return '<span class="text-xs text-slate-300"><strong>Description:</strong> ' + esc(det.description) + '</span>';
+            return '<span class="text-slate-500">—</span>';
+          }
+          
+          if (act === "zone_patch") {
+            var updates = det.updates || {};
+            var items = [];
+            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
+            if (updates.description !== undefined) items.push("Description: \"" + esc(updates.description) + "\"");
+            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
+            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
+          }
+          
+          if (act === "api_key_create") {
+            if (det.scopes) return '<span class="text-xs text-slate-300"><strong>Scopes:</strong> ' + esc(det.scopes) + '</span>';
+            return '<span class="text-slate-500">—</span>';
+          }
+          
+          if (act === "api_key_patch") {
+            var updates = det.updates || {};
+            var items = [];
+            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
+            if (updates.scopes !== undefined) items.push("Scopes: " + esc(updates.scopes.join(", ")));
+            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
+            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
+          }
+          
+          return '<pre class="text-[10px] text-slate-400 bg-navy-900/50 p-1 rounded max-w-xs overflow-x-auto font-mono">' + esc(JSON.stringify(det, null, 2)) + '</pre>';
+        } catch(e) {
+          return '<pre class="text-[10px] text-slate-400 bg-navy-900/50 p-1 rounded max-w-xs overflow-x-auto font-mono">' + esc(JSON.stringify(det)) + '</pre>';
+        }
+      }
+
+      async function loadActivityLogs(reset) {
+        if (reset) {
+          state.activityPage = 1;
+          state.activityHasMore = true;
+        }
+        if (!state.activityHasMore) return;
+
+        var search = document.getElementById("actSearch").value.trim();
+        var action = document.getElementById("actActionFilter").value;
+        
+        var url = "/admin/api/logs/activity?page=" + state.activityPage + "&limit=30";
+        if (search) url += "&search=" + encodeURIComponent(search);
+        if (action) url += "&action=" + encodeURIComponent(action);
+
+        var r = await adminApi(url);
+        if (!r.ok) { showToast("Failed to load activity logs", true); return; }
+        var j = await r.json();
+        
+        var tb = document.getElementById("activityLogRows");
+        var logs = j.logs || [];
+        
+        if (reset && logs.length === 0) {
+          tb.innerHTML = "";
+          document.getElementById("emptyActivity").classList.remove("hidden");
+          document.getElementById("activityLoadMoreContainer").classList.add("hidden");
+          return;
+        }
+        document.getElementById("emptyActivity").classList.add("hidden");
+
+        var html = "";
+        for (var i = 0; i < logs.length; i++) {
+          var log = logs[i];
+          var detailsStr = formatLogDetails(log);
+
+          var actionBadge = '<span class="badge badge-slate">' + esc(log.action) + '</span>';
+          if (log.action.indexOf("create") !== -1) actionBadge = '<span class="badge badge-green">' + esc(log.action) + '</span>';
+          else if (log.action.indexOf("patch") !== -1) actionBadge = '<span class="badge badge-blue">' + esc(log.action) + '</span>';
+          else if (log.action.indexOf("delete") !== -1) actionBadge = '<span class="badge badge-red">' + esc(log.action) + '</span>';
+          else if (log.action.indexOf("reveal") !== -1) actionBadge = '<span class="badge badge-amber">' + esc(log.action) + '</span>';
+          else if (log.action === "login") actionBadge = '<span class="badge badge-violet">' + esc(log.action) + '</span>';
+          else if (log.action === "logout") actionBadge = '<span class="badge badge-slate">' + esc(log.action) + '</span>';
+
+          html += '<tr>' +
+            '<td><span class="text-slate-400 text-xs">' + fmtDateUTC(log.createdAt) + '</span></td>' +
+            '<td><span class="text-white font-medium">' + esc(log.actor) + '</span></td>' +
+            '<td>' + actionBadge + '</td>' +
+            '<td><span class="text-xs text-slate-500">' + esc(log.entityType || '—') + '</span></td>' +
+            '<td><span class="text-slate-300 text-xs">' + esc(log.entityName || '—') + '</span></td>' +
+            '<td>' + detailsStr + '</td>' +
+            '<td><code class="text-xs text-slate-400">' + esc(log.ipAddress) + '</code></td>' +
+            '</tr>';
+        }
+
+        if (reset) {
+          tb.innerHTML = html;
+        } else {
+          tb.innerHTML += html;
+        }
+
+        state.activityHasMore = (state.activityPage * 30) < j.total;
+        var moreBtn = document.getElementById("activityLoadMoreContainer");
+        if (state.activityHasMore) {
+          moreBtn.classList.remove("hidden");
+        } else {
+          moreBtn.classList.add("hidden");
+        }
+      }
+
+      async function loadAccessLogs(reset) {
+        if (reset) {
+          state.accessPage = 1;
+          state.accessHasMore = true;
+        }
+        if (!state.accessHasMore) return;
+
+        var search = document.getElementById("accSearch").value.trim();
+        var result = document.getElementById("accResultFilter").value;
+        
+        var url = "/admin/api/logs/access?page=" + state.accessPage + "&limit=30";
+        if (search) url += "&search=" + encodeURIComponent(search);
+        if (result) url += "&result=" + encodeURIComponent(result);
+
+        var r = await adminApi(url);
+        if (!r.ok) { showToast("Failed to load access logs", true); return; }
+        var j = await r.json();
+        
+        var tb = document.getElementById("accessLogRows");
+        var logs = j.logs || [];
+        
+        if (reset && logs.length === 0) {
+          tb.innerHTML = "";
+          document.getElementById("emptyAccess").classList.remove("hidden");
+          document.getElementById("accessLoadMoreContainer").classList.add("hidden");
+          return;
+        }
+        document.getElementById("emptyAccess").classList.add("hidden");
+
+        var html = "";
+        for (var i = 0; i < logs.length; i++) {
+          var log = logs[i];
+          var resBadge = log.result 
+            ? '<span class="badge badge-green flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Allowed</span>'
+            : '<span class="badge badge-red flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Denied</span>';
+
+          html += '<tr>' +
+            '<td><span class="text-slate-400 text-xs">' + fmtDateUTC(log.createdAt) + '</span></td>' +
+            '<td><span class="text-white font-medium">' + esc(log.tokenName) + '</span></td>' +
+            '<td><span class="badge badge-blue">' + esc(log.area) + '</span></td>' +
+            '<td><span class="text-xs text-slate-400 font-mono">' + esc(log.level) + '</span></td>' +
+            '<td>' + resBadge + '</td>' +
+            '<td><code class="text-xs text-slate-400">' + esc(log.ipAddress) + '</code></td>' +
+            '</tr>';
+        }
+
+        if (reset) {
+          tb.innerHTML = html;
+        } else {
+          tb.innerHTML += html;
+        }
+
+        state.accessHasMore = (state.accessPage * 30) < j.total;
+        var moreBtn = document.getElementById("accessLoadMoreContainer");
+        if (state.accessHasMore) {
+          moreBtn.classList.remove("hidden");
+        } else {
+          moreBtn.classList.add("hidden");
+        }
+      }
+
+      // Event Listeners for logs
+      document.getElementById("tabTokens").addEventListener("click", function () { setTab("tokens"); refreshActiveTabData(); refreshServiceStatus(); });
+      document.getElementById("tabZones").addEventListener("click", function () { setTab("zones"); refreshActiveTabData(); refreshServiceStatus(); });
+      document.getElementById("tabApiKeys").addEventListener("click", function () { setTab("apiKeys"); loadApiKeys(); });
+      document.getElementById("tabActivityLog").addEventListener("click", function () { setTab("activityLog"); loadActivityLogs(true); });
+      document.getElementById("tabAccessLogs").addEventListener("click", function () { setTab("accessLogs"); loadAccessLogs(true); });
+
+      document.getElementById("btnActivityLoadMore").addEventListener("click", function () {
+        state.activityPage++;
+        loadActivityLogs(false);
+      });
+      document.getElementById("btnFilterActivity").addEventListener("click", function () {
+        loadActivityLogs(true);
+      });
+      document.getElementById("btnResetActivity").addEventListener("click", function () {
+        document.getElementById("actSearch").value = "";
+        document.getElementById("actActionFilter").value = "";
+        loadActivityLogs(true);
+      });
+
+      document.getElementById("btnAccessLoadMore").addEventListener("click", function () {
+        state.accessPage++;
+        loadAccessLogs(false);
+      });
+      document.getElementById("btnFilterAccess").addEventListener("click", function () {
+        loadAccessLogs(true);
+      });
+      document.getElementById("btnResetAccess").addEventListener("click", function () {
+        document.getElementById("accSearch").value = "";
+        document.getElementById("accResultFilter").value = "";
+        loadAccessLogs(true);
+      });
+
       document.getElementById("newApiKeyBtn").addEventListener("click", function () {
         document.getElementById("akErr").classList.add("hidden");
         document.getElementById("apiKeyForm").reset();

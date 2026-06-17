@@ -14,6 +14,7 @@ from app.datetime_utils import fmt_datetime
 from app.db import UniqueViolationError
 from app.deps import ALL_SCOPES
 from app.admin_deps import FullSession, csrf_check
+from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/admin/api/api-keys", tags=["admin-api-keys"])
 
@@ -89,6 +90,19 @@ async def create_api_key(
     except UniqueViolationError as e:
         raise HTTPException(409, "Key already exists") from e
 
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="api_key_create",
+        entity_type="api_key",
+        entity_id=str(new_id),
+        entity_name=name,
+        details={"scopes": scopes_str},
+        ip_address=ip,
+    )
+
     return {
         "id": str(new_id),
         "name": name,
@@ -107,7 +121,7 @@ async def patch_api_key(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    row = await db.fetchrow("SELECT id FROM api_keys WHERE id = $1", key_id)
+    row = await db.fetchrow("SELECT name FROM api_keys WHERE id = $1", key_id)
     if not row:
         raise HTTPException(404, "Not found")
 
@@ -137,6 +151,25 @@ async def patch_api_key(
     args.append(key_id)
     q = f"UPDATE api_keys SET {', '.join(parts)} WHERE id = ${n}"
     await db.execute(q, *args)
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    k_name = body.name.strip() if body.name is not None else row["name"]
+    await log_activity(
+        db,
+        actor=actor,
+        action="api_key_patch",
+        entity_type="api_key",
+        entity_id=key_id,
+        entity_name=k_name,
+        details={
+            "updates": {
+                k: v for k, v in {"name": body.name, "scopes": body.scopes}.items() if v is not None
+            }
+        },
+        ip_address=ip,
+    )
+
     return {"ok": True}
 
 
@@ -169,7 +202,7 @@ async def reveal_api_key(
     if not totp.verify(body.code.replace(" ", ""), valid_window=1):
         raise HTTPException(400, "Invalid code")
 
-    row = await db.fetchrow("SELECT key_enc FROM api_keys WHERE id = $1", key_id)
+    row = await db.fetchrow("SELECT name, key_enc FROM api_keys WHERE id = $1", key_id)
     if not row:
         raise HTTPException(404, "Not found")
     if not row["key_enc"]:
@@ -178,6 +211,19 @@ async def reveal_api_key(
         raw_key = decrypt_token_value(row["key_enc"])
     except Exception as e:
         raise HTTPException(500, "Decrypt failed") from e
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="api_key_reveal",
+        entity_type="api_key",
+        entity_id=key_id,
+        entity_name=row["name"],
+        ip_address=ip,
+    )
+
     return {"key": raw_key}
 
 
@@ -190,8 +236,21 @@ async def delete_api_key(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    row = await db.fetchrow("SELECT id FROM api_keys WHERE id = $1", key_id)
+    row = await db.fetchrow("SELECT name FROM api_keys WHERE id = $1", key_id)
     if not row:
         raise HTTPException(404, "Not found")
     await db.execute("DELETE FROM api_keys WHERE id = $1", key_id)
+
+    actor = await get_actor(request, sess)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="api_key_delete",
+        entity_type="api_key",
+        entity_id=key_id,
+        entity_name=row["name"],
+        ip_address=ip,
+    )
+
     return {"ok": True}

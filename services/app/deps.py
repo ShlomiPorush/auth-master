@@ -24,15 +24,17 @@ async def _resolve_api_key(request: Request, authorization: str | None = Header(
 
     # ENV key = full access
     if token == get_settings().admin_api_key:
+        request.state.actor = "master_api_key"
         return list(ALL_SCOPES)
 
     # DB key — lookup by hash
     h = sha256_hex(token)
     db = request.app.state.db
-    row = await db.fetchrow("SELECT scopes FROM api_keys WHERE key_hash = $1", h)
+    row = await db.fetchrow("SELECT name, scopes FROM api_keys WHERE key_hash = $1", h)
     if not row:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    request.state.actor = f"api_key:{row['name']}"
     scopes_str = row["scopes"] or ""
     return [s.strip() for s in scopes_str.split(",") if s.strip()]
 

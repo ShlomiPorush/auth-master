@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
     rate_limit_window_ms: int = Field(default=60_000, validation_alias="RATE_LIMIT_WINDOW_MS")
     rate_limit_max_req: int = Field(default=120, validation_alias="RATE_LIMIT_MAX_REQ")
+    activity_log_retention_days: int = Field(default=30, validation_alias="ACTIVITY_LOG_RETENTION_DAYS")
+    access_log_retention_days: int = Field(default=30, validation_alias="ACCESS_LOG_RETENTION_DAYS")
 
     @property
     def allowed_areas_list(self) -> list[str]:

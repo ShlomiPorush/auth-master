@@ -10,9 +10,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from app.config import get_settings
 from app.datetime_utils import is_expired
 from app.db import create_database
-from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate
+from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs
 from app.schema import ensure_database_schema
 from app.token_cache import cache_delete
+from app.logger import purge_old_logs
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
 
@@ -47,6 +48,12 @@ async def cleanup_expired_tokens(db, r) -> None:
                     await cache_delete(r, h)
     except Exception as e:
         print(f"Error in cleanup_expired_tokens: {e}")
+
+    try:
+        s = get_settings()
+        await purge_old_logs(db, s.activity_log_retention_days, s.access_log_retention_days)
+    except Exception as e:
+        print(f"Error in purge_old_logs: {e}")
 
 
 async def expired_tokens_cleanup_loop(db, r) -> None:
@@ -118,6 +125,7 @@ app.include_router(admin_auth.router)
 app.include_router(admin_tokens.router)
 app.include_router(admin_zones.router)
 app.include_router(admin_api_keys.router)
+app.include_router(admin_logs.router)
 
 
 def _safe_static_file(rel: str) -> Path:

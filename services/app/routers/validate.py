@@ -12,6 +12,8 @@ from app.datetime_utils import is_expired
 from app.grants import grant_covers, parse_grants
 from app.rate_limit import allow_validate
 from app.token_cache import cache_delete, cache_get, cache_set
+from app.logger import log_access
+
 
 router = APIRouter(tags=["validate"])
 
@@ -52,10 +54,11 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     row = await cache_get(r, h)
     if row is None:
         rec = await db.fetchrow(
-            "SELECT id, grants, expires_at, is_active FROM tokens WHERE token_hash = $1",
+            "SELECT id, name, grants, expires_at, is_active FROM tokens WHERE token_hash = $1",
             h,
         )
         if not rec:
+            await log_access(db, None, None, area, level, False, ip)
             return JSONResponse(content={"result": False}, media_type="application/json")
         g = rec["grants"]
         if isinstance(g, str):
@@ -66,7 +69,7 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
         exp = rec["expires_at"]
         if exp and not isinstance(exp, str):
             exp = exp.isoformat()
-        row = {"id": str(rec["id"]), "grants": grants, "expires_at": exp, "is_active": rec["is_active"]}
+        row = {"id": str(rec["id"]), "name": rec["name"], "grants": grants, "expires_at": exp, "is_active": rec["is_active"]}
         await cache_set(r, h, row)
 
     # SQLite stores booleans as 0/1
@@ -74,10 +77,13 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     if isinstance(is_active, int):
         is_active = bool(is_active)
     if not is_active or is_expired(row.get("expires_at")):
+        await log_access(db, row.get("id"), row.get("name"), area, level, False, ip)
         return JSONResponse(content={"result": False}, media_type="application/json")
 
     ok = grant_covers(row["grants"], area.strip(), level)  # type: ignore[arg-type]
     if ok:
         await db.execute("UPDATE tokens SET last_used_at = now() WHERE id = $1", row["id"])
+
+    await log_access(db, row.get("id"), row.get("name"), area, level, ok, ip)
 
     return JSONResponse(content={"result": ok}, media_type="application/json")

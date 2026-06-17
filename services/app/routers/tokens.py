@@ -16,6 +16,7 @@ from app.deps import require_admin_api_key, require_scope
 from app.grants import assert_grants_allowed, parse_grants
 from app.token_cache import cache_delete
 from app.zones import allowed_area_names
+from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/tokens", tags=["tokens"], dependencies=[Depends(require_admin_api_key)])
 
@@ -94,6 +95,20 @@ async def create_zone_api(request: Request, body: ZoneCreateApi):
             )
     except UniqueViolationError as e:
         raise HTTPException(409, "Zone already exists") from e
+
+    actor = await get_actor(request)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="zone_create",
+        entity_type="zone",
+        entity_id=str(new_id),
+        entity_name=name,
+        details={"description": desc},
+        ip_address=ip,
+    )
+
     return {"id": str(new_id), "name": name, "description": desc}
 
 
@@ -150,6 +165,20 @@ async def create_token(request: Request, body: TokenCreate):
             )
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
+
+    actor = await get_actor(request)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_create",
+        entity_type="token",
+        entity_id=str(rid),
+        entity_name=body.name.strip(),
+        details={"grants": grants, "expiresAt": exp.isoformat() if exp else None},
+        ip_address=ip,
+    )
+
     return {
         "id": str(rid),
         "token": raw,
@@ -163,7 +192,7 @@ async def create_token(request: Request, body: TokenCreate):
 async def patch_token(request: Request, token_id: str, body: TokenPatch):
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
     th_old = row["token_hash"]
@@ -221,6 +250,30 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
     await cache_delete(r, th_old)
     if body.token is not None:
         await cache_delete(r, sha256_hex(body.token.strip()))
+
+    actor = await get_actor(request)
+    ip = request.client.host if request.client else "unknown"
+    t_name = body.name.strip() if body.name is not None else row["name"]
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_patch",
+        entity_type="token",
+        entity_id=token_id,
+        entity_name=t_name,
+        details={
+            "updates": {
+                k: v for k, v in {
+                    "name": body.name,
+                    "grants": body.grants,
+                    "isActive": body.isActive,
+                    "expiresAt": body.expiresAt
+                }.items() if v is not None
+            }
+        },
+        ip_address=ip,
+    )
+
     return {"ok": True}
 
 
@@ -228,10 +281,23 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
 async def delete_token(request: Request, token_id: str):
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
     th = row["token_hash"]
     await db.execute("DELETE FROM tokens WHERE id = $1", token_id)
     await cache_delete(r, th)
+
+    actor = await get_actor(request)
+    ip = request.client.host if request.client else "unknown"
+    await log_activity(
+        db,
+        actor=actor,
+        action="token_delete",
+        entity_type="token",
+        entity_id=token_id,
+        entity_name=row["name"],
+        ip_address=ip,
+    )
+
     return {"ok": True}
