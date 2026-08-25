@@ -1,4 +1,4 @@
-FROM node:20-alpine AS css
+FROM --platform=$BUILDPLATFORM node:20-alpine AS css
 WORKDIR /build
 COPY services/styles/package.json ./auth/styles/
 RUN cd auth/styles && npm install
