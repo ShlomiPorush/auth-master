@@ -3,11 +3,6 @@ name: Build and Publish Docker Image
 on:
   push:
     tags: [ 'v*.*.*' ]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'Dockerfile'
-      - '.github/workflows/docker-publish.yml'
 
 env:
   GH_REGISTRY: ghcr.io
@@ -25,6 +20,18 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Require a changelog entry
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! awk -v hdr="## [${TAG#v}]" \
+              'index($0, hdr) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [${TAG#v}]' section." >&2
+            echo "Describe the release there on main, then move the tag." >&2
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -61,3 +68,54 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  publish-release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          # Everything between this version's heading and the next one.
+          awk -v hdr="## [${version}]" '
+            index($0, hdr) == 1 { inside = 1; next }
+            inside && /^## / { exit }
+            inside && /^\[[^]]+\]: / { exit }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "The '## [${version}]' section in CHANGELOG.md is empty." >&2
+            exit 1
+          fi
+
+          {
+            cat notes.md
+            echo ""
+            echo "## Docker images"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${DOCKER_HUB_REPO}:${version}"
+            echo "docker pull ${GH_REGISTRY}/${REPOSITORY,,}:${version}"
+            echo '```'
+            echo ""
+            echo "Built for linux/amd64 and linux/arm64. The \`latest\` tag points at this version."
+          } > release-body.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-body.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file release-body.md --verify-tag
+          fi
