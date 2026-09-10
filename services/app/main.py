@@ -1,5 +1,7 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
+from html import escape as html_escape
 from pathlib import Path
 
 import redis.asyncio as redis
@@ -151,7 +153,7 @@ def _serve_html(rel: str) -> Response:
     if not ROOT_PATH:
         return FileResponse(p)
     html = p.read_text(encoding="utf-8")
-    base_tag = f'<base href="{ROOT_PATH}/" />'
+    base_tag = f'<base href="{html_escape(ROOT_PATH, quote=True)}/" />'
     html = html.replace("<head>", f"<head>\n    {base_tag}", 1)
     # Convert absolute paths to relative so <base> can resolve them
     for prefix in ('"/js/', '"/css/', '"/images/'):
@@ -217,7 +219,7 @@ async def static_js(filename: str):
     # head.js is served dynamically with BASE_PATH injected
     if filename == "head.js":
         source = _safe_static_file("js/head.js").read_text(encoding="utf-8")
-        script = f'window.__BASE_PATH__ = "{ROOT_PATH}";\n{source}'
+        script = f'window.__BASE_PATH__ = {json.dumps(ROOT_PATH)};\n{source}'
         return Response(content=script, media_type="application/javascript")
 
     return FileResponse(_safe_static_file(f"js/{filename}"))
