@@ -83,19 +83,6 @@ See [API.md](API.md) for the full REST API reference.
 - CSRF protection on all state-changing admin operations
 - Rate limiting on the `/validate` endpoint
 
-## Releases
-
-[CHANGELOG.md](CHANGELOG.md) records what changed in every version, and each
-version also has a [GitHub release](../../releases) page. Images are published
-to Docker Hub as `shlomip/auth-master` and to GHCR as
-`ghcr.io/shlomiporush/auth-master`, for `linux/amd64` and `linux/arm64`.
-
-To cut a release, move the `Unreleased` entries in `CHANGELOG.md` under a new
-`## [X.Y.Z] - YYYY-MM-DD` heading, merge that to `main`, then tag the commit
-`vX.Y.Z` and push the tag. Pushing the tag builds and publishes the images and
-creates the release page from the changelog section. A tag whose version has no
-changelog section fails the build before anything is published.
-
 ## License
 
 MIT
