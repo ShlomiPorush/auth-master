@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-22
+
+### Added
+
+- Every dashboard section is now a page with its own URL: `/admin/tokens`,
+  `/admin/zones`, `/admin/api-keys`, `/admin/logs/activity` and
+  `/admin/logs/access`. Pages can be bookmarked, shared and opened in a new tab;
+  refreshing stays on the same page and the browser back and forward buttons move
+  between pages. Opening a page while signed out goes through the login flow and
+  returns to that page afterwards. `/` and the legacy `/admin` paths redirect to
+  `/admin/tokens`.
+
+### Fixed
+
+- Searching the activity and access logs no longer fails on SQLite deployments.
+  The SQLite driver rewrote every `$N` placeholder to a positional `?` without
+  duplicating the bound value, so any query that reuses a placeholder, as both
+  log search filters do, was rejected by SQLite. PostgreSQL deployments were not
+  affected.
+
 ## [1.1.5] - 2026-09-10
 
 ### Fixed
@@ -140,7 +160,8 @@ Initial release. Self-hosted token authentication and authorization service with
 admin dashboard, TOTP-protected sessions, scoped API keys, authorization zones and a
 token validation endpoint.
 
-[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v1.1.5...HEAD
+[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ShlomiPorush/auth-master/compare/v1.1.5...v1.2.0
 [1.1.5]: https://github.com/ShlomiPorush/auth-master/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/ShlomiPorush/auth-master/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/ShlomiPorush/auth-master/compare/v1.1.2...v1.1.3
