@@ -44,7 +44,7 @@
         font-size: 13px; font-weight: 500; color: #94a3b8;
         border-bottom: 2px solid transparent; transition: all .2s; cursor: pointer;
         background: transparent; border-top: none; border-left: none; border-right: none;
-        white-space: nowrap;
+        white-space: nowrap; text-decoration: none;
       }
       .tab-btn:hover { color: #e2e8f0; }
       .tab-btn.active { color: #60a5fa; border-bottom-color: #3b82f6; }
@@ -192,26 +192,26 @@
     <!-- ─── TAB NAV ─── -->
     <nav class="border-b border-navy-600 bg-navy-800/50">
       <div class="max-w-[1600px] mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto whitespace-nowrap">
-        <button type="button" id="tabTokens" class="tab-btn active">
+        <a id="tabTokens" href="/admin/tokens" class="tab-btn active">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
           Tokens
-        </button>
-        <button type="button" id="tabZones" class="tab-btn">
+        </a>
+        <a id="tabZones" href="/admin/zones" class="tab-btn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
           Zones
-        </button>
-        <button type="button" id="tabApiKeys" class="tab-btn">
+        </a>
+        <a id="tabApiKeys" href="/admin/api-keys" class="tab-btn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
           API Keys
-        </button>
-        <button type="button" id="tabActivityLog" class="tab-btn">
+        </a>
+        <a id="tabActivityLog" href="/admin/logs/activity" class="tab-btn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
           Activity Log
-        </button>
-        <button type="button" id="tabAccessLogs" class="tab-btn">
+        </a>
+        <a id="tabAccessLogs" href="/admin/logs/access" class="tab-btn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
           Access Logs
-        </button>
+        </a>
       </div>
     </nav>
 
@@ -780,8 +780,52 @@
 
       function closeEditModal() { state.editTokenId = ""; document.getElementById("editModal").classList.add("hidden"); unlockScroll(); }
 
+      /* ── Page routing: every tab is a real page with its own URL ── */
+      var TAB_PATHS = { tokens: "/admin/tokens", zones: "/admin/zones", apiKeys: "/admin/api-keys", activityLog: "/admin/logs/activity", accessLogs: "/admin/logs/access" };
+      var TAB_TITLES = { tokens: "Tokens", zones: "Zones", apiKeys: "API Keys", activityLog: "Activity Log", accessLogs: "Access Logs" };
+
+      function tabFromPath(pathname) {
+        var p = pathname, b = basePath();
+        if (b && p.indexOf(b) === 0) p = p.slice(b.length);
+        if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
+        for (var k in TAB_PATHS) { if (TAB_PATHS[k] === p) return k; }
+        return "tokens";
+      }
+
+      function syncTabUrl(which, replace) {
+        var url = basePath() + TAB_PATHS[which];
+        if (replace) history.replaceState({ tab: which }, "", url);
+        else history.pushState({ tab: which }, "", url);
+      }
+
+      function loadTabData(which) {
+        if (which === "tokens" || which === "zones") { refreshActiveTabData(); refreshServiceStatus(); }
+        else if (which === "apiKeys") { loadApiKeys(); }
+        else if (which === "activityLog") { loadActivityLogs(true); }
+        else if (which === "accessLogs") { loadAccessLogs(true); }
+      }
+
+      function bindTabLink(id, which) {
+        var el = document.getElementById(id);
+        el.href = basePath() + TAB_PATHS[which];
+        el.addEventListener("click", function (e) {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          e.preventDefault();
+          syncTabUrl(which, false);
+          setTab(which);
+          loadTabData(which);
+        });
+      }
+
+      window.addEventListener("popstate", function () {
+        var which = tabFromPath(location.pathname);
+        setTab(which);
+        loadTabData(which);
+      });
+
       function setTab(which) {
         state.activeTab = which;
+        document.title = TAB_TITLES[which] + " — Auth Service";
         var tok = document.getElementById("panelTokens"),
             zon = document.getElementById("panelZones"),
             ak = document.getElementById("panelApiKeys"),
@@ -868,7 +912,11 @@
 
       async function loadMe() {
         var r = await adminApi("/admin/api/me"); var j = await r.json();
-        if (!j.user) { window.location.href = basePath() + "/login"; return; }
+        if (!j.user) {
+          var next = TAB_PATHS[tabFromPath(location.pathname)];
+          window.location.href = basePath() + "/login" + (next !== "/admin/tokens" ? "?next=" + encodeURIComponent(next) : "");
+          return;
+        }
         state.username = j.user.username; state.csrf = j.csrf || readCsrf(); writeCsrf(state.csrf);
         document.getElementById("user").textContent = state.username;
         await refreshAreasFromApi();
@@ -1653,12 +1701,12 @@
         }
       }
 
-      // Event Listeners for logs
-      document.getElementById("tabTokens").addEventListener("click", function () { setTab("tokens"); refreshActiveTabData(); refreshServiceStatus(); });
-      document.getElementById("tabZones").addEventListener("click", function () { setTab("zones"); refreshActiveTabData(); refreshServiceStatus(); });
-      document.getElementById("tabApiKeys").addEventListener("click", function () { setTab("apiKeys"); loadApiKeys(); });
-      document.getElementById("tabActivityLog").addEventListener("click", function () { setTab("activityLog"); loadActivityLogs(true); });
-      document.getElementById("tabAccessLogs").addEventListener("click", function () { setTab("accessLogs"); loadAccessLogs(true); });
+      // Tab navigation links
+      bindTabLink("tabTokens", "tokens");
+      bindTabLink("tabZones", "zones");
+      bindTabLink("tabApiKeys", "apiKeys");
+      bindTabLink("tabActivityLog", "activityLog");
+      bindTabLink("tabAccessLogs", "accessLogs");
 
       document.getElementById("btnActivityLoadMore").addEventListener("click", function () {
         state.activityPage++;
@@ -1740,9 +1788,15 @@
       });
 
       (async function init() {
+        var initialTab = tabFromPath(location.pathname);
+        setTab(initialTab);
+        syncTabUrl(initialTab, true); // canonicalise "/" to "/tokens"
         var st = await adminApi("/admin/api/setup/status"); var sj = await st.json();
         if (sj.needsSetup) { window.location.href = basePath() + "/setup"; return; }
         await loadMe(); await loadTokens(); await loadZonesTable(); await refreshServiceStatus();
+        if (initialTab === "apiKeys") { await loadApiKeys(); }
+        else if (initialTab === "activityLog") { await loadActivityLogs(true); }
+        else if (initialTab === "accessLogs") { await loadAccessLogs(true); }
         setInterval(refreshServiceStatus, 15000);
         setInterval(async function () {
           if (document.hidden) return;

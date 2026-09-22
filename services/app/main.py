@@ -164,13 +164,13 @@ def _serve_html(rel: str) -> Response:
 @app.get("/admin")
 @app.get("/admin/")
 async def legacy_admin_root():
-    return RedirectResponse(_prefixed("/"), status_code=302)
+    return RedirectResponse(_prefixed("/admin/tokens"), status_code=302)
 
 
 @app.get("/admin/index.html")
 @app.get("/admin/dashboard.html")
 async def legacy_admin_dashboard_files():
-    return RedirectResponse(_prefixed("/"), status_code=302)
+    return RedirectResponse(_prefixed("/admin/tokens"), status_code=302)
 
 
 @app.get("/admin/setup.html")
@@ -261,9 +261,18 @@ async def page_login_mfa():
     return _serve_html("login-mfa.html")
 
 
+@app.get("/admin/tokens")
+@app.get("/admin/zones")
+@app.get("/admin/api-keys")
+@app.get("/admin/logs/activity")
+@app.get("/admin/logs/access")
+async def page_dashboard():
+    return _serve_html("index.html")
+
+
 @app.get("/")
 async def page_home():
-    return _serve_html("index.html")
+    return RedirectResponse(_prefixed("/admin/tokens"), status_code=302)
 
 
 if __name__ == "__main__":
