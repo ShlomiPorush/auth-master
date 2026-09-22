@@ -45,27 +45,6 @@ class Row(dict):
 # ── SQL rewriting helpers ──────────────────────────────────────
 
 _PG_PARAM = re.compile(r"\$(\d+)")
-_UUID_CAST = re.compile(r"\$(\d+)::uuid")
-_JSONB_CAST = re.compile(r"\$(\d+)::jsonb")
-
-
-def _pg_to_sqlite_sql(sql: str) -> str:
-    """Rewrite PG-dialect SQL to work on SQLite."""
-    # Remove ::uuid and ::jsonb casts
-    sql = _UUID_CAST.sub(r"$\1", sql)
-    sql = _JSONB_CAST.sub(r"$\1", sql)
-    # Remove other :: casts  e.g.  $2::text
-    sql = re.sub(r"\$(\d+)::\w+", r"$\1", sql)
-    # Replace $N with ?
-    sql = _PG_PARAM.sub("?", sql)
-    # Replace PG-specific functions
-    sql = sql.replace("gen_random_uuid()", "?")  # we pass uuid from Python
-    sql = sql.replace("now()", "datetime('now')")
-    sql = sql.replace("TIMESTAMPTZ", "TEXT")
-    sql = sql.replace("JSONB", "TEXT")
-    sql = sql.replace("::jsonb", "")
-    sql = sql.replace("'[]'::text", "'[]'")
-    return sql
 
 
 def _serialize_arg(v: Any) -> Any:
@@ -77,6 +56,37 @@ def _serialize_arg(v: Any) -> Any:
     if isinstance(v, bool):
         return int(v)
     return v
+
+
+def _pg_to_sqlite(sql: str, args: tuple[Any, ...]) -> tuple[str, tuple[Any, ...]]:
+    """Rewrite PG-dialect SQL to work on SQLite, remapping args to match.
+
+    SQLite's ``?`` placeholders are strictly positional, so a ``$N`` that is
+    reused in the SQL (legal in PostgreSQL) must have its argument duplicated
+    for every occurrence.
+    """
+    # Remove :: casts  e.g.  $1::uuid, $2::jsonb, $3::text
+    sql = re.sub(r"\$(\d+)::\w+", r"$\1", sql)
+
+    # Replace each $N with ? and record which argument it binds to
+    order: list[int] = []
+
+    def _sub(m: re.Match[str]) -> str:
+        order.append(int(m.group(1)) - 1)
+        return "?"
+
+    sql = _PG_PARAM.sub(_sub, sql)
+    # Replace PG-specific functions
+    sql = sql.replace("gen_random_uuid()", "?")  # we pass uuid from Python
+    sql = sql.replace("now()", "datetime('now')")
+    sql = sql.replace("TIMESTAMPTZ", "TEXT")
+    sql = sql.replace("JSONB", "TEXT")
+    sql = sql.replace("::jsonb", "")
+    sql = sql.replace("'[]'::text", "'[]'")
+
+    if order:
+        args = tuple(args[i] for i in order)
+    return sql, tuple(_serialize_arg(a) for a in args)
 
 
 # ── Protocol ───────────────────────────────────────────────────
@@ -176,8 +186,7 @@ class SqliteDatabase(Database):
         self._conn = conn
 
     async def execute(self, sql: str, *args: Any) -> None:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         try:
             await self._conn.execute(sql, args)
         except sqlite3.IntegrityError as e:
@@ -187,8 +196,7 @@ class SqliteDatabase(Database):
         await self._conn.commit()
 
     async def fetchrow(self, sql: str, *args: Any) -> Row | None:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         cursor = await self._conn.execute(sql, args)
         row = await cursor.fetchone()
         if row is None:
@@ -203,8 +211,7 @@ class SqliteDatabase(Database):
         return list(row.values())[0]
 
     async def fetch(self, sql: str, *args: Any) -> list[Row]:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         cursor = await self._conn.execute(sql, args)
         rows = await cursor.fetchall()
         cols = [d[0] for d in cursor.description]
@@ -233,8 +240,7 @@ class _SqliteConn:
         self._conn = conn
 
     async def execute(self, sql: str, *args: Any) -> None:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         try:
             await self._conn.execute(sql, args)
         except sqlite3.IntegrityError as e:
@@ -243,8 +249,7 @@ class _SqliteConn:
             raise
 
     async def fetchrow(self, sql: str, *args: Any) -> Row | None:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         cursor = await self._conn.execute(sql, args)
         row = await cursor.fetchone()
         if row is None:
@@ -259,8 +264,7 @@ class _SqliteConn:
         return list(row.values())[0]
 
     async def fetch(self, sql: str, *args: Any) -> list[Row]:
-        sql = _pg_to_sqlite_sql(sql)
-        args = tuple(_serialize_arg(a) for a in args)
+        sql, args = _pg_to_sqlite(sql, args)
         cursor = await self._conn.execute(sql, args)
         rows = await cursor.fetchall()
         cols = [d[0] for d in cursor.description]
