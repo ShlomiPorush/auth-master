@@ -48,7 +48,8 @@
           return;
         }
         writeCsrf(j.csrf || "");
-        window.location.href = basePath() + "/login-mfa";
+        var next = safeNext();
+        window.location.href = basePath() + "/login-mfa" + (next ? "?next=" + encodeURIComponent(next) : "");
       });
     </script>
   </body>

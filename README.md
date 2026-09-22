@@ -63,11 +63,15 @@ See [docker-compose.yml](docker-compose.yml)
 
 ## Dashboard
 
-The admin dashboard provides:
+Every dashboard section is a page with its own URL, so it can be bookmarked, shared, and opened directly:
 
-- **Tokens tab** — Create, edit, reveal (MFA-protected), and delete tokens
-- **Zones tab** — Create and delete authorization zones
-- **API Keys tab** — Create scoped API keys for external integrations, edit permissions, copy keys (MFA-protected)
+- **Tokens** (`/admin/tokens`) — Create, edit, reveal (MFA-protected), and delete tokens
+- **Zones** (`/admin/zones`) — Create and delete authorization zones
+- **API Keys** (`/admin/api-keys`) — Create scoped API keys for external integrations, edit permissions, copy keys (MFA-protected)
+- **Activity Log** (`/admin/logs/activity`) — Audit trail of admin actions
+- **Access Logs** (`/admin/logs/access`) — History of token validation requests
+
+Opening a page while signed out redirects to the login flow and returns to the same page after signing in.
 
 ## API Documentation
 

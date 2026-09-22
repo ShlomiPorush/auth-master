@@ -46,7 +46,7 @@
           return;
         }
         writeCsrf(j.csrf || "");
-        window.location.href = basePath() + "/";
+        window.location.href = basePath() + (safeNext() || "/");
       });
     </script>
   </body>

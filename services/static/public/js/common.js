@@ -18,6 +18,13 @@
     });
   };
   w.basePath = function () { return B; };
+  // Read the ?next= return path; only internal absolute paths are honoured
+  w.safeNext = function () {
+    var v = "";
+    try { v = new URLSearchParams(w.location.search).get("next") || ""; } catch (e) {}
+    if (v.charAt(0) !== "/" || v.charAt(1) === "/" || v.indexOf("\\") !== -1) return "";
+    return v;
+  };
   w.readCsrf = function () {
     return sessionStorage.getItem("csrf") || "";
   };
