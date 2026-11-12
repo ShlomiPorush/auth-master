@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the limit is exceeded, and appears in the access log.
 - API key holders can read the scopes of their key with `GET /tokens/me`.
 
+### Fixed
+
+- The access log page no longer fails on PostgreSQL deployments. The listing
+  matched each log entry to its token by comparing the entry's token ID, stored as
+  text, with the token's UUID, and PostgreSQL rejects a comparison between those
+  two types, so every request for the page failed. The token ID is now compared as
+  text. SQLite deployments were not affected.
+
 ## [1.2.0] - 2026-09-22
 
 ### Added

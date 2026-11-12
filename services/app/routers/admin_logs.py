@@ -132,7 +132,7 @@ async def get_access_logs(
             al.ip_address, 
             al.created_at 
         FROM access_logs al
-        LEFT JOIN tokens t ON al.token_id = t.id
+        LEFT JOIN tokens t ON al.token_id = CAST(t.id AS TEXT)
         {where_clause} 
         ORDER BY al.created_at DESC 
         LIMIT ${n} OFFSET ${n+1}
