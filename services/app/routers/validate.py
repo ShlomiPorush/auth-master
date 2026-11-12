@@ -121,7 +121,7 @@ async def token_grants(request: Request, body: GrantsBody):
 
     db = request.app.state.db
     rec = await db.fetchrow(_TOKEN_SELECT, sha256_hex(body.token))
-    active = bool(rec) and _is_active(rec)
+    active = rec is not None and _is_active(rec)
     await log_access(
         db,
         str(rec["id"]) if rec else None,
