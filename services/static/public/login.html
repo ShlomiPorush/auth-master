@@ -1,56 +1,44 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sign In — Auth Service</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Sign In · Auth Service</title>
     <meta name="description" content="Sign in to the Auth Service administration panel" />
-    <script src="/js/head.js"></script>
+    <style>.hidden{display:none}</style>
     <script src="/js/theme.js"></script>
+    <script src="/js/head.js"></script>
   </head>
-  <body class="auth-page min-h-screen font-sans flex items-center justify-center p-4 text-slate-200 antialiased">
-    <div class="w-full max-w-md card-glow p-8">
-      <div class="flex items-center gap-3 mb-8">
-        <div class="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-          <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+  <body class="ui ui-login" data-auth-page="login">
+    <main class="ui-login-wrap">
+      <div class="ui-login-col">
+        <div class="ui-login-head">
+          <span class="ui-brand-mark" aria-hidden="true"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg></span>
+          <div>
+            <h1 class="ui-h1">Sign In</h1>
+            <p>Auth Service Administration</p>
+          </div>
         </div>
-        <div>
-          <h1 class="text-xl font-semibold text-white">Sign In</h1>
-          <p class="text-xs text-slate-500">Auth Service Administration</p>
-        </div>
+        <form id="f" class="ui-form" novalidate>
+          <div class="ui-field">
+            <label class="ui-label" for="username">Username</label>
+            <input class="ui-input" id="username" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="admin" data-inventory="login.username" />
+          </div>
+          <div class="ui-field">
+            <label class="ui-label" for="password">Password</label>
+            <div class="ui-pass">
+              <input class="ui-input" type="password" id="password" name="password" required autocomplete="current-password" aria-describedby="password-caps" data-inventory="login.password" />
+              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" aria-label="Show password" title="Show password"></button>
+            </div>
+            <p class="ui-caps hidden" id="password-caps" data-caps="password">Caps Lock is on</p>
+          </div>
+          <p class="ui-error hidden" id="err" role="alert"></p>
+          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Continue</button>
+        </form>
       </div>
-      <form id="f" class="space-y-5">
-        <div>
-          <label class="block text-sm font-medium text-slate-400 mb-1.5">Username</label>
-          <input name="username" required class="input-dark" autocomplete="username" placeholder="admin" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-400 mb-1.5">Password</label>
-          <input name="password" type="password" required class="input-dark" autocomplete="current-password" placeholder="••••••••" />
-        </div>
-        <p id="err" class="text-sm text-red-400 hidden"></p>
-        <button type="submit" class="btn-primary">Continue</button>
-      </form>
-    </div>
+    </main>
     <script src="/js/common.js"></script>
-    <script>
-      document.getElementById("f").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        var fd = new FormData(e.target);
-        var r = await adminApi("/admin/api/login", {
-          method: "POST",
-          body: { username: fd.get("username"), password: fd.get("password") },
-        });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) {
-          document.getElementById("err").textContent = j.detail || j.error || "Failed";
-          document.getElementById("err").classList.remove("hidden");
-          return;
-        }
-        writeCsrf(j.csrf || "");
-        var next = safeNext();
-        window.location.href = basePath() + "/login-mfa" + (next ? "?next=" + encodeURIComponent(next) : "");
-      });
-    </script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/auth-pages.js"></script>
   </body>
 </html>

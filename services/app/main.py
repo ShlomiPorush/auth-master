@@ -21,6 +21,19 @@ from app.token_cache import cache_delete
 from app.logger import purge_old_logs
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
+# The only stylesheets and scripts served from /css and /js.
+STATIC_CSS = frozenset({"ui.css", "swagger-ui.css"})
+STATIC_JS = frozenset({
+    "common.js",
+    "theme.js",
+    "head.js",
+    "ui.js",
+    "dashboard.js",
+    "auth-pages.js",
+    "swagger-ui-bundle.js",
+    "redoc.standalone.js",
+    "qrcode.min.js",
+})
 
 _settings = get_settings()
 # Normalise: strip trailing slash, ensure leading slash if non-empty
@@ -230,7 +243,7 @@ async def legacy_admin_js(filename: str):
 
 @app.get("/css/{filename}")
 async def static_css(filename: str):
-    if filename not in ("shared.css", "tailwind.css", "swagger-ui.css", "inter.css"):
+    if filename not in STATIC_CSS:
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(
         _safe_static_file(f"css/{filename}"),
@@ -241,7 +254,7 @@ async def static_css(filename: str):
 
 @app.get("/js/{filename}")
 async def static_js(filename: str):
-    if filename not in ("common.js", "theme.js", "head.js", "swagger-ui-bundle.js", "redoc.standalone.js", "qrcode.min.js"):
+    if filename not in STATIC_JS:
         raise HTTPException(status_code=404, detail="Not found")
 
     # head.js is served dynamically with BASE_PATH injected
