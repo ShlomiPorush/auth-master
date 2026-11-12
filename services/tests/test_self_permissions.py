@@ -279,8 +279,10 @@ def test_lookup_rejects_invalid_unicode(client):
 def test_expiry_matches_token_list_format(client, monkeypatch):
     monkeypatch.setenv("TZ", "Asia/Jerusalem")
     tok = secrets.token_urlsafe(24)
-    _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}], expires_at=_future())
+    # SQLite's own datetime form (UTC, no offset): the formatter must convert it to TZ.
+    _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}], expires_at="2031-01-01 00:00:00")
     listed = client.get("/tokens", headers={"Authorization": f"Bearer {MASTER_KEY}"}).json()
+    assert listed[0]["expiresAt"] == "2031-01-01T02:00:00+02:00"
     assert _grants(client, tok).json()["expiresAt"] == listed[0]["expiresAt"]
 
 
