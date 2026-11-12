@@ -14,11 +14,10 @@ input that failed validation answered 500 instead of 422.
 Every secret the app reads is generated per run with ``secrets``.  The app is
 imported inside the fixture, not at collection time, so whichever test module
 imports it first fixes the cached settings; the fixture then refuses to run if
-the effective settings hold an empty or placeholder secret or Redis
-credentials.  The app always opens this run's own temporary SQLite database,
-and Redis is replaced by an in-memory fake, so ``REDIS_URL`` must name no
-credentials; set it in the environment before running pytest together with
-other modules that import the app.
+the effective settings hold an empty or placeholder secret.  The app always
+opens this run's own temporary SQLite database, and Redis is replaced by an
+in-memory fake; ``REDIS_URL`` carries a per-run random password because the app
+requires one.
 
 Requires pytest and httpx.
 """
@@ -31,7 +30,6 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import pytest
 
@@ -62,7 +60,7 @@ for _name, _value in _SECRETS.items():
         raise RuntimeError(f"{_name} is empty or a placeholder")
 os.environ.update(_SECRETS)
 os.environ["DATABASE_URL"] = _DATABASE_URL
-os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
+os.environ["REDIS_URL"] = f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379/0"
 os.environ["RATE_LIMIT_MAX_REQ"] = "100000"
 
 JSON = {"content-type": "application/json"}
@@ -72,9 +70,6 @@ def _refuse_unsafe_settings(s: Settings) -> None:
     for field in _SECRET_FIELDS:
         if getattr(s, field) in _PLACEHOLDERS:
             raise RuntimeError(f"{field} is empty or a placeholder")
-    redis_url = urlsplit(s.redis_url)
-    if redis_url.username or redis_url.password:
-        raise RuntimeError("REDIS_URL must not hold credentials in tests; set REDIS_URL=redis://127.0.0.1:6379/0")
 
 
 class FakeRedis:
