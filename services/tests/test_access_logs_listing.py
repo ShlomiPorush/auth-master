@@ -9,8 +9,12 @@ The tests call the real route handler against a schema built by
 ``ensure_database_schema``, so they exercise the production query.
 
 The SQLite test always runs. The PostgreSQL test runs only when
-``AUTH_TEST_POSTGRES_URL`` points at a disposable PostgreSQL database; it is
-skipped otherwise.
+``AUTH_TEST_POSTGRES_URL`` is set, and is skipped otherwise. Point it at a new,
+empty, throwaway PostgreSQL database for every run: the test creates the
+schema and inserts rows, and it does not remove them. Generate that server's
+password for each run with a cryptographically secure generator, for example
+``openssl rand -hex 32``, and pass the URL only through the environment. Never
+write the password or the URL to a file in the repository.
 """
 from __future__ import annotations
 
@@ -39,17 +43,13 @@ def _at(seconds: int) -> datetime:
 
 
 async def _seed(db) -> str:
+    # PostgreSQL-dialect SQL; the SQLite driver strips the casts and stores
+    # bool and datetime arguments as SQLite values.
     token_id = str(uuid.uuid4())
-    if db.is_sqlite:
-        await db.execute(
-            "INSERT INTO tokens (id, name, token_hash) VALUES ($1, $2, $3)",
-            token_id, "payments-svc", "hash-" + token_id,
-        )
-    else:
-        await db.execute(
-            "INSERT INTO tokens (id, name, token_hash) VALUES ($1::uuid, $2, $3)",
-            token_id, "payments-svc", "hash-" + token_id,
-        )
+    await db.execute(
+        "INSERT INTO tokens (id, name, token_hash) VALUES ($1::uuid, $2, $3)",
+        token_id, "payments-svc", "hash-" + token_id,
+    )
 
     entries = [
         # (token_id, created_at); token_name stays NULL so the name comes from the join
@@ -59,18 +59,11 @@ async def _seed(db) -> str:
         (None, _at(0)),  # unknown token
     ]
     for tid, created in entries:
-        if db.is_sqlite:
-            await db.execute(
-                "INSERT INTO access_logs (id, token_id, area, level, result, ip_address, created_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                str(uuid.uuid4()), tid, "billing", "read", 1, "10.0.0.1", created,
-            )
-        else:
-            await db.execute(
-                "INSERT INTO access_logs (id, token_id, area, level, result, ip_address, created_at) "
-                "VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
-                str(uuid.uuid4()), tid, "billing", "read", True, "10.0.0.1", created,
-            )
+        await db.execute(
+            "INSERT INTO access_logs (id, token_id, area, level, result, ip_address, created_at) "
+            "VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
+            str(uuid.uuid4()), tid, "billing", "read", True, "10.0.0.1", created,
+        )
     return token_id
 
 
@@ -98,12 +91,12 @@ async def _check_listing(db) -> None:
 
 def test_access_log_listing_sqlite():
     async def run():
-        tmp = tempfile.mkdtemp()
-        db = await create_database(f"sqlite:///{tmp}/test.db")
-        try:
-            await _check_listing(db)
-        finally:
-            await db.close()
+        with tempfile.TemporaryDirectory() as tmp:
+            db = await create_database(f"sqlite:///{tmp}/test.db")
+            try:
+                await _check_listing(db)
+            finally:
+                await db.close()
 
     asyncio.run(run())
 
