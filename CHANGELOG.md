@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Token holders can read the grants of their token with `POST /validate/grants`.
+  The call is public, returns the zones and permission levels together with the
+  expiry time, and answers `{"active": false}` for an unknown, disabled or
+  expired token. It shares the per-IP rate limit with `/validate`, answers `429`
+  when the limit is exceeded, and appears in the access log.
+- API key holders can read the scopes of their key with `GET /tokens/me`.
+
 ### Fixed
 
 - The access log page no longer fails on PostgreSQL deployments. The listing
