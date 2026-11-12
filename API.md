@@ -22,7 +22,7 @@ API keys can be:
 
 | Scope | Description |
 |---|---|
-| `validate` | Access to the `/validate` endpoint |
+| `validate` | Not required by any endpoint. `/validate` is public and needs no API key. |
 | `tokens:read` | List tokens and zones |
 | `tokens:write` | Create, update, delete tokens |
 | `zones:read` | List zones |
@@ -301,7 +301,7 @@ All error responses follow a consistent format:
 | `403` | Forbidden (missing required scope) |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate token or zone) |
-| `429` | Rate limited (validate endpoint) |
+| `429` | Too many requests from one IP address. `/validate` never returns this code: over the limit it answers `200` with `{"result": false}`. |
 
 ---
 
