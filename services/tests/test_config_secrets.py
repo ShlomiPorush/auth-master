@@ -15,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import config  # noqa: E402
 from app.config import KNOWN_PUBLIC_VALUES, Settings, get_settings  # noqa: E402
 
+# The uncached loader, so these tests never touch the settings that other test
+# modules cached when they imported the app.
+load_settings = get_settings.__wrapped__
+
 ENCRYPTION_AND_KEY_SETTINGS = ("ADMIN_API_KEY", "SESSION_SECRET", "APP_ENCRYPTION_KEY")
 CLEARED = (
     *ENCRYPTION_AND_KEY_SETTINGS,
@@ -43,20 +47,17 @@ def env(monkeypatch, tmp_path):
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
-    get_settings.cache_clear()
     yield values
-    get_settings.cache_clear()
 
 
 def startup_error() -> str:
-    get_settings.cache_clear()
     with pytest.raises(SystemExit) as exc:
-        get_settings()
+        load_settings()
     return str(exc.value.code)
 
 
 def test_valid_configuration_loads(env):
-    s = get_settings()
+    s = load_settings()
     assert s.admin_api_key == env["ADMIN_API_KEY"]
     assert s.database_url.startswith("sqlite")
 
@@ -147,7 +148,7 @@ def test_invalid_redis_url_is_refused(env, monkeypatch, url):
 )
 def test_private_redis_password_is_accepted(env, monkeypatch, template):
     monkeypatch.setenv("REDIS_URL", template.format(p=fresh()))
-    get_settings()
+    load_settings()
 
 
 def test_public_redis_password_variable_is_refused(env, monkeypatch):
@@ -157,7 +158,7 @@ def test_public_redis_password_variable_is_refused(env, monkeypatch):
 
 def test_private_redis_password_variable_is_accepted(env, monkeypatch):
     monkeypatch.setenv("REDIS_PASSWORD", fresh())
-    get_settings()
+    load_settings()
 
 
 # ── PostgreSQL ─────────────────────────────────────────────────
@@ -206,7 +207,7 @@ def test_ambiguous_postgres_url_is_refused(env, monkeypatch):
 )
 def test_private_or_absent_postgres_password_is_accepted(env, monkeypatch, template):
     monkeypatch.setenv("DATABASE_URL", template.format(p=fresh()))
-    get_settings()
+    load_settings()
 
 
 def test_public_pgpassword_is_refused(env, monkeypatch):
@@ -217,7 +218,7 @@ def test_public_pgpassword_is_refused(env, monkeypatch):
 
 def test_pgpassword_is_not_checked_for_sqlite(env, monkeypatch):
     monkeypatch.setenv("PGPASSWORD", "authpass")
-    get_settings()
+    load_settings()
 
 
 # ── Error output ───────────────────────────────────────────────
