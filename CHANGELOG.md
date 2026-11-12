@@ -27,9 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be encoded as UTF-8, such as a lone `\ud800` escape in a JSON body. It
   now answers `{"result": false}`, the same answer as for any other rejected
   input, and does not write an access log entry for the request.
-- A request that fails input validation now always answers `422`. When the
-  rejected input contained text that cannot be encoded as UTF-8, building the
-  error response failed and the request answered `500`. Non-ASCII characters
+- A request that fails input validation now answers `422` when the rejected
+  input contains text that cannot be encoded as UTF-8. Building the error
+  response failed for such text, so the request answered `500`. Non-ASCII characters
   in `422` response bodies are now sent as JSON `\uXXXX` escapes; the parsed
   content is unchanged.
 

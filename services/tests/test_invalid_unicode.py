@@ -14,10 +14,11 @@ input that failed validation answered 500 instead of 422.
 Every secret the app reads is generated per run with ``secrets``.  The app is
 imported inside the fixture, not at collection time, so whichever test module
 imports it first fixes the cached settings; the fixture then refuses to run if
-the effective settings hold an empty or placeholder secret, Redis credentials,
-or a database outside the temp directory.  Redis is replaced by an in-memory
-fake, so ``REDIS_URL`` must name no credentials; set it in the environment
-before running pytest together with other modules that import the app.
+the effective settings hold an empty or placeholder secret or Redis
+credentials.  The app always opens this run's own temporary SQLite database,
+and Redis is replaced by an in-memory fake, so ``REDIS_URL`` must name no
+credentials; set it in the environment before running pytest together with
+other modules that import the app.
 
 Requires pytest and httpx.
 """
@@ -40,10 +41,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import Settings  # noqa: E402
 
 _SECRET_FIELDS = ("admin_api_key", "session_secret", "app_encryption_key")
-_PLACEHOLDERS = {""} | {Settings.model_fields[f].default for f in _SECRET_FIELDS}
+# Defaults in config.py, plus the example values in .env.example and docker-compose.yml.
+_PLACEHOLDERS = {
+    "",
+    "generate-a-long-random-string",
+    "at-least-32-characters-long-secret-key",
+    "min-32-chars-secret-change-me!!",
+} | {Settings.model_fields[f].default for f in _SECRET_FIELDS}
 
 # Removed when the test process exits.
 _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+_DATABASE_URL = f"sqlite:///{_TMP_DIR.name}/test.db"
 _SECRETS = {
     "ADMIN_API_KEY": secrets.token_urlsafe(32),
     "SESSION_SECRET": secrets.token_urlsafe(48),
@@ -53,7 +61,7 @@ for _name, _value in _SECRETS.items():
     if _value in _PLACEHOLDERS:
         raise RuntimeError(f"{_name} is empty or a placeholder")
 os.environ.update(_SECRETS)
-os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DIR.name}/test.db"
+os.environ["DATABASE_URL"] = _DATABASE_URL
 os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 os.environ["RATE_LIMIT_MAX_REQ"] = "100000"
 
@@ -67,11 +75,6 @@ def _refuse_unsafe_settings(s: Settings) -> None:
     redis_url = urlsplit(s.redis_url)
     if redis_url.username or redis_url.password:
         raise RuntimeError("REDIS_URL must not hold credentials in tests; set REDIS_URL=redis://127.0.0.1:6379/0")
-    if not s.database_url.startswith("sqlite:///"):
-        raise RuntimeError("tests must run on a temporary SQLite database")
-    db_path = Path(s.database_url[len("sqlite:///"):]).resolve()
-    if not db_path.is_relative_to(Path(tempfile.gettempdir()).resolve()):
-        raise RuntimeError("tests must run on a temporary SQLite database")
 
 
 class FakeRedis:
@@ -103,6 +106,10 @@ def client(monkeypatch):
     from app.config import get_settings
 
     _refuse_unsafe_settings(get_settings())
+    # Always this run's own database, whatever DATABASE_URL the cached settings
+    # hold (another module may have imported the app first); the rows are wiped.
+    create_database = main_mod.create_database
+    monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
     fake = FakeRedis()
     monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
     rate_limit._buckets.clear()
