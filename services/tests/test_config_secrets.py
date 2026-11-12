@@ -181,6 +181,15 @@ def test_public_postgres_password_is_refused(env, monkeypatch, url):
     assert "DATABASE_URL uses a publicly known password" in startup_error()
 
 
+def test_unparsable_postgres_url_does_not_leak_the_password(env, monkeypatch):
+    # A full-width solidus normalizes to '/', so urlsplit raises ValueError with the netloc in it.
+    password = fresh()
+    monkeypatch.setenv("DATABASE_URL", f"postgres://auth:{password}@db／host/authdb")
+    message = startup_error()
+    assert "DATABASE_URL is not a valid PostgreSQL URL." in message
+    assert password not in message
+
+
 def test_ambiguous_postgres_url_is_refused(env, monkeypatch):
     # urllib splits at the last '@', asyncpg at the first: refuse instead of guessing.
     monkeypatch.setenv("DATABASE_URL", "postgres://auth:authpass@%2Frun%2Fpostgresql@primary/authdb")

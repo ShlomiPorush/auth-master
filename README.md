@@ -58,7 +58,16 @@ The service refuses to start while a required secret is missing, empty, or has a
 ### Secrets
 
 - Generate every secret with `tools/generate-env.sh` or `tools/generate-env.ps1`, or with `openssl rand -hex 32`. The service rejects every value that was ever published in this repository, in any of these settings.
-- **External PostgreSQL or Redis:** take the password from your secret store and put it in `.env` (`DATABASE_URL` or `PGPASSWORD`), or let your orchestrator inject it. For an external Redis, set `REDIS_URL` in a compose override file and remove the bundled `redis` service and the `depends_on` entry there, because the value in `docker-compose.yml` wins over `.env`.
+- **External PostgreSQL or Redis:** take the password from your secret store and put it in `.env` (`DATABASE_URL`, `PGPASSWORD`, or `EXTERNAL_REDIS_URL` below), or let your orchestrator inject it. For an external Redis, keep the generated `REDIS_PASSWORD` in `.env` (Compose checks `docker-compose.yml` before it applies an override, so it is still required) and add a `docker-compose.override.yml` next to `docker-compose.yml` (Docker Compose 2.24 or later):
+
+  ```yaml
+  services:
+    redis: !reset null
+    auth-service:
+      environment:
+        REDIS_URL: ${EXTERNAL_REDIS_URL:?EXTERNAL_REDIS_URL is not set}
+      depends_on: !reset {}
+  ```
 - The service does not read PostgreSQL password files (`.pgpass`, `PGPASSFILE` or a `passfile` URL parameter), so a published password stored in one is not detected.
 
 ### Changing secrets

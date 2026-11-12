@@ -148,6 +148,19 @@ def test_refuses_inside_a_git_tree_that_does_not_ignore_env(tmp_path):
 
 
 @needs_git
+def test_refuses_when_the_temporary_file_would_not_be_ignored(tmp_path):
+    git_init(tmp_path, ignore=False)
+    # .env and other .env.* names are ignored, but the six-character names mktemp
+    # produces are excluded again.
+    (tmp_path / ".gitignore").write_text(".env\n.env.*\n!.env.??????\n")
+    result = run(tmp_path)
+    assert result.returncode != 0
+    assert "Git does not ignore" in result.stderr
+    assert not (tmp_path / ".env").exists()
+    assert leftovers(tmp_path) == []
+
+
+@needs_git
 def test_works_inside_a_git_tree_with_this_repositorys_ignore_rules(tmp_path):
     git_init(tmp_path, ignore=True)
     assert run(tmp_path).returncode == 0

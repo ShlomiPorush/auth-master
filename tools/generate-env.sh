@@ -25,13 +25,14 @@ if [ -e "$out" ] || [ -L "$out" ]; then
 fi
 
 # Inside a git work tree, both the result and the temporary file must be ignored,
-# so the secrets cannot be committed by accident.
+# so the secrets cannot be committed by accident. The temporary file is checked
+# by its real name right after it is created, before anything is written to it.
+in_git=false
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    for name in "$out" ".env.tmpcheck"; do
-        if ! git check-ignore -q -- "$name"; then
-            fail "Git does not ignore '$name' in this directory. Add '.env' and '.env.*' to .gitignore first. Nothing was changed."
-        fi
-    done
+    in_git=true
+    if ! git check-ignore -q -- "$out"; then
+        fail "Git does not ignore '$out' in this directory. Add '.env' and '.env.*' to .gitignore first. Nothing was changed."
+    fi
 fi
 
 [ -r /dev/urandom ] || fail "/dev/urandom is not readable. Nothing was changed."
@@ -49,6 +50,10 @@ umask 077
 tmp=$(mktemp ./.env.XXXXXX) || fail "Could not create a temporary file here. Nothing was changed."
 trap 'rm -f "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
+
+if [ "$in_git" = true ] && ! git check-ignore -q -- "$tmp"; then
+    fail "Git does not ignore '$(basename "$tmp")' in this directory. Add '.env.*' to .gitignore first. Nothing was changed."
+fi
 
 {
     printf '# Created by tools/generate-env.sh. Keep this file private; never commit it.\n'

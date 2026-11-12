@@ -50,15 +50,20 @@ def _decoding_stages(value: str) -> list[str]:
 
 
 def _postgres_url_problem(url: str) -> str | None:
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        password = parts.password
+    except ValueError:
+        # The exception text contains the URL, password included: never pass it on.
+        return "DATABASE_URL is not a valid PostgreSQL URL."
     if parts.netloc.count("@") > 1:
         return (
             "DATABASE_URL contains more than one '@' before the host, so the password "
             "cannot be read unambiguously. Write '@' inside the user name or password as %40."
         )
     candidates = parse_qs(parts.query, keep_blank_values=True).get("password", [])
-    if parts.password is not None:
-        candidates.append(parts.password)
+    if password is not None:
+        candidates.append(password)
     for candidate in candidates:
         if any(_is_public(stage) for stage in _decoding_stages(candidate)):
             return (

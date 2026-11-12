@@ -25,9 +25,10 @@ services:
       # To use PostgreSQL instead, set it in .env, for example:
       # DATABASE_URL=postgres://auth:<password>@postgres:5432/authdb
       #
-      # The bundled Redis. For an external Redis, use an override file that sets
-      # REDIS_URL and removes the redis service and the depends_on entry below,
-      # because a value set here wins over .env.
+      # The bundled Redis. For an external Redis, see "External PostgreSQL or
+      # Redis" in README.md: an override file sets REDIS_URL and removes the redis
+      # service, because a value set here wins over .env. REDIS_PASSWORD must stay
+      # set in .env even then, because this file is checked before the override.
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}@redis:6379
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
