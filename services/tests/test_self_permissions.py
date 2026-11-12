@@ -22,7 +22,9 @@ from pathlib import Path
 
 import pytest
 
-_TMP = tempfile.mkdtemp()
+# Removed when the test process exits.
+_TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+_TMP = _TMP_DIR.name
 _PLACEHOLDERS = {
     "",
     "change-me-in-production",
@@ -262,6 +264,24 @@ def test_validate_budget_limits_lookup(client, monkeypatch):
 
 def test_lookup_requires_token_field(client):
     assert client.post("/validate/grants", json={}).status_code == 422
+
+
+def test_lookup_rejects_invalid_unicode(client):
+    r = client.post(
+        "/validate/grants",
+        content=b'{"token": "\\ud800"}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422
+    assert r.json() == {"detail": "Token must be valid UTF-8 text"}
+
+
+def test_expiry_matches_token_list_format(client, monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Jerusalem")
+    tok = secrets.token_urlsafe(24)
+    _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}], expires_at=_future())
+    listed = client.get("/tokens", headers={"Authorization": f"Bearer {MASTER_KEY}"}).json()
+    assert _grants(client, tok).json()["expiresAt"] == listed[0]["expiresAt"]
 
 
 # ── /validate regression ───────────────────────────────────────

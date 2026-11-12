@@ -119,8 +119,13 @@ async def token_grants(request: Request, body: GrantsBody):
     if not allow_validate(ip):
         raise HTTPException(status_code=429, detail="Too many requests")
 
+    try:
+        token_hash = sha256_hex(body.token)
+    except UnicodeEncodeError as e:  # e.g. a lone surrogate from a JSON \uD800 escape
+        raise HTTPException(status_code=422, detail="Token must be valid UTF-8 text") from e
+
     db = request.app.state.db
-    rec = await db.fetchrow(_TOKEN_SELECT, sha256_hex(body.token))
+    rec = await db.fetchrow(_TOKEN_SELECT, token_hash)
     active = rec is not None and _is_active(rec)
     await log_access(
         db,

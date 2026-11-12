@@ -125,6 +125,8 @@ Content-Type: application/json
 }
 ```
 
+A token that is not valid UTF-8 text gets `422` with `{"detail": "Token must be valid UTF-8 text"}`.
+
 The answer is read from the database on every call, so a disabled, deleted or rotated token stops reporting grants immediately. Each call is recorded in the access log with area `*` and level `grants`. It does not update the token's last-used time.
 
 > Shares the per-IP rate limit with `/validate`: lookups and validations draw from the same budget. When the limit is exceeded, the response is `429` with `{"detail": "Too many requests"}`. The limit is kept per server process.
