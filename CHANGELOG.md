@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The service no longer has default values for its secrets, and it refuses to
+  start when one is missing, empty, or set to a value that was ever published in
+  this repository. Earlier versions fell back to these published values when a
+  setting was not overridden, so the master API key, the key that encrypts stored
+  MFA secrets and token values, and the Redis password were publicly known. Every
+  value below is public. Replace it wherever it is still in use:
+  - `ADMIN_API_KEY`: `change-me-in-production`, `generate-a-long-random-string`
+  - `SESSION_SECRET`: `min-32-chars-secret-change-me-for-production-use`,
+    `min-32-chars-secret-change-me!!`, `at-least-32-characters-long-secret-key`
+  - `APP_ENCRYPTION_KEY`: `0123456789abcdef0123456789abcdef`
+  - Redis password: `changeme`
+  - PostgreSQL password in the example `DATABASE_URL`: `authpass`
+
+  The same check rejects the placeholders `<password>`, `<api-key>` and
+  `your-api-key` from the documentation. Passwords inside `REDIS_URL` and
+  `DATABASE_URL`, and the `REDIS_PASSWORD` and `PGPASSWORD` variables, are
+  checked too. Error messages name the setting and the fix and never show its
+  value.
+
+### Changed
+
+- **Breaking:** `ADMIN_API_KEY`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and
+  `REDIS_URL` are required, and `REDIS_URL` must contain a password.
+  `docker-compose.yml` requires `REDIS_PASSWORD`, `ADMIN_API_KEY`,
+  `SESSION_SECRET` and `APP_ENCRYPTION_KEY` and stops with a message when one is
+  missing. A PostgreSQL `DATABASE_URL` with more than one `@` before the host is
+  refused; write `@` in the user name or password as `%40`.
+- **Breaking for installations that ran on the published `SESSION_SECRET` or
+  `APP_ENCRYPTION_KEY`:** these two values derive the key that encrypts stored MFA
+  secrets and revealable token and API key values. After setting new ones, admins
+  cannot pass MFA and existing values cannot be revealed. Token validation and
+  API key authentication keep working. No conversion tool is provided.
+- New `tools/generate-env.sh` (Linux, macOS) and `tools/generate-env.ps1`
+  (Windows) create `.env` once with new random secrets, readable by its owner
+  only. They never replace an existing file. `.env.example` no longer contains
+  values.
+
 ### Added
 
 - Token holders can read the grants of their token with `POST /validate/grants`.
