@@ -69,7 +69,14 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     if level not in ("read", "readwrite", "write", "delete", "all"):
         return JSONResponse(content={"result": False}, media_type="application/json")
 
-    h = sha256_hex(token)
+    # A lone surrogate (e.g. from a JSON "\ud800" escape) is a valid Python str but
+    # not UTF-8 text: it matches no stored token and cannot be written to the access
+    # log.  Answer like any other rejected input, before cache, database or logging.
+    try:
+        area.encode("utf-8")
+        h = sha256_hex(token)
+    except UnicodeEncodeError:
+        return JSONResponse(content={"result": False}, media_type="application/json")
     db = request.app.state.db
     r: Redis = request.app.state.redis
 
