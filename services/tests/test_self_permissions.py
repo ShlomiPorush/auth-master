@@ -44,6 +44,8 @@ for _name, _value in _SECRETS.items():
     if _value in _PLACEHOLDERS:
         raise RuntimeError(f"{_name} is empty or a placeholder")
 os.environ.update(_SECRETS)
+# The app requires a Redis password; the tests replace Redis with FakeRedis below.
+os.environ["REDIS_URL"] = f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379"
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP}/test.db"
 os.environ["ALLOWED_AREAS"] = "orders,billing"
 os.environ["RATE_LIMIT_MAX_REQ"] = "100000"

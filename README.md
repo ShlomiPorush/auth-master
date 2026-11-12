@@ -21,20 +21,29 @@ See [docker-compose.yml](docker-compose.yml)
 
 ### First Run
 
-1. Start the containers: `docker compose up -d`
-2. Open `http://localhost:8080` — you'll be redirected to the setup wizard
-3. Create your admin account and set up MFA (TOTP)
-4. Log in and start managing tokens and zones
+1. Create `.env` with new random secrets, in the directory that holds `docker-compose.yml`:
+   - Linux or macOS: `sh tools/generate-env.sh`
+   - Windows: `pwsh tools/generate-env.ps1`
+
+   The script writes `ADMIN_API_KEY`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and `REDIS_PASSWORD`, makes the file readable by you only, and never replaces an existing `.env`. Keep the file private and out of version control. Optional settings are listed in [.env.example](.env.example).
+2. Start the containers: `docker compose up -d`
+3. Open `http://localhost:8080` — you'll be redirected to the setup wizard
+4. Create your admin account and set up MFA (TOTP)
+5. Log in and start managing tokens and zones
+
+The service refuses to start while a required secret is missing, empty, or has a value that was ever published in this repository, and its log names each setting and how to fix it.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///data/auth.db` | Database connection string. Use `postgres://…` for PostgreSQL |
-| `REDIS_URL` | `redis://:changeme@127.0.0.1:6379` | Redis connection string (required for caching + sessions) |
-| `ADMIN_API_KEY` | `change-me-in-production` | Master API key with full access to all scopes |
-| `SESSION_SECRET` | _(dev default)_ | Secret for signing session cookies (min 32 chars) |
-| `APP_ENCRYPTION_KEY` | _(dev default)_ | Key for encrypting stored tokens (32 hex chars) |
+| `DATABASE_URL` | `sqlite:///data/auth.db` | Database connection string. Use `postgres://…` for PostgreSQL. A password in it must not be a published value, and a URL with more than one `@` before the host is refused (write `@` as `%40`) |
+| `REDIS_URL` | _(required)_ | Redis connection string with a password (required for caching + sessions). The bundled compose file builds it from `REDIS_PASSWORD` |
+| `REDIS_PASSWORD` | _(required with the bundled Redis)_ | Password of the bundled Redis server |
+| `ADMIN_API_KEY` | _(required)_ | Master API key with full access to all scopes |
+| `SESSION_SECRET` | _(required)_ | Together with `APP_ENCRYPTION_KEY`, derives the key that encrypts stored MFA secrets and revealable token and API key values |
+| `APP_ENCRYPTION_KEY` | _(required)_ | See `SESSION_SECRET` |
+| `PGPASSWORD` | _(empty)_ | Optional PostgreSQL password when `DATABASE_URL` has none; checked like the others |
 | `ALLOWED_AREAS` | `orders,billing,webhooks` | Fallback zone list when the zones table is empty |
 | `BOOTSTRAP_TOKEN` | _(empty)_ | Optional token for bootstrapping the first admin account via API |
 | `TOTP_ISSUER` | `AuthService` | Issuer name shown in authenticator apps |
@@ -45,6 +54,29 @@ See [docker-compose.yml](docker-compose.yml)
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
 | `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute) |
+
+### Secrets
+
+- Generate every secret with `tools/generate-env.sh` or `tools/generate-env.ps1`, or with `openssl rand -hex 32`. The service rejects every value that was ever published in this repository, in any of these settings.
+- **External PostgreSQL or Redis:** take the password from your secret store and put it in `.env` (`DATABASE_URL`, `PGPASSWORD`, or `EXTERNAL_REDIS_URL` below), or let your orchestrator inject it. For an external Redis, keep the generated `REDIS_PASSWORD` in `.env` (Compose checks `docker-compose.yml` before it applies an override, so it is still required) and add a `docker-compose.override.yml` next to `docker-compose.yml` (Docker Compose 2.24 or later):
+
+  ```yaml
+  services:
+    redis: !reset null
+    auth-service:
+      environment:
+        REDIS_URL: ${EXTERNAL_REDIS_URL:?EXTERNAL_REDIS_URL is not set}
+      depends_on: !reset {}
+  ```
+- The service does not read PostgreSQL password files (`.pgpass`, `PGPASSFILE` or a `passfile` URL parameter), so a published password stored in one is not detected.
+
+### Changing secrets
+
+| Secret | What changing it affects |
+|---|---|
+| `ADMIN_API_KEY` | Update every integration that uses the master key. Nothing stored is affected. |
+| `REDIS_PASSWORD` / Redis password | Restart Redis and the service together. Admins may have to sign in again. |
+| `SESSION_SECRET`, `APP_ENCRYPTION_KEY` | Stored MFA secrets and revealable token and API key values become unreadable: admins can no longer pass MFA, and existing tokens and API keys can no longer be revealed. Token validation and API key authentication keep working. There is no conversion tool, so change these only on a new installation. |
 
 ## Architecture
 

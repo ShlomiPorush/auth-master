@@ -1,4 +1,7 @@
 .env
+# Secret files and the generator's temporary files; only the example is tracked.
+.env.*
+!.env.example
 *.log
 .DS_Store
 __pycache__/

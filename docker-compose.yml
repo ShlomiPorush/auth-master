@@ -1,12 +1,16 @@
+# Every secret below must be set in .env. Create it once with
+#   sh tools/generate-env.sh      (Linux, macOS)
+#   pwsh tools/generate-env.ps1   (Windows)
+# docker compose refuses to start while a required value is missing.
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -18,12 +22,17 @@ services:
       - "8080:8080"
     environment:
       # DATABASE_URL defaults to sqlite:///data/auth.db (no Postgres needed)
-      # To use PostgreSQL instead, uncomment and set:
-      # DATABASE_URL: postgres://auth:authpass@postgres:5432/authdb
-      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-in-production}
-      SESSION_SECRET: ${SESSION_SECRET:-min-32-chars-secret-change-me!!}
-      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      # To use PostgreSQL instead, set it in .env, for example:
+      # DATABASE_URL=postgres://auth:<password>@postgres:5432/authdb
+      #
+      # The bundled Redis. For an external Redis, see "External PostgreSQL or
+      # Redis" in README.md: an override file sets REDIS_URL and removes the redis
+      # service, because a value set here wins over .env. REDIS_PASSWORD must stay
+      # set in .env even then, because this file is checked before the override.
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}@redis:6379
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
       ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       TZ: ${TZ:-UTC}
