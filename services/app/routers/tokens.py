@@ -60,6 +60,12 @@ async def ping():
     return {"ok": True}
 
 
+@router.get("/me")
+async def my_scopes(request: Request):
+    """Return the scopes of the calling API key.  Requires no specific scope."""
+    return {"scopes": sorted(set(request.state.api_scopes))}
+
+
 @router.get("/zones", dependencies=[require_scope("zones:read")])
 async def list_zones(request: Request):
     """Lightweight zone list for API consumers (e.g. n8n node)."""

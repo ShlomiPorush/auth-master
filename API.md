@@ -88,6 +88,49 @@ GET /validate?token=tok_abc123...&area=orders&level=read
 
 ---
 
+### Token Grants
+
+Returns the grants of a token to whoever holds it. This endpoint is **public**: the token itself is the credential, and no API key is required.
+
+```
+POST /validate/grants
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "token": "tok_abc123..."
+}
+```
+
+**Response** for an active token:
+```json
+{
+  "active": true,
+  "grants": [
+    { "area": "orders", "level": "read" },
+    { "area": "webhooks", "level": "read,write,delete" }
+  ],
+  "expiresAt": "2025-12-31T23:59:59+00:00"
+}
+```
+
+`level` lists the individual permission flags (`read`, `write`, `delete`). `expiresAt` is `null` when the token never expires.
+
+**Response** for an unknown, disabled or expired token (the same in every case):
+```json
+{
+  "active": false
+}
+```
+
+The answer is read from the database on every call, so a disabled, deleted or rotated token stops reporting grants immediately. Each call is recorded in the access log with area `*` and level `grants`. It does not update the token's last-used time.
+
+> Shares the per-IP rate limit with `/validate`: lookups and validations draw from the same budget. When the limit is exceeded, the response is `429` with `{"detail": "Too many requests"}`. The limit is kept per server process.
+
+---
+
 ## Token Management
 
 All endpoints under `/tokens` require an API key with the appropriate scope.
@@ -106,6 +149,22 @@ Validates the API key without requiring any specific scope. Used for connectivit
 **Response:**
 ```json
 { "ok": true }
+```
+
+---
+
+### My Scopes
+
+```
+GET /tokens/me
+Authorization: Bearer <api-key>
+```
+
+Returns the scopes of the API key that makes the call. No specific scope is required. The master `ADMIN_API_KEY` returns every scope.
+
+**Response:**
+```json
+{ "scopes": ["tokens:read", "validate", "zones:read"] }
 ```
 
 ---
