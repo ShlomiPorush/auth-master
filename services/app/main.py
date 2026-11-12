@@ -3,9 +3,12 @@ import json
 from contextlib import asynccontextmanager
 from html import escape as html_escape
 from pathlib import Path
+from typing import Any
 
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
@@ -97,6 +100,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
+
+
+class _AsciiJSONResponse(JSONResponse):
+    """JSONResponse that escapes non-ASCII characters.
+
+    Validation errors echo the rejected input, which can hold a lone surrogate
+    (e.g. a JSON "\\ud800" escape).  Such text has no UTF-8 encoding, so the
+    default rendering fails and the 422 becomes a 500.  ASCII output always
+    encodes and parses to the same JSON.
+    """
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=True,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Same status and body as FastAPI's default handler; only the rendering differs.
+    return _AsciiJSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.get("/docs", include_in_schema=False)

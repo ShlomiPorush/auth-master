@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text, with the token's UUID, and PostgreSQL rejects a comparison between those
   two types, so every request for the page failed. The token ID is now compared as
   text. SQLite deployments were not affected.
+- `/validate` no longer fails with `500` when the token or the zone is text that
+  cannot be encoded as UTF-8, such as a lone `\ud800` escape in a JSON body. It
+  now answers `{"result": false}`, the same answer as for any other rejected
+  input, and does not write an access log entry for the request.
+- A request that fails input validation now answers `422` when the rejected
+  input contains text that cannot be encoded as UTF-8. Building the error
+  response failed for such text, so the request answered `500`. Non-ASCII characters
+  in `422` response bodies are now sent as JSON `\uXXXX` escapes; the parsed
+  content is unchanged.
 
 ## [1.2.0] - 2026-09-22
 
