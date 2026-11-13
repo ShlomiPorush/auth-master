@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -158,6 +159,13 @@ def allow_validate(ip: str) -> bool:
     # are reported within about one window once any traffic arrives.
     _maybe_log_summary(now)
     return allowed
+
+
+def retry_after_seconds(ip: str) -> int:
+    """Whole seconds until `ip`'s current window ends, at least 1 (for Retry-After)."""
+    n, t0 = _buckets.get(ip, (0, 0.0))
+    remaining_ms = t0 + _limits.window_ms - time.time() * 1000
+    return max(1, math.ceil(remaining_ms / 1000))
 
 
 def _record_rejection(ip: str, now: float) -> None:

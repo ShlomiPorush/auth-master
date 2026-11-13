@@ -1999,7 +1999,7 @@ function dashLimitHtml() {
         return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
     }).join(", ");
     lines.push(
-        "They were answered as denied (<code>/validate</code> answers <code>{\"result\": false}</code>, <code>/validate/grants</code> answers 429) " +
+        "They were answered with <code>429 Too many requests</code> and a <code>Retry-After</code> header " +
             "and are not in the list below. Last one " + uiTime(d.lastRejectedAt) + ".",
         (d.untrackedRejected ? "Most rejected among the first " + esc(uiNum(d.maxTrackedAddresses)) + " addresses: " : "Most rejected: ") + tops +
             (d.untrackedRejected ? "; " + esc(uiCountLabel(d.untrackedRejected, "more rejection", "more rejections")) + " from other addresses, so this ranking is partial." : "."),
