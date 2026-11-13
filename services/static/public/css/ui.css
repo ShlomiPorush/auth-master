@@ -646,7 +646,8 @@ body.ui-app { overflow: hidden; }
     .ui-stack .ui-td-end { flex: 0 0 auto; margin-inline-start: auto; }
     .ui-stack .ui-td:empty { display: none; }
     .ui-stack .ui-unit { display: inline; color: var(--ui-muted); }
-    .ui-perm { grid-template-columns: minmax(0, 1fr) repeat(2, auto); }
+    /* The zone name on its own line, the four flags in one row under it */
+    .ui-perm { grid-template-columns: repeat(4, auto); justify-content: start; row-gap: var(--ui-sp-3); }
     .ui-perm > b { grid-column: 1 / -1; }
 }
 
