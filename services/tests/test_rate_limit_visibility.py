@@ -30,7 +30,8 @@ os.environ.setdefault("ADMIN_API_KEY", secrets.token_urlsafe(32))
 os.environ.setdefault("SESSION_SECRET", secrets.token_urlsafe(48))
 os.environ.setdefault("APP_ENCRYPTION_KEY", secrets.token_hex(16))
 os.environ.setdefault("REDIS_URL", f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379/0")
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TMP_DIR.name}/rl.db")
+# Never a database from the environment: the HTTP tests write to the one the app opens.
+os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DIR.name}/rl.db"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -50,13 +51,50 @@ def _app():
     return main_mod, rate_limit, COOKIE_NAME, PREFIX
 
 
+class _Clock:
+    """Stands in for the time module in app.rate_limit: wall and monotonic, in ms."""
+
+    def __init__(self) -> None:
+        self.wall = T0
+        self.mono = 5_000.0
+
+    def time(self) -> float:
+        return self.wall / 1000
+
+    def monotonic(self) -> float:
+        return self.mono / 1000
+
+
+class _Limiter:
+    """The rate_limit module, with allow_validate called at a given time.
+
+    `t` sets both clocks to T0 + offset; `wall_shift` moves only the wall clock,
+    as an NTP correction or a manual clock change would."""
+
+    def __init__(self, module, clock: _Clock) -> None:
+        self._m = module
+        self._clock = clock
+        self.wall_shift = 0.0
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+    def allow_validate(self, ip: str, t: float) -> bool:
+        self._clock.mono = 5_000.0 + (t - T0)
+        self._clock.wall = t + self.wall_shift
+        return self._m.allow_validate(ip)
+
+
 @pytest.fixture()
 def limiter(monkeypatch):
     _, rate_limit, _, _ = _app()
+    clock = _Clock()
+    monkeypatch.setattr(rate_limit, "time", clock)
     monkeypatch.setattr(rate_limit, "MAX_REQ", 500)
     monkeypatch.setattr(rate_limit, "WINDOW_MS", 60_000)
-    rate_limit.reset_state(T0)
-    yield rate_limit
+    rate_limit.reset_state()
+    yield _Limiter(rate_limit, clock)
+    monkeypatch.undo()
     rate_limit.reset_state()
 
 
@@ -103,11 +141,11 @@ def test_burst_shaped_like_production_is_reported_in_full(limiter, caplog):
 
 def test_at_most_one_line_per_window(limiter, caplog, monkeypatch):
     caplog.set_level(logging.WARNING, logger=LOGGER)
-    monkeypatch.setattr(limiter, "MAX_REQ", 1)
+    monkeypatch.setattr(limiter._m, "MAX_REQ", 1)
     line_times = []
     for i in range(6_000):  # ten minutes, ten requests a second, one admitted per window
         limiter.allow_validate("10.0.0.1", T0 + i * 100)
-        t = limiter._rejections.last_summary_ms
+        t = limiter._rejections.last_summary_mono_ms
         if t and (not line_times or line_times[-1] != t):
             line_times.append(t)
     assert len(_lines(caplog)) == len(line_times)
@@ -116,6 +154,20 @@ def test_at_most_one_line_per_window(limiter, caplog, monkeypatch):
     total = sum(int(r.getMessage().split("rejected ")[1].split(" ")[0]) for r in _lines(caplog))
     pending = limiter._rejections.pending.total
     assert total + pending == limiter.rejection_stats()["rejectedTotal"]
+
+
+def test_wall_clock_change_does_not_hold_back_summaries(limiter, caplog):
+    """The wall clock goes back an hour after a summary: the next one still comes
+    one window later, timed by the monotonic clock."""
+    caplog.set_level(logging.WARNING, logger=LOGGER)
+    for i in range(500):
+        limiter.allow_validate("10.0.0.1", T0 + i)
+    assert not limiter.allow_validate("10.0.0.1", T0 + 1_000)
+    assert len(_lines(caplog)) == 1
+    limiter.wall_shift = -3_600_000.0
+    for s in range(2, 70):  # rejected: the bucket's window started in the wall clock's future
+        limiter.allow_validate("10.0.0.1", T0 + s * 1_000)
+    assert len(_lines(caplog)) == 2
 
 
 def test_no_line_without_rejections(limiter, caplog):
@@ -132,7 +184,7 @@ def test_no_line_without_rejections(limiter, caplog):
 
 def test_many_addresses_stay_bounded_and_one_line_per_window(limiter, caplog, monkeypatch):
     caplog.set_level(logging.WARNING, logger=LOGGER)
-    monkeypatch.setattr(limiter, "MAX_REQ", 1)
+    monkeypatch.setattr(limiter._m, "MAX_REQ", 1)
     n = limiter.MAX_TRACKED_KEYS + 500
     for k in range(n):
         ip = f"2001:db8::{k:x}"
@@ -183,16 +235,19 @@ def client(monkeypatch):
     monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
     monkeypatch.setattr(rate_limit, "MAX_REQ", 2)
     monkeypatch.setattr(rate_limit, "WINDOW_MS", 60_000)
+    # The settings may come from another test module that imported the app first.
+    # Run only against a SQLite file in a temporary directory, never another database.
+    from app.config import get_settings
+
+    url = get_settings().database_url
+    db_file = Path(url.split("///", 1)[-1]).resolve() if url.startswith("sqlite:///") else None
+    if db_file is None or Path(tempfile.gettempdir()).resolve() not in db_file.parents:
+        pytest.fail("The app's database is not a temporary test file; refusing to run the HTTP tests.")
     rate_limit.reset_state()
     with TestClient(main_mod.app) as c:
         c.fake_redis = fake
         yield c
-        c.portal.call(_wipe, main_mod.app.state.db)
     rate_limit.reset_state()
-
-
-async def _wipe(db):
-    await db.execute("DELETE FROM access_logs")
 
 
 def _session(client, kind: str) -> None:

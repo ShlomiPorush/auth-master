@@ -1954,7 +1954,7 @@ DASH_PAGE_IMPL.access = function () { dashLogShow(dashLogs.access); dashLimitLoa
 
 registerPageRefresh("activity", 30000, function (isCurrent) { return dashLogRefresh(dashLogs.activity, isCurrent); });
 registerPageRefresh("access", 30000, function (isCurrent) {
-    return Promise.all([dashLogRefresh(dashLogs.access, isCurrent), dashLimitLoad()]);
+    return Promise.all([dashLogRefresh(dashLogs.access, isCurrent), dashLimitLoad(isCurrent)]);
 });
 
 // ===========================================================================
@@ -1962,48 +1962,63 @@ registerPageRefresh("access", 30000, function (isCurrent) {
 // log, so the card says how many there were and from which addresses
 // ===========================================================================
 
-var dashLimit = { data: null, drawn: "" };
+var dashLimit = { data: null, at: 0, failed: "", seq: 0, drawn: "" };
 
-function dashLimitLoad() {
+function dashLimitLoad(isCurrent) {
+    var seq = ++dashLimit.seq;
     return api("GET", "/admin/api/rate-limit").then(function (res) {
+        // A newer load or a newer refresh cycle owns the card
+        if (seq !== dashLimit.seq || (isCurrent && !isCurrent())) return;
         var d = res.data;
-        if (res.ok && d && typeof d.rejectedTotal === "number" && typeof d.limit === "number") dashLimit.data = d;
+        if (res.ok && d && typeof d.rejectedTotal === "number" && typeof d.limit === "number") {
+            dashLimit.data = d;
+            dashLimit.at = Date.now();
+            dashLimit.failed = "";
+        } else {
+            dashLimit.failed = apiError(res, "The server did not answer.");
+        }
         dashLimitDraw();
     });
 }
 
-function dashLimitHtml(d) {
+function dashLimitHtml() {
+    var d = dashLimit.data;
+    var stale = dashLimit.failed ? "Could not refresh these counts: " + esc(dashLimit.failed) + " They are checked again every 30 seconds." : "";
+    if (!d) return dashLimitAlert(" is-fail", "Could not load the rate limit status", [stale]);
+    if (stale) stale += " The counts below are from " + uiTime(new Date(dashLimit.at).toISOString()) + ".";
     var seconds = d.windowMs / 1000;
     var rule = "Limit: " + esc(uiCountLabel(d.limit, "request", "requests")) + " per " +
         esc(seconds === 60 ? "minute" : uiCountLabel(seconds, "second", "seconds")) + " from one address.";
     var since = "Counted by this server process since " + uiTime(d.since) + "; a restart resets the count.";
-    var title, lines, tone;
+    var lines = stale ? [stale] : [];
     if (!d.rejectedTotal) {
-        tone = "";
-        title = "No requests were rejected by the rate limit";
-        lines = [rule, since];
-    } else {
-        tone = " is-warn";
-        title = uiCountLabel(d.rejectedTotal, "request was", "requests were") + " rejected by the rate limit";
-        var tops = (d.topAddresses || []).map(function (a) {
-            return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
-        }).join(", ");
-        lines = [
-            "They answered <code>{\"result\": false}</code> and are not in the list below. Last one " + uiTime(d.lastRejectedAt) + ".",
-            (d.untrackedRejected ? "Most rejected among the first " + esc(uiNum(d.maxTrackedAddresses)) + " addresses: " : "Most rejected: ") + tops +
-                (d.untrackedRejected ? "; " + esc(uiCountLabel(d.untrackedRejected, "more rejection", "more rejections")) + " from other addresses, so this ranking is partial." : "."),
-            rule,
-            since,
-        ];
+        return dashLimitAlert(stale ? " is-fail" : "", "No requests were rejected by the rate limit", lines.concat([rule, since]));
     }
+    var tops = (d.topAddresses || []).map(function (a) {
+        return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
+    }).join(", ");
+    lines.push(
+        "They were answered as denied (<code>/validate</code> answers <code>{\"result\": false}</code>, <code>/validate/grants</code> answers 429) " +
+            "and are not in the list below. Last one " + uiTime(d.lastRejectedAt) + ".",
+        (d.untrackedRejected ? "Most rejected among the first " + esc(uiNum(d.maxTrackedAddresses)) + " addresses: " : "Most rejected: ") + tops +
+            (d.untrackedRejected ? "; " + esc(uiCountLabel(d.untrackedRejected, "more rejection", "more rejections")) + " from other addresses, so this ranking is partial." : "."),
+        rule,
+        since
+    );
+    var title = uiCountLabel(d.rejectedTotal, "request was", "requests were") + " rejected by the rate limit";
+    return dashLimitAlert(stale ? " is-fail" : " is-warn", title, lines);
+}
+
+// `lines` are HTML: every value in them is escaped where it is put in
+function dashLimitAlert(tone, title, lines) {
     return '<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p>" +
         lines.map(function (l) { return "<small>" + l + "</small>"; }).join("") + "</div><span></span></div>";
 }
 
 function dashLimitDraw() {
     var box = document.getElementById("access-limit");
-    if (!box || !dashLimit.data) return;
-    var html = dashLimitHtml(dashLimit.data);
+    if (!box || (!dashLimit.data && !dashLimit.failed)) return;
+    var html = dashLimitHtml();
     box.classList.remove("hidden");
     if (html === dashLimit.drawn) return;
     dashLimit.drawn = html;

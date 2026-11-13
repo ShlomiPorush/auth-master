@@ -62,28 +62,29 @@ class _Tally:
 
 
 class _Rejections:
-    def __init__(self, now_ms: float) -> None:
-        self.started_ms = now_ms
+    def __init__(self) -> None:
+        self.started_ms = time.time() * 1000
         self.since_start = _Tally()
         self.last_ms: float | None = None
         self.pending = _Tally()
         self.pending_first_ms: float | None = None
-        # 0 so that the first rejection after a quiet period is reported at once.
-        self.last_summary_ms = 0.0
+        # Monotonic, so a clock change cannot hold back or hurry the next summary.
+        # None until the first summary, which is written at once.
+        self.last_summary_mono_ms: float | None = None
 
 
-_rejections = _Rejections(time.time() * 1000)
+_rejections = _Rejections()
 
 
-def reset_state(now_ms: float | None = None) -> None:
+def reset_state() -> None:
     """Forget all counts and rejections (tests)."""
     global _rejections
     _buckets.clear()
-    _rejections = _Rejections(time.time() * 1000 if now_ms is None else now_ms)
+    _rejections = _Rejections()
 
 
-def allow_validate(ip: str, now_ms: float | None = None) -> bool:
-    now = time.time() * 1000 if now_ms is None else now_ms
+def allow_validate(ip: str) -> bool:
+    now = time.time() * 1000
     n, t0 = _buckets[ip]
     if now - t0 > WINDOW_MS:
         _buckets[ip] = (1, now)
@@ -111,12 +112,15 @@ def _record_rejection(ip: str, now: float) -> None:
 
 def _maybe_log_summary(now: float) -> None:
     r = _rejections
-    if not r.pending.total or now - r.last_summary_ms < WINDOW_MS:
+    if not r.pending.total:
+        return
+    mono = time.monotonic() * 1000
+    if r.last_summary_mono_ms is not None and mono - r.last_summary_mono_ms < WINDOW_MS:
         return
     pending, first = r.pending, r.pending_first_ms
     r.pending = _Tally()
     r.pending_first_ms = None
-    r.last_summary_ms = now
+    r.last_summary_mono_ms = mono
     tops = ", ".join(f"{k}={c}" for k, c in pending.top(SUMMARY_TOP_KEYS))
     shown = min(len(pending.by_key), SUMMARY_TOP_KEYS)
     rest = pending.total - sum(c for _k, c in pending.top(SUMMARY_TOP_KEYS))
