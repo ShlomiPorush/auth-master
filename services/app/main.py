@@ -34,6 +34,9 @@ STATIC_JS = frozenset({
     "redoc.standalone.js",
     "qrcode.min.js",
 })
+# Served paths come from these lists, never from the request text itself.
+_CSS_PATHS = {name: f"css/{name}" for name in STATIC_CSS}
+_JS_PATHS = {name: f"js/{name}" for name in STATIC_JS}
 
 _settings = get_settings()
 # Normalise: strip trailing slash, ensure leading slash if non-empty
@@ -249,10 +252,11 @@ _REVALIDATE = {"Cache-Control": "no-cache"}
 
 @app.get("/css/{filename}")
 async def static_css(filename: str):
-    if filename not in STATIC_CSS:
+    rel = _CSS_PATHS.get(filename)
+    if rel is None:
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(
-        _safe_static_file(f"css/{filename}"),
+        _safe_static_file(rel),
         media_type="text/css",
         headers=_REVALIDATE,
     )
@@ -260,7 +264,8 @@ async def static_css(filename: str):
 
 @app.get("/js/{filename}")
 async def static_js(filename: str):
-    if filename not in STATIC_JS:
+    rel = _JS_PATHS.get(filename)
+    if rel is None:
         raise HTTPException(status_code=404, detail="Not found")
 
     # head.js is served dynamically with BASE_PATH injected
@@ -269,7 +274,7 @@ async def static_js(filename: str):
         script = f'window.__BASE_PATH__ = {json.dumps(ROOT_PATH)};\n{source}'
         return Response(content=script, media_type="application/javascript", headers=_REVALIDATE)
 
-    return FileResponse(_safe_static_file(f"js/{filename}"), headers=_REVALIDATE)
+    return FileResponse(_safe_static_file(rel), headers=_REVALIDATE)
 
 
 @app.get("/fonts/{filename}")
