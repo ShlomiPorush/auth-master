@@ -1950,10 +1950,65 @@ function dashLogShow(s) {
 }
 
 DASH_PAGE_IMPL.activity = function () { dashLogShow(dashLogs.activity); };
-DASH_PAGE_IMPL.access = function () { dashLogShow(dashLogs.access); };
+DASH_PAGE_IMPL.access = function () { dashLogShow(dashLogs.access); dashLimitLoad(); };
 
 registerPageRefresh("activity", 30000, function (isCurrent) { return dashLogRefresh(dashLogs.activity, isCurrent); });
-registerPageRefresh("access", 30000, function (isCurrent) { return dashLogRefresh(dashLogs.access, isCurrent); });
+registerPageRefresh("access", 30000, function (isCurrent) {
+    return Promise.all([dashLogRefresh(dashLogs.access, isCurrent), dashLimitLoad()]);
+});
+
+// ===========================================================================
+// Rate limit card on Access Logs: requests the limit rejected are not in the
+// log, so the card says how many there were and from which addresses
+// ===========================================================================
+
+var dashLimit = { data: null, drawn: "" };
+
+function dashLimitLoad() {
+    return api("GET", "/admin/api/rate-limit").then(function (res) {
+        var d = res.data;
+        if (res.ok && d && typeof d.rejectedTotal === "number" && typeof d.limit === "number") dashLimit.data = d;
+        dashLimitDraw();
+    });
+}
+
+function dashLimitHtml(d) {
+    var seconds = d.windowMs / 1000;
+    var rule = "Limit: " + esc(uiCountLabel(d.limit, "request", "requests")) + " per " +
+        esc(seconds === 60 ? "minute" : uiCountLabel(seconds, "second", "seconds")) + " from one address.";
+    var since = "Counted by this server process since " + uiTime(d.since) + "; a restart resets the count.";
+    var title, lines, tone;
+    if (!d.rejectedTotal) {
+        tone = "";
+        title = "No requests were rejected by the rate limit";
+        lines = [rule, since];
+    } else {
+        tone = " is-warn";
+        title = uiCountLabel(d.rejectedTotal, "request was", "requests were") + " rejected by the rate limit";
+        var tops = (d.topAddresses || []).map(function (a) {
+            return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
+        }).join(", ");
+        lines = [
+            "They answered <code>{\"result\": false}</code> and are not in the list below. Last one " + uiTime(d.lastRejectedAt) + ".",
+            (d.untrackedRejected ? "Most rejected among the first " + esc(uiNum(d.maxTrackedAddresses)) + " addresses: " : "Most rejected: ") + tops +
+                (d.untrackedRejected ? "; " + esc(uiCountLabel(d.untrackedRejected, "more rejection", "more rejections")) + " from other addresses, so this ranking is partial." : "."),
+            rule,
+            since,
+        ];
+    }
+    return '<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p>" +
+        lines.map(function (l) { return "<small>" + l + "</small>"; }).join("") + "</div><span></span></div>";
+}
+
+function dashLimitDraw() {
+    var box = document.getElementById("access-limit");
+    if (!box || !dashLimit.data) return;
+    var html = dashLimitHtml(dashLimit.data);
+    box.classList.remove("hidden");
+    if (html === dashLimit.drawn) return;
+    dashLimit.drawn = html;
+    box.innerHTML = html;
+}
 
 var DASH_SEARCH_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
 
