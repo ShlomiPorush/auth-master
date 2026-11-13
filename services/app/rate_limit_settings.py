@@ -16,6 +16,7 @@ every RELOAD_INTERVAL_SEC seconds; app.rate_limit.apply() only moves to newer ve
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import time
 from dataclasses import dataclass
@@ -76,31 +77,62 @@ def check_window_ms(value: Any) -> int:
     return value
 
 
+# An address plus a network size such as "/128".
+MAX_ENTRY_LEN = rate_limit.MAX_ADDRESS_LEN + 4
+_IPV4_MAPPED = ipaddress.ip_network("::ffff:0:0/96")
+
+
+def _shown(entry: str) -> str:
+    shown = entry if len(entry) <= MAX_ENTRY_LEN else entry[:MAX_ENTRY_LEN] + "..."
+    # Text that is not valid UTF-8 (a lone surrogate from a JSON escape) is shown escaped.
+    return shown.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def normalize_entry(entry: str) -> str:
+    """One exempt entry in its normal form: an address ("192.0.2.1") or a network
+    ("172.18.0.0/16").  A one-address network is stored as the address."""
+    bad = InvalidSettings(
+        "exempt",
+        f'"{_shown(entry)}" is not an IPv4 or IPv6 address or network. Write one per line, '
+        "such as 203.0.113.10 or 172.18.0.0/16, without an IPv6 zone (%eth0).",
+    )
+    if len(entry) > MAX_ENTRY_LEN or "%" in entry:
+        raise bad
+    if "/" not in entry:
+        key = rate_limit.address_key(entry)
+        if key is None:
+            raise bad
+        return key
+    try:
+        net = ipaddress.ip_network(entry)
+    except ValueError:
+        try:
+            loose = ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            raise bad from None
+        raise InvalidSettings(
+            "exempt", f'"{_shown(entry)}" has address bits beyond its network size. Write it as {loose.with_prefixlen}.'
+        ) from None
+    if net.num_addresses == 1:
+        return rate_limit.address_key(str(net.network_address)) or str(net.network_address)
+    if net.version == 6 and net.subnet_of(_IPV4_MAPPED):
+        raise InvalidSettings("exempt", f'"{_shown(entry)}" is an IPv4 network written as IPv6. Write it as an IPv4 network.')
+    return net.with_prefixlen
+
+
 def check_exempt(values: Any) -> tuple[str, ...]:
     if not isinstance(values, (list, tuple)):
         raise InvalidSettings("exempt", "Exempt addresses must be a list.")
-    keys: set[str] = set()
+    entries: set[str] = set()
     for text in values:
         if not isinstance(text, str):
             raise InvalidSettings("exempt", "Each exempt address must be text.")
         entry = text.strip()
-        if not entry:
-            continue
-        key = rate_limit.address_key(entry)
-        if key is None:
-            shown = entry if len(entry) <= rate_limit.MAX_ADDRESS_LEN else entry[: rate_limit.MAX_ADDRESS_LEN] + "..."
-            # Text that is not valid UTF-8 (a lone surrogate from a JSON escape) is shown escaped.
-            shown = shown.encode("utf-8", "backslashreplace").decode("utf-8")
-            raise InvalidSettings(
-                "exempt",
-                f'"{shown}" is not a single IPv4 or IPv6 address. Write one address per line, '
-                "without a network size (/24) or an IPv6 zone (%eth0).",
-            )
-        keys.add(key)
-    if len(keys) > MAX_EXEMPT:
-        raise InvalidSettings("exempt", f"At most {MAX_EXEMPT} exempt addresses are allowed.")
-    return tuple(sorted(keys))
-
+        if entry:
+            entries.add(normalize_entry(entry))
+    if len(entries) > MAX_EXEMPT:
+        raise InvalidSettings("exempt", f"At most {MAX_EXEMPT} exempt addresses and networks are allowed.")
+    return tuple(sorted(entries))
 
 def parse_value(text: str) -> tuple[int | None, int | None, tuple[str, ...]]:
     try:

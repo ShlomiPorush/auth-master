@@ -74,13 +74,27 @@ def test_exempt_addresses_are_normalized():
 
 
 @pytest.mark.parametrize("entry", [
-    "10.0.0.0/24", "0.0.0.0/0", "fe80::1%eth0", "localhost", "10.0.0", "1" * 46, "10.0.0.1, 10.0.0.2",
+    "10.0.0.5/24", "fe80::1%eth0", "fe80::/64%eth0", "localhost", "10.0.0", "10.0.0.0/33", "1" * 50, "10.0.0.1, 10.0.0.2",
 ])
-def test_exempt_refuses_anything_but_one_address(entry):
+def test_exempt_refuses_anything_but_an_address_or_network(entry):
     _, _, _, rls = _mods()
     with pytest.raises(rls.InvalidSettings) as e:
         rls.check_exempt([entry])
     assert e.value.field == "exempt"
+
+
+def test_exempt_networks_are_normalized():
+    _, _, _, rls = _mods()
+    got = rls.check_exempt([
+        "172.18.0.0/16", "10.0.0.7/32", "::ffff:10.0.0.9/128", "2001:DB8::/32", "0.0.0.0/0", "172.18.0.0/16",
+    ])
+    assert got == ("0.0.0.0/0", "10.0.0.7", "10.0.0.9", "172.18.0.0/16", "2001:db8::/32")
+
+
+def test_network_with_host_bits_says_how_to_write_it():
+    _, _, _, rls = _mods()
+    with pytest.raises(rls.InvalidSettings, match="Write it as 172.18.0.0/16"):
+        rls.check_exempt(["172.18.0.5/16"])
 
 
 def test_exempt_count_is_capped():
@@ -140,6 +154,16 @@ def test_apply_only_moves_forward():
     assert not rate_limit.apply(L(1, 99, 60_000))
     assert not rate_limit.apply(L(2, 99, 60_000))
     assert rate_limit.current().max_req == 10
+
+
+def test_address_inside_an_exempt_network_is_never_limited():
+    _, _, rate_limit, _ = _mods()
+    rate_limit.reset_state(rate_limit.Limits(1, 1, 60_000, frozenset({"172.18.0.0/16", "2001:db8::/32"})))
+    for key in ("172.18.3.4", "::ffff:172.18.0.50", "2001:db8::7"):
+        assert all(rate_limit.allow_validate(key) for _ in range(3)), key
+    assert rate_limit.allow_validate("172.19.0.1")
+    assert not rate_limit.allow_validate("172.19.0.1")
+    assert rate_limit.rejection_stats()["rejectedTotal"] == 1
 
 
 def test_exempt_address_is_never_limited_or_counted():
@@ -477,7 +501,7 @@ def test_invalid_input_is_refused(admin):
     for body, field in [
         ({"baseVersion": 0, "maxReq": 0}, "maxReq"),
         ({"baseVersion": 0, "windowSeconds": 3601}, "windowMs"),
-        ({"baseVersion": 0, "exempt": ["10.0.0.0/8"]}, "exempt"),
+        ({"baseVersion": 0, "exempt": ["10.0.0.5/8"]}, "exempt"),
         ({"baseVersion": 0, "maxReq": None}, "maxReq"),
     ]:
         res = admin.put(body)
@@ -520,6 +544,26 @@ def test_own_address_needs_confirmation(admin, frm):
     assert res.status_code == 200
     # Already exempt: changing something else does not ask again.
     assert admin.put({"baseVersion": 1, "maxReq": 9}, frm=frm).status_code == 200
+
+
+def test_own_address_inside_a_new_network_needs_confirmation_once(admin):
+    admin.login()
+    res = admin.put({"baseVersion": 0, "exempt": ["172.18.0.0/16"]}, frm="172.18.1.7")
+    assert res.status_code == 409 and res.json()["code"] == "own_address"
+    assert admin.put({"baseVersion": 0, "exempt": ["172.18.0.0/16"], "confirmOwnAddress": True}, frm="172.18.1.7").status_code == 200
+    # Narrowing to a smaller network that still holds the address does not exempt anything new.
+    assert admin.put({"baseVersion": 1, "exempt": ["172.18.1.0/24"]}, frm="172.18.1.7").status_code == 200
+
+
+def test_proxy_network_is_shown(admin, monkeypatch):
+    admin.login()
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+    assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": None}
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.18.0.0/16")
+    assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": "172.18.0.0/16"}
+    # Empty is not the same as unset: uvicorn then trusts no address at all.
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "")
+    assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": ""}
 
 
 def test_activity_copy_failure_still_saves(admin, monkeypatch):

@@ -2063,13 +2063,6 @@ function dashSetChanges() {
     return out;
 }
 
-// The own address is being added (it was not exempt in the saved version)
-function dashSetAddsOwn() {
-    var own = dashSet.snap && dashSet.snap.yourAddress;
-    if (!own || !dashSet.draft) return false;
-    var was = dashSet.baseSnap.fields.exempt.value.indexOf(own) >= 0;
-    return !was && dashSetExemptList(dashSet.draft.exempt).indexOf(own) >= 0;
-}
 
 function dashSettingsLoad(isCurrent) {
     var seq = ++dashSet.seq;
@@ -2116,6 +2109,20 @@ function dashSettingsDrawForm() {
     var f = dashSet.baseSnap.fields;
     var d = dashSet.draft;
     var own = dashSet.snap.yourAddress;
+    var proxy = dashSet.snap.proxyNetwork || { envName: "FORWARDED_ALLOW_IPS", value: null };
+    var proxySet = proxy.value !== null && proxy.value !== undefined;
+    var proxyField = !proxySet
+        ? '<p class="ui-hint"><code>' + esc(proxy.envName) + "</code> is not set, so uvicorn trusts <code>X-Forwarded-For</code> only from " +
+          "<code>127.0.0.1</code> and <code>::1</code>. Behind a reverse proxy at another address, every caller then has the proxy's address. " +
+          "Set it to the proxy's address or network.</p>"
+        : proxy.value === ""
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(proxy.envName) + "</code> environment variable to an empty value, " +
+          "so uvicorn trusts <code>X-Forwarded-For</code> from no address: every caller has the address of the connection it arrives on.</span></p>"
+        : proxy.value
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(proxy.envName) + "</code> environment variable: <code>" +
+          esc(proxy.value) + "</code>. uvicorn takes the caller's address from <code>X-Forwarded-For</code> on connections from these addresses, " +
+          "unless its start command sets another value.</span></p>"
+        : "";
     var maxField = f.maxReq.locked
         ? dashSetLocked(f.maxReq, uiCountLabel(f.maxReq.value, "request", "requests"))
         : '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
@@ -2132,14 +2139,16 @@ function dashSettingsDrawForm() {
         '<div class="ui-field"><label class="ui-label" for="set-max">Requests per window, from one address</label>' + maxField + "</div>" +
         '<div class="ui-field"><label class="ui-label" for="set-window">Window, in seconds</label>' + winField + "</div>" +
         "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="set-exempt">Exempt addresses <small>(one per line, up to ' + esc(uiNum(f.exempt.max)) + ")</small></label>" +
-        '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint set-exempt-warn" placeholder="203.0.113.10">' +
+        '<div class="ui-field"><span class="ui-label">Reverse proxy addresses</span>' + proxyField + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="set-exempt">Exempt addresses and networks <small>(one per line, up to ' + esc(uiNum(f.exempt.max)) + ")</small></label>" +
+        '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint" placeholder="203.0.113.10&#10;172.18.0.0/16">' +
         esc(d.exempt) + "</textarea>" +
-        '<span class="ui-hint" id="set-exempt-hint">Single IPv4 or IPv6 addresses. Requests from these addresses are never limited or counted.' +
+        '<span class="ui-hint" id="set-exempt-hint">IPv4 or IPv6 addresses, or networks such as <code>172.18.0.0/16</code>. Requests from them are never limited or counted.' +
         (own ? " Your request to this page came from <code>" + esc(own) + "</code>." : "") + "</span>" +
-        '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>An exempt address is not limited at all</p>' +
-        "<small>If a reverse proxy sits in front of this service and <code>FORWARDED_ALLOW_IPS</code> is not set, every caller arrives from the proxy's address, " +
-        "and exempting it removes the limit for everyone.</small></div><span></span></div>" +
+        (proxySet && proxy.value ? "" :
+            '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>An exempt address is not limited at all</p>' +
+            "<small>If a reverse proxy sits in front of this service and <code>FORWARDED_ALLOW_IPS</code> is not set, every caller arrives from the proxy's address, " +
+            "and exempting it removes the limit for everyone.</small></div><span></span></div>") +
         '<label class="ui-check-label hidden" id="set-own-wrap"><input type="checkbox" class="ui-check" id="set-own" /> <span>Exempt <code>' + esc(own || "") +
         "</code>, the address my own request came from, anyway</span></label>" +
         "</div>" +
@@ -2154,10 +2163,11 @@ function dashSettingsDrawForm() {
 function dashSettingsSyncForm() {
     var form = document.getElementById("settings-form");
     if (!form) return;
-    var addsOwn = dashSetAddsOwn();
+
     var wrap = document.getElementById("set-own-wrap");
-    wrap.classList.toggle("hidden", !(addsOwn || dashSet.askOwn));
-    if (!(addsOwn || dashSet.askOwn)) document.getElementById("set-own").checked = false;
+    // Shown when the server answered that the change exempts the admin's own address
+    wrap.classList.toggle("hidden", !dashSet.askOwn);
+    if (!dashSet.askOwn) document.getElementById("set-own").checked = false;
     var err = document.getElementById("set-err");
     err.textContent = dashSet.error;
     err.classList.toggle("hidden", !dashSet.error);

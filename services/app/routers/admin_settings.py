@@ -1,6 +1,7 @@
 """Admin Settings page: the /validate rate limit and the addresses exempt from it."""
 from __future__ import annotations
 
+import os
 import sqlite3
 from typing import Any
 
@@ -50,6 +51,8 @@ def _view(stored: rls.Stored, request: Request) -> dict[str, Any]:
         },
         "applied": rls.status_view(),
         "yourAddress": _own_address(request),
+        # uvicorn's own setting, read when the server starts; shown here, never changed here.
+        "proxyNetwork": {"envName": "FORWARDED_ALLOW_IPS", "value": os.environ.get("FORWARDED_ALLOW_IPS")},
     }
 
 
@@ -116,11 +119,16 @@ async def put_rate_limit_settings(
         return _error(422, "invalid", e.message, field=e.field)
 
     own = _own_address(request)
-    if own is not None and own in exempt and own not in stored.exempt and not body.confirmOwnAddress:
+    newly_exempt = (
+        own is not None
+        and rate_limit.Limits(0, 1, 1000, frozenset(exempt)).is_exempt(own)
+        and not rate_limit.Limits(0, 1, 1000, frozenset(stored.exempt)).is_exempt(own)
+    )
+    if newly_exempt and not body.confirmOwnAddress:
         return _error(
             409, "own_address",
-            f"{own} is the address your own request came from. Behind a reverse proxy without "
-            "FORWARDED_ALLOW_IPS it is the proxy's address, and exempting it removes the limit for every caller.",
+            f"This exempts {own}, the address your own request came from. Behind a reverse proxy that "
+            "FORWARDED_ALLOW_IPS does not cover, it is the proxy's address, and exempting it removes the limit for every caller.",
             field="exempt", address=own,
         )
 

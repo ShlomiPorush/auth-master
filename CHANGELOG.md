@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The exempt list on the Settings page also takes networks, such as
+  `172.18.0.0/16`, next to single addresses. A network with address bits beyond its
+  size (`172.18.0.5/16`) is refused with the form to write instead. After a network
+  is saved, version 2.0.0 refuses to start, because it reads only single addresses:
+  remove the network before going back, or use the repair in README.md.
+- The Settings page shows `FORWARDED_ALLOW_IPS`, uvicorn's list of trusted reverse
+  proxies, as a locked field. The warning about callers sharing the proxy's address
+  appears only when it is not set.
+
+### Changed
+
+- The own-address confirmation on the Settings page is asked only when a change
+  exempts the admin's own address for the first time, also through a network.
+
 ## [2.0.0] - 2026-11-13
 
 ### Security

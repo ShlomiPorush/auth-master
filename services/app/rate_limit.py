@@ -26,7 +26,7 @@ import logging
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.config import get_settings
@@ -45,7 +45,25 @@ class Limits:
     version: int
     max_req: int
     window_ms: int
+    # Normalized entries: single addresses ("192.0.2.1") and networks ("172.18.0.0/16").
     exempt: frozenset[str] = frozenset()
+    exempt_addresses: frozenset[str] = field(init=False, repr=False, compare=False)
+    exempt_networks: tuple = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "exempt_addresses", frozenset(e for e in self.exempt if "/" not in e))
+        object.__setattr__(self, "exempt_networks", tuple(ipaddress.ip_network(e) for e in self.exempt if "/" in e))
+
+    def is_exempt(self, key: str | None) -> bool:
+        """`key` comes from address_key(); None (not an IP address) is never exempt."""
+        if key is None or not self.exempt:
+            return False
+        if key in self.exempt_addresses:
+            return True
+        if not self.exempt_networks:
+            return False
+        addr = ipaddress.ip_address(key)
+        return any(addr.version == net.version and addr in net for net in self.exempt_networks)
 
 
 def limits_from_environment() -> Limits:
@@ -142,7 +160,7 @@ def reset_state(limits: Limits | None = None) -> None:
 def allow_validate(ip: str) -> bool:
     now = time.time() * 1000
     lim = _limits
-    if lim.exempt and address_key(ip) in lim.exempt:
+    if lim.exempt and lim.is_exempt(address_key(ip)):
         _maybe_log_summary(now)
         return True
     n, t0 = _buckets[ip]
