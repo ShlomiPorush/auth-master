@@ -62,15 +62,16 @@ reverse proxy such as Traefik or nginx in another container, every request arriv
 from the proxy's address, so all clients share one limit, and the access log shows
 the proxy's address for every request.
 
-To count real client addresses, set `FORWARDED_ALLOW_IPS` to the proxy's address,
-for example `FORWARDED_ALLOW_IPS=172.18.0.50`. uvicorn then takes the client address
-from the `X-Forwarded-For` header, but only on connections from that address. Give
-the proxy a fixed address in its compose file: if its address changes, the header
-is ignored again and all clients share one limit.
+To count real client addresses, set `FORWARDED_ALLOW_IPS` to the proxy's address or
+network, for example `FORWARDED_ALLOW_IPS=172.18.0.50` or
+`FORWARDED_ALLOW_IPS=172.18.0.0/16`. uvicorn then takes the client address from the
+`X-Forwarded-For` header, but only on connections from those addresses. Without it,
+uvicorn trusts the header only from `127.0.0.1` and `::1`. The Settings page shows
+the value.
 
-Trust only the proxy. Do not use a whole Docker network such as `172.18.0.0/16` or
-`*`: any other container on that network could then send a false
-`X-Forwarded-For` header to choose the address it is counted under.
+A network trusts every container on it, not only the proxy: any of them can send its
+own `X-Forwarded-For` header and choose the address it is counted under. A single
+address trusts only the proxy, but needs the proxy to keep that address.
 
 Requests over the limit are answered `429 Too many requests` with a `Retry-After`
 header (the whole seconds until the caller's window ends), and are not written to the
@@ -87,12 +88,15 @@ applies to:
   `RATE_LIMIT_MAX_REQ` or `RATE_LIMIT_WINDOW_MS` is set in the environment or `.env`,
   that value wins and the field is locked on the page. Remove the variable to manage
   the value on the page.
-- **Exempt addresses**: up to 100 single IPv4 or IPv6 addresses, one per line.
-  Requests from them are never limited or counted. They are still validated and
-  logged. An exempt address is not limited at all: behind a reverse proxy without
-  `FORWARDED_ALLOW_IPS`, every caller arrives from the proxy's address, and exempting
-  it removes the limit for everyone. The page asks for a confirmation before it
-  exempts the address your own request came from.
+- **Exempt addresses and networks**: up to 100 entries, one per line: IPv4 or IPv6
+  addresses (`203.0.113.10`) or networks (`172.18.0.0/16`). Requests from them are
+  never limited or counted. They are still validated and logged. An exempt address is
+  not limited at all: behind a reverse proxy that `FORWARDED_ALLOW_IPS` does not
+  cover, every caller arrives from the proxy's address, and exempting it removes the
+  limit for everyone. The page asks for a confirmation before a change exempts the
+  address your own request came from.
+- **Reverse proxy addresses**: the value of `FORWARDED_ALLOW_IPS`, shown locked. It is
+  read by uvicorn when the server starts, so it is set in the environment only.
 
 Each save is kept as a new version in the table `rate_limit_settings`, with who saved
 it, when and from which address; older versions are never changed or deleted, and
