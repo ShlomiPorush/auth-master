@@ -30,8 +30,10 @@ os.environ.setdefault("ADMIN_API_KEY", secrets.token_urlsafe(32))
 os.environ.setdefault("SESSION_SECRET", secrets.token_urlsafe(48))
 os.environ.setdefault("APP_ENCRYPTION_KEY", secrets.token_hex(16))
 os.environ.setdefault("REDIS_URL", f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379/0")
-# Never a database from the environment: the HTTP tests write to the one the app opens.
-os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DIR.name}/rl.db"
+# The HTTP tests write only here: the client fixture makes the app open this file,
+# whatever database the cached settings name.
+_DATABASE_URL = f"sqlite:///{_TMP_DIR.name}/rl.db"
+os.environ.setdefault("DATABASE_URL", _DATABASE_URL)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -235,14 +237,10 @@ def client(monkeypatch):
     monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
     monkeypatch.setattr(rate_limit, "MAX_REQ", 2)
     monkeypatch.setattr(rate_limit, "WINDOW_MS", 60_000)
-    # The settings may come from another test module that imported the app first.
-    # Run only against a SQLite file in a temporary directory, never another database.
-    from app.config import get_settings
-
-    url = get_settings().database_url
-    db_file = Path(url.split("///", 1)[-1]).resolve() if url.startswith("sqlite:///") else None
-    if db_file is None or Path(tempfile.gettempdir()).resolve() not in db_file.parents:
-        pytest.fail("The app's database is not a temporary test file; refusing to run the HTTP tests.")
+    # The cached settings may come from another module or the environment: whatever
+    # they name, the app opens this module's own database file.
+    create_database = main_mod.create_database
+    monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
     rate_limit.reset_state()
     with TestClient(main_mod.app) as c:
         c.fake_redis = fake
