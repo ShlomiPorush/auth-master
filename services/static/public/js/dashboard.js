@@ -1887,11 +1887,21 @@ function dashLogBind(s) {
     var search = document.getElementById(s.id + "-search");
     var sel = document.getElementById(s.id + "-filter");
     uiPicker(sel, { label: s.id === "activity" ? "Action" : "Result" });
+    // The search applies as you type (after a short pause) and at once on Enter
+    var typing = null;
+    var applySearch = function () {
+        clearTimeout(typing);
+        typing = null;
+        if (search.value.trim() !== s.applied.search) dashLogApply(s, true);
+    };
+    search.addEventListener("input", function () {
+        clearTimeout(typing);
+        typing = setTimeout(applySearch, 350);
+    });
     search.addEventListener("keydown", function (event) {
-        if (event.key === "Enter") { event.preventDefault(); dashLogApply(s, true); }
+        if (event.key === "Enter") { event.preventDefault(); applySearch(); }
     });
     sel.addEventListener("change", function () { dashLogApply(s, true); });
-    document.getElementById(s.id + "-apply").addEventListener("click", function () { dashLogApply(s, true); });
     document.getElementById(s.id + "-reset").addEventListener("click", function () {
         search.value = "";
         sel.value = "";
