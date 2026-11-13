@@ -561,6 +561,9 @@ def test_proxy_network_is_shown(admin, monkeypatch):
     assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": None}
     monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.18.0.0/16")
     assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": "172.18.0.0/16"}
+    # Empty is not the same as unset: uvicorn then trusts no address at all.
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "")
+    assert admin.get().json()["proxyNetwork"] == {"envName": "FORWARDED_ALLOW_IPS", "value": ""}
 
 
 def test_activity_copy_failure_still_saves(admin, monkeypatch):

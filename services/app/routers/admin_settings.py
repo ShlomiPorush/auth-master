@@ -52,7 +52,7 @@ def _view(stored: rls.Stored, request: Request) -> dict[str, Any]:
         "applied": rls.status_view(),
         "yourAddress": _own_address(request),
         # uvicorn's own setting, read when the server starts; shown here, never changed here.
-        "proxyNetwork": {"envName": "FORWARDED_ALLOW_IPS", "value": os.environ.get("FORWARDED_ALLOW_IPS") or None},
+        "proxyNetwork": {"envName": "FORWARDED_ALLOW_IPS", "value": os.environ.get("FORWARDED_ALLOW_IPS")},
     }
 
 
