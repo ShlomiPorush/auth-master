@@ -1446,17 +1446,22 @@ function uiMenu(anchor, items, label) {
 function uiMenuPlace(menu, anchor) {
     var room = uiFloatRoom(null);
     var r = anchor.getBoundingClientRect();
-    menu.style.maxHeight = Math.max(80, room.bottom - room.top) + "px";
+    menu.style.maxHeight = "";
     var w = menu.offsetWidth;
     var h = menu.offsetHeight;
+    var below = room.bottom - (r.bottom + 4);
+    var above = (r.top - 4) - room.top;
+    var up = h > below && above > below;
+    var fit = Math.max(80, up ? above : below);
+    if (h > fit) {
+        menu.style.maxHeight = fit + "px";
+        h = fit;
+    }
     var rtl = getComputedStyle(anchor).direction === "rtl";
     var left = rtl ? r.left : r.right - w;
     left = Math.max(room.left, Math.min(left, room.right - w));
-    var top = r.bottom + 4;
-    if (top + h > room.bottom && r.top - h - 4 - room.top > room.bottom - r.bottom - 4) top = r.top - h - 4;
-    top = Math.max(room.top, Math.min(top, room.bottom - h));
     menu.style.left = left + "px";
-    menu.style.top = top + "px";
+    menu.style.top = (up ? r.top - 4 - h : r.bottom + 4) + "px";
 }
 
 function uiMenuDismiss(returnFocus) {
@@ -1468,6 +1473,30 @@ function uiMenuDismiss(returnFocus) {
     try { if (state.supported && state.menu.matches(":popover-open")) state.menu.hidePopover(); } catch (e) { /* closed already */ }
     state.menu.remove();
     if (returnFocus && state.anchor.isConnected) state.anchor.focus({ preventScroll: true });
+}
+
+var uiPickerScrollQueued = false;
+function uiPickerFollow() {
+    uiPickerScrollQueued = false;
+    var picker = uiPickerState.open;
+    if (!picker) return;
+    var room = uiFloatRoom(picker.host);
+    var r = picker.button.getBoundingClientRect();
+    if (r.bottom < room.top || r.top > room.bottom || r.right < room.left || r.left > room.right) {
+        uiPickerClose(false);
+        return;
+    }
+    uiPickerPlace(picker);
+}
+function uiPickerOnScroll(event) {
+    var picker = uiPickerState.open;
+    if (!picker || uiPickerScrollQueued) return;
+    var target = event.target;
+    // The panel's own list scrolling moves nothing
+    if (target instanceof Node && picker.panel && picker.panel.contains(target)) return;
+    if (target instanceof Node && target !== document && !target.contains(picker.host)) return;
+    uiPickerScrollQueued = true;
+    requestAnimationFrame(uiPickerFollow);
 }
 
 function uiMenuOnScroll(event) {
@@ -1596,6 +1625,7 @@ function uiInstallGlobalListeners() {
     });
     window.addEventListener("keydown", uiOnKeyEscape, true);
     window.addEventListener("scroll", uiMenuOnScroll, true);
+    window.addEventListener("scroll", uiPickerOnScroll, true);
     window.addEventListener("resize", function () { uiMenuDismiss(false); if (uiPickerState.open) uiPickerPlace(uiPickerState.open); });
     // Click to copy anywhere; inside a clickable row it does not open the row
     document.addEventListener("click", function (event) {

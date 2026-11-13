@@ -23,6 +23,8 @@ function page({ mtop, tabbar, boxes }) {
     const ctx = loadScripts(["js/common.js", "js/ui.js"], {
         innerWidth: 390,
         innerHeight: 844,
+        Node: class Node {},
+        requestAnimationFrame: (fn) => fn(),
         getComputedStyle: (el) => styles.get(el) || { overflowX: "visible", overflowY: "visible", direction: "ltr" },
         document: {
             body,
@@ -84,4 +86,70 @@ test("a row menu stays between the bars", () => {
     // no room under the button above the tab bar: it opens above it
     assert.equal(menu.style.top, 700 - 120 - 4 + "px");
     assert.equal(menu.style.left, 340 + 34 - 190 + "px");
+});
+
+// A picker as uiPicker builds it, open, with a button that can move
+function openPicker(ctx, host, buttonRect, panel) {
+    const picker = {
+        host, panel,
+        button: { getBoundingClientRect: () => buttonRect.value, setAttribute() {}, removeAttribute() {}, isConnected: true, focus() {} },
+    };
+    panel.remove = () => {};
+    panel.contains = () => false;
+    ctx.uiPickerState.open = picker;
+    return picker;
+}
+
+test("F1: an open picker is placed again when the page scrolls", () => {
+    const { ctx, host } = page({ mtop: rect(0, 0, 700, 56), tabbar: null });
+    ctx.innerWidth = 700;
+    ctx.innerHeight = 390;
+    const button = { value: rect(300, 20, 130, 30) };
+    const panel = panelAt(20, 260, 200);
+    const picker = openPicker(ctx, host, button, panel);
+    ctx.uiPickerPlace(picker);
+    assert.equal(panel.classList.has("is-up"), true);
+    assert.equal(panel.style.maxHeight, 300 - 64 - 6 + "px");
+    // The page scrolls 70px: the button moves up and the room above shrinks
+    button.value = rect(230, 20, 130, 30);
+    ctx.uiPickerOnScroll({ target: ctx.document });
+    assert.equal(panel.style.maxHeight, 230 - 64 - 6 + "px", "placed again");
+});
+
+test("F1: the picker closes once its button leaves the room; other scrolls leave it alone", () => {
+    const { ctx, host } = page({ mtop: rect(0, 0, 700, 56), tabbar: null });
+    ctx.innerHeight = 390;
+    const button = { value: rect(300, 20, 130, 30) };
+    const panel = panelAt(20, 260, 200);
+    openPicker(ctx, host, button, panel);
+    // A box that does not hold the picker scrolls: nothing happens
+    const other = new ctx.Node();
+    other.contains = () => false;
+    button.value = rect(10, 20, 130, 30);
+    ctx.uiPickerOnScroll({ target: other });
+    assert.ok(ctx.uiPickerState.open, "still open");
+    // The page scrolls the button under the top bar: it closes
+    ctx.uiPickerOnScroll({ target: ctx.document });
+    assert.equal(ctx.uiPickerState.open, null);
+});
+
+test("F2: a menu that does not fit below opens above when there is more room there, never over its button", () => {
+    const { ctx } = page({ mtop: rect(0, 0, 390, 56), tabbar: rect(536, 0, 390, 64) });
+    ctx.innerHeight = 600;
+    ctx.getComputedStyle = () => ({ direction: "ltr" });
+    const menu = { style: {}, offsetWidth: 190, offsetHeight: 168 };
+    ctx.uiMenuPlace(menu, { getBoundingClientRect: () => rect(350, 300, 34, 34) });
+    assert.equal(menu.style.top, 350 - 4 - 168 + "px");
+    assert.ok(parseInt(menu.style.top, 10) + 168 <= 350, "ends above the button");
+});
+
+test("F2: with too little room on both sides it takes the larger one, cut to it", () => {
+    const { ctx } = page({ mtop: null, tabbar: null });
+    ctx.innerHeight = 300;
+    ctx.getComputedStyle = () => ({ direction: "ltr" });
+    const menu = { style: {}, offsetWidth: 190, offsetHeight: 400 };
+    ctx.uiMenuPlace(menu, { getBoundingClientRect: () => rect(100, 300, 34, 34) });
+    // below: 292 - 138 = 154; above: 96 - 8 = 88 -> below, cut to 154 and scrolling
+    assert.equal(menu.style.top, "138px");
+    assert.equal(menu.style.maxHeight, "154px");
 });
