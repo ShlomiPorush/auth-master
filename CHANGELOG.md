@@ -90,6 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expired token. It shares the per-IP rate limit with `/validate`, answers `429`
   when the limit is exceeded, and appears in the access log.
 - API key holders can read the scopes of their key with `GET /tokens/me`.
+- Requests rejected by the `/validate` rate limit are now reported. They are
+  still not written to the access log, and their answers do not change. Each
+  server process writes a `Rate limit:` line to its log at most once per rate
+  limit window, with the number of rejected requests and the addresses that
+  caused most of them. The Access Logs page shows how many requests were
+  rejected, when the last one was, and from which addresses, read from the new
+  `GET /admin/api/rate-limit`. Counts are kept in memory per server process and
+  reset on restart.
 
 ### Removed
 

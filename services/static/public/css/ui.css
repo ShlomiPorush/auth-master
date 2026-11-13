@@ -237,6 +237,9 @@ body.ui-app { overflow: hidden; }
 .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto; align-items: center; gap: var(--ui-sp-6);
     padding: var(--ui-sp-5) var(--ui-pad-x) var(--ui-sp-5) 0; border-top: 1px solid var(--ui-line); }
 .ui-attn-list > .ui-alert:first-child { border-top: 0; }
+.ui-limit-card > .ui-alert { border-top: 0; }
+.ui-limit-card .ui-alert p { font-weight: 650; }
+.ui-limit-card .ui-alert small + small { margin-top: var(--ui-sp-1); }
 .ui-alert-bar { align-self: stretch; border-radius: 0 var(--ui-sp-2) var(--ui-sp-2) 0; background: var(--ui-muted); }
 [dir="rtl"] .ui-alert-bar { border-radius: var(--ui-sp-2) 0 0 var(--ui-sp-2); }
 .ui-alert.is-fail .ui-alert-bar { background: var(--ui-fail); }

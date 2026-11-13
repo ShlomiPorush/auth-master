@@ -53,6 +53,28 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
 | `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Read by uvicorn, not by the app: the addresses of reverse proxies whose `X-Forwarded-For` header is trusted. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
+
+### Behind a reverse proxy
+
+The rate limit counts requests per client address, as uvicorn reports it. Behind a
+reverse proxy such as Traefik or nginx in another container, every request arrives
+from the proxy's address, so all clients share one limit, and the access log shows
+the proxy's address for every request.
+
+To count real client addresses, set `FORWARDED_ALLOW_IPS` to the proxy's address,
+for example `FORWARDED_ALLOW_IPS=172.18.0.50`. uvicorn then takes the client address
+from the `X-Forwarded-For` header, but only on connections from that address. Give
+the proxy a fixed address in its compose file: if its address changes, the header
+is ignored again and all clients share one limit.
+
+Trust only the proxy. Do not use a whole Docker network such as `172.18.0.0/16` or
+`*`: any other container on that network could then send a false
+`X-Forwarded-For` header to choose the address it is counted under.
+
+Requests over the limit are not written to the access log. The Access Logs page
+shows how many there were and from which addresses, and each server process writes
+a `Rate limit:` line to its log at most once per window.
 
 ### Secrets
 
@@ -100,7 +122,7 @@ Every dashboard section is a page with its own URL, so it can be bookmarked, sha
 - **Zones** (`/admin/zones`) — Create and delete authorization zones
 - **API Keys** (`/admin/api-keys`) — Create scoped API keys for external integrations, edit permissions, copy keys (MFA-protected)
 - **Activity Log** (`/admin/logs/activity`) — Audit trail of admin actions
-- **Access Logs** (`/admin/logs/access`) — History of token validation requests
+- **Access Logs** (`/admin/logs/access`) — History of token validation requests, and the requests the rate limit rejected
 
 Opening a page while signed out redirects to the login flow and returns to the same page after signing in.
 
