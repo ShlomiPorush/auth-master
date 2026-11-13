@@ -1248,8 +1248,11 @@ function uiPickerOpen(picker) {
         '<div class="ui-picker-list" role="listbox" id="' + listId + '" aria-label="' + esc(picker.label) + '">' +
         opts.map(function (opt, i) {
             var on = i === select.selectedIndex;
-            return '<button type="button" class="ui-option" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + on + '"><span>' +
-                esc(opt.textContent) + "</span></button>";
+            var dot = opt.getAttribute("data-dot");
+            var hint = opt.getAttribute("data-hint");
+            return '<button type="button" class="ui-option" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + on + '">' +
+                (dot !== null ? '<i class="ui-option-dot' + (dot ? " ui-dot-" + esc(dot) : "") + '" aria-hidden="true"></i>' : "") +
+                "<span>" + esc(opt.textContent) + "</span>" + (hint ? '<small class="ui-num">' + esc(hint) + "</small>" : "") + "</button>";
         }).join("") + "</div>" +
         (withSearch ? '<p class="ui-picker-none hidden" role="status">No matches</p>' : "");
     picker.host.appendChild(panel);
@@ -1311,17 +1314,47 @@ function uiPickerOpen(picker) {
     }
 }
 
-// Opens upward when there is more room above, toward the start when it would leave the screen
+// The room a floating panel may use (MP-5): the screen below a shown top bar
+// (.ui-mtop) and above a shown tab bar (.ui-tabbar), cut down by every box around
+// the element whose overflow is not visible, 8px in from each edge
+function uiFloatRoom(el) {
+    var room = { top: 8, bottom: window.innerHeight - 8, left: 8, right: window.innerWidth - 8 };
+    var bar = document.querySelector(".ui-mtop");
+    if (bar && bar.getClientRects().length) room.top = Math.max(room.top, bar.getBoundingClientRect().bottom + 8);
+    var tabs = document.querySelector(".ui-tabbar");
+    if (tabs && tabs.getClientRects().length) room.bottom = Math.min(room.bottom, tabs.getBoundingClientRect().top - 8);
+    for (var box = el ? el.parentElement : null; box && box !== document.body; box = box.parentElement) {
+        var cs = getComputedStyle(box);
+        if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+        var r = box.getBoundingClientRect();
+        room.top = Math.max(room.top, r.top + 8);
+        room.bottom = Math.min(room.bottom, r.bottom - 8);
+        room.left = Math.max(room.left, r.left + 8);
+        room.right = Math.min(room.right, r.right - 8);
+    }
+    return room;
+}
+
+// Under its button; above it only when there is more room there; scrolls inside
+// when taller than its side; shifted back inside the edges (MP-5)
 function uiPickerPlace(picker) {
     var panel = picker.panel;
-    if (!panel || uiIsPhone()) return;
+    if (!panel) return;
+    panel.style.maxHeight = "";
+    panel.style.transform = "";
+    panel.classList.remove("is-up");
+    var room = uiFloatRoom(picker.host);
     var rect = picker.button.getBoundingClientRect();
-    var height = panel.offsetHeight;
-    var below = window.innerHeight - rect.bottom;
-    panel.classList.toggle("is-up", below < height + 12 && rect.top > below);
+    var below = room.bottom - rect.bottom - 6;
+    var above = rect.top - room.top - 6;
+    var up = panel.offsetHeight > below && above > below;
+    panel.classList.toggle("is-up", up);
+    panel.style.maxHeight = Math.max(80, up ? above : below) + "px";
     var pr = panel.getBoundingClientRect();
-    var rtl = getComputedStyle(picker.host).direction === "rtl";
-    panel.classList.toggle("is-end", rtl ? pr.left < 8 : pr.right > window.innerWidth - 8);
+    var dx = 0;
+    if (pr.right > room.right) dx = room.right - pr.right;
+    if (pr.left + dx < room.left) dx = room.left - pr.left;
+    if (dx) panel.style.transform = "translateX(" + Math.round(dx) + "px)";
 }
 
 function uiPickerChoose(picker, index) {
@@ -1411,15 +1444,17 @@ function uiMenu(anchor, items, label) {
 
 // Under the button, aligned with its end edge; above when there is no room; 8px inside the screen
 function uiMenuPlace(menu, anchor) {
+    var room = uiFloatRoom(null);
     var r = anchor.getBoundingClientRect();
+    menu.style.maxHeight = Math.max(80, room.bottom - room.top) + "px";
     var w = menu.offsetWidth;
     var h = menu.offsetHeight;
     var rtl = getComputedStyle(anchor).direction === "rtl";
     var left = rtl ? r.left : r.right - w;
-    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    left = Math.max(room.left, Math.min(left, room.right - w));
     var top = r.bottom + 4;
-    if (top + h > window.innerHeight - 8 && r.top - h - 4 > 8) top = r.top - h - 4;
-    top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
+    if (top + h > room.bottom && r.top - h - 4 - room.top > room.bottom - r.bottom - 4) top = r.top - h - 4;
+    top = Math.max(room.top, Math.min(top, room.bottom - h));
     menu.style.left = left + "px";
     menu.style.top = top + "px";
 }

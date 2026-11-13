@@ -16,7 +16,7 @@
       <!-- Sidebar (wide screens) and icon rail (761 to 1100px) -->
       <aside class="ui-side" aria-label="Sidebar">
         <div class="ui-brand">
-          <span class="ui-brand-mark" aria-hidden="true"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg></span>
+          <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <span class="ui-brand-name">Auth Service</span>
           <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
@@ -73,6 +73,7 @@
 
       <!-- Phone top bar -->
       <header class="ui-mtop">
+        <a class="ui-mtop-home" data-go="tokens" data-query="" href="/admin/tokens" aria-label="Tokens"><img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" /></a>
         <div class="ui-mtop-title"><small>Auth Service</small><b id="mtop-page">Tokens</b></div>
         <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
@@ -105,12 +106,6 @@
             </div>
           </div>
 
-          <div class="ui-kpis">
-            <a class="ui-kpi" data-go="tokens" data-query="" href="/admin/tokens" data-inventory="tokens.kpi.total">Tokens<b id="tok-kpi-total">-</b></a>
-            <a class="ui-kpi" data-go="tokens" data-query="status=active" href="/admin/tokens?status=active" data-inventory="tokens.kpi.active">Active<b id="tok-kpi-active">-</b></a>
-            <a class="ui-kpi" data-go="zones" data-query="" href="/admin/zones" data-inventory="tokens.kpi.zones">Zones<b id="tok-kpi-zones">-</b></a>
-          </div>
-
           <div class="ui-panel" id="tok-panel">
             <div class="ui-fbar">
               <div class="ui-fbar-row">
@@ -123,13 +118,13 @@
                 </button>
               </div>
               <div class="ui-fbar-row">
-                <div class="ui-chips" id="tok-status" role="group" aria-label="Status" data-inventory="tokens.filter.status">
-                  <button type="button" class="ui-chip" data-status="all" aria-pressed="true">All <small>-</small></button>
-                  <button type="button" class="ui-chip" data-status="active" aria-pressed="false">Active <small>-</small></button>
-                  <button type="button" class="ui-chip" data-status="disabled" aria-pressed="false">Disabled <small>-</small></button>
-                  <button type="button" class="ui-chip" data-status="expired" aria-pressed="false">Expired <small>-</small></button>
-                  <button type="button" class="ui-chip" data-status="expiring" aria-pressed="false">Expiring soon <small>-</small></button>
-                </div>
+                <select id="tok-status" data-inventory="tokens.filter.status">
+                  <option value="all" data-status="all">All</option>
+                  <option value="active" data-status="active" data-dot="ok">Active</option>
+                  <option value="disabled" data-status="disabled" data-dot="">Disabled</option>
+                  <option value="expired" data-status="expired" data-dot="warn">Expired</option>
+                  <option value="expiring" data-status="expiring" data-dot="warn">Expiring soon</option>
+                </select>
                 <select id="tok-zone" data-inventory="tokens.filter.zone"><option value="">All zones</option></select>
                 <select id="tok-level" data-inventory="tokens.filter.level">
                   <option value="">All levels</option>

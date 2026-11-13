@@ -734,9 +734,9 @@ function dashTokSyncControls() {
     var f = dashTok.filters;
     var search = document.getElementById("tok-search");
     if (document.activeElement !== search) search.value = f.q;
-    document.querySelectorAll("#tok-status [data-status]").forEach(function (b) {
-        b.setAttribute("aria-pressed", String(b.getAttribute("data-status") === f.status));
-    });
+    var statusSel = document.getElementById("tok-status");
+    statusSel.value = f.status;
+    uiPickerSync(statusSel);
     var zoneSel = document.getElementById("tok-zone");
     var areas = dash.areas.slice();
     // A zone in the address that is not (or no longer) a zone stays picked (FS-17)
@@ -772,17 +772,12 @@ function dashTokDraw(quiet) {
         if (!rows.length) html = dashEmpty("No tokens yet. Click New Token to create one.", "A token lets a service call the zones you grant it.");
         else if (!shown.length) html = dashEmpty("No tokens match your search.", "Change the search or clear the filters.");
         else html = shown.map(function (t) { return dashTokRow(t, now); }).join("");
-        document.querySelectorAll("#tok-status [data-status]").forEach(function (b) {
-            var key = b.getAttribute("data-status");
-            var n = rows.filter(function (t) { return dashTokMatch(t, { q: f.q, status: key, zone: f.zone, level: f.level }, "", now); }).length;
-            b.querySelector("small").textContent = uiNum(n);
+        // Each status option names how many tokens it lists, with the other filters (MP-1 hint)
+        Array.prototype.forEach.call(document.getElementById("tok-status").options, function (opt) {
+            var n = rows.filter(function (t) { return dashTokMatch(t, { q: f.q, status: opt.value, zone: f.zone, level: f.level }, "", now); }).length;
+            opt.setAttribute("data-hint", uiNum(n));
         });
-        var total = rows.length;
-        var active = rows.filter(function (t) { return dashTokStatus(t) === "active"; }).length;
-        document.getElementById("tok-kpi-total").textContent = uiNum(total);
-        document.getElementById("tok-kpi-active").textContent = uiNum(active);
     }
-    document.getElementById("tok-kpi-zones").textContent = dash.zonesLoaded ? uiNum(dash.zones.length || dash.areas.length) : "-";
     var filtered = f.q || f.status !== "all" || f.zone || f.level;
     document.getElementById("tok-clear").classList.toggle("hidden", !filtered);
     var head = document.getElementById("tok-head");
@@ -811,6 +806,7 @@ function dashTokLoad(force) {
 function dashTokBind() {
     if (dashTok.bound) return;
     dashTok.bound = true;
+    uiPicker(document.getElementById("tok-status"), { label: "Status" });
     uiPicker(document.getElementById("tok-zone"), { label: "Zone" });
     uiPicker(document.getElementById("tok-level"), { label: "Level" });
     var search = document.getElementById("tok-search");
@@ -819,10 +815,8 @@ function dashTokBind() {
         dashTokWriteQuery();
         dashTokDraw(false);
     });
-    document.getElementById("tok-status").addEventListener("click", function (event) {
-        var b = event.target.closest("[data-status]");
-        if (!b) return;
-        dashTok.filters.status = b.getAttribute("data-status");
+    document.getElementById("tok-status").addEventListener("change", function (event) {
+        dashTok.filters.status = event.target.value;
         dashTokWriteQuery();
         dashTokDraw(false);
     });

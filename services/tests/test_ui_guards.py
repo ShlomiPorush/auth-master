@@ -202,7 +202,6 @@ FLOATING_CSS = {
     ".ui-toast": "the toast (showToast)",
     ".ui-menu[popover]": "row menus and the Sort panel on the native popover layer",
     ".ui-popover": "picker panels (uiPicker)",
-    ".ui-dialog-backdrop .ui-popover": "a picker panel inside a phone sheet",
     ".ui-tabbar": "the phone tab bar (NL-9), part of the page",
     ".ui-fly": "the page name beside a rail icon (NL-8)",
 }
