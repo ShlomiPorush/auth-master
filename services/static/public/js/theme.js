@@ -5,8 +5,11 @@
 (function () {
   var KEY = "uiTheme";
   var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  // The choice made in this visit; it holds when storage is blocked or fails
+  var chosen = null;
 
   function stored() {
+    if (chosen) return chosen;
     try {
       var v = window.localStorage.getItem(KEY);
       return v === "light" || v === "dark" ? v : "system";
@@ -30,10 +33,11 @@
     else if (media.addListener) media.addListener(follow);
   }
   // Another tab changed the theme
-  window.addEventListener("storage", function (event) { if (event.key === KEY) apply(); });
+  window.addEventListener("storage", function (event) { if (event.key === KEY) { chosen = null; apply(); } });
 
   window.uiThemeGet = stored;
   window.uiThemeSet = function (pref) {
+    chosen = pref === "light" || pref === "dark" ? pref : "system";
     try {
       if (pref === "light" || pref === "dark") window.localStorage.setItem(KEY, pref);
       else window.localStorage.removeItem(KEY);

@@ -134,7 +134,9 @@ function dashTokensLoad(force) {
 }
 
 function dashZonesLoad() {
+    var mark = uiMutationMark();
     return api("GET", "/admin/api/zones").then(function (res) {
+        if (uiStaleSince(mark)) return dash.zones;
         if (!res.ok || !Array.isArray(res.data)) {
             dash.zonesFailed = apiError(res, "Failed");
             return dash.zones;
@@ -148,6 +150,7 @@ function dashZonesLoad() {
         }
         // No zones: the areas from ALLOWED_AREAS, read again from /me
         return api("GET", "/admin/api/me").then(function (me) {
+            if (uiStaleSince(mark)) return dash.zones;
             if (me.ok && me.data && Array.isArray(me.data.allowedAreas)) dash.allowedAreas = me.data.allowedAreas;
             dash.areas = dash.allowedAreas && dash.allowedAreas.length ? dash.allowedAreas.slice() : ["default"];
             return dash.zones;
@@ -1074,8 +1077,11 @@ function dashTokenDialog(t) {
 }
 
 // The authenticator code, then the token or key is copied (MFA). A reply for a
-// closed or replaced dialog is dropped and never copied.
+// closed, dropped or replaced dialog is dropped and never copied.
 var dashRevealSeq = 0;
+function dashRevealCurrent(d, closed, seq) {
+    return !closed && seq === dashRevealSeq && !!d && d.backdrop.isConnected;
+}
 function dashMfaDialog(kind, item) {
     var d = null;
     var seq = ++dashRevealSeq;
@@ -1096,6 +1102,7 @@ function dashMfaDialog(kind, item) {
         form: { id: formId, onSubmit: function () { submit(); } },
     });
     d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    d.backdrop.addEventListener("ui-drop", function () { closed = true; });
     var code = d.body.querySelector("#mfa-code");
     var err = d.foot.querySelector("#mfa-err");
     var btn = d.foot.querySelector("[type=submit]");
@@ -1108,7 +1115,7 @@ function dashMfaDialog(kind, item) {
             ? api("POST", "/admin/api/tokens/" + encodeURIComponent(item.id) + "/reveal", { code: value })
             : api("POST", "/admin/api/api-keys/" + encodeURIComponent(item.id) + "/reveal", { code: value });
         path.then(function (res) {
-            if (closed || seq !== dashRevealSeq) return;
+            if (!dashRevealCurrent(d, closed, seq)) return;
             btn.disabled = false;
             if (!res.ok) {
                 if (res.status === 401) return;
@@ -1261,6 +1268,9 @@ function dashZonesBind() {
     uiUnsavedRegister(function () {
         if (uiPageCurrent !== "zones") return 0;
         return Array.prototype.slice.call(form.querySelectorAll("input")).filter(function (i) { return i.value.trim(); }).length;
+    }, function () {
+        form.reset();
+        err.classList.add("hidden");
     });
 }
 
@@ -1348,7 +1358,7 @@ function dashKeyFind(id) {
 function dashKeysLoad(quiet) {
     var mark = uiMutationMark();
     return api("GET", "/admin/api/api-keys").then(function (res) {
-        if (uiStaleSince(mark) && quiet) return;
+        if (uiStaleSince(mark)) return;
         if (res.ok && Array.isArray(res.data)) {
             dashKeys.rows = res.data;
             dashKeys.failed = "";
@@ -1533,7 +1543,8 @@ Object.keys(dashLogs).forEach(function (k) {
     s.loading = false;
     s.moreFailed = "";
     s.failed = "";
-    s.capped = false;
+    s.rowsFor = null;
+    s.refreshFailed = "";
     s.pending = [];
     s.drawn = "";
     s.bound = false;
@@ -1564,27 +1575,51 @@ function dashLogTailCursor(s) {
     return "";
 }
 
-function dashLogFirst(s, quiet) {
+// The filters a list was loaded with; rows, cursors and the pill belong to them
+function dashLogKey(s) {
+    return JSON.stringify([s.applied.search, s.applied.filter]);
+}
+
+// The rows shown were loaded with the filters applied now: only then may a refresh
+// follow their top or Load more follow their end
+function dashLogReady(s) {
+    return s.rows !== null && s.rowsFor === dashLogKey(s);
+}
+
+function dashLogFirst(s, quiet, isCurrent) {
     var gen = ++s.gen;
+    var key = dashLogKey(s);
     s.loading = true;
     s.moreFailed = "";
-    s.capped = false;
     if (!quiet) dashLogDim(s, true);
     return api("GET", dashLogQuery(s, { limit: String(LOG_PAGE_SIZE), page: "1" })).then(function (res) {
-        if (gen !== s.gen) return;
+        if (gen !== s.gen || (isCurrent && !isCurrent())) return;
         s.loading = false;
         dashLogDim(s, false);
         if (!res.ok || !res.data) {
-            if (s.rows === null) s.failed = apiError(res, s.failedText);
-            else if (!quiet) showToast(s.failedText, "error");
+            var reason = apiError(res, s.failedText);
+            if (s.rowsFor !== key) {
+                // Rows of other filters never stay under these ones: the first load failed
+                s.rows = null;
+                s.rowsFor = null;
+                s.heads = {};
+                s.nexts = {};
+                s.pending = [];
+                s.hasMore = false;
+                s.failed = reason;
+            } else {
+                dashLogRefreshFailed(s, reason);
+            }
             dashLogDraw(s, quiet);
             return;
         }
         s.failed = "";
+        s.refreshFailed = "";
         s.heads = {};
         s.nexts = {};
         dashLogCursors(s, res.data);
         s.rows = uiLogMerge([], res.data.logs || []);
+        s.rowsFor = key;
         s.total = res.data.total || 0;
         s.hasMore = (res.data.logs || []).length >= LOG_PAGE_SIZE;
         s.pending = [];
@@ -1592,8 +1627,15 @@ function dashLogFirst(s, quiet) {
     });
 }
 
+// An update that failed keeps the rows, says so under the list, and tells once
+// per run of failures with the old wording
+function dashLogRefreshFailed(s, reason) {
+    if (!s.refreshFailed) showToast(s.failedText, "error");
+    s.refreshFailed = reason || s.failedText;
+}
+
 function dashLogMore(s) {
-    if (s.loading || !s.rows || !s.rows.length) return;
+    if (s.loading || !dashLogReady(s) || !s.rows.length) return;
     var cursor = dashLogTailCursor(s);
     if (!cursor) return;
     var gen = s.gen;
@@ -1617,21 +1659,26 @@ function dashLogMore(s) {
 }
 
 // New rows since the top row: `since` its cursor (the server looks 60 seconds
-// further back), page by page with `before` while pages are full, at most 20
-function dashLogRefresh(s) {
+// further back), page by page with `before` while pages are full. While older
+// rows remain to load, the pages stop once they pass the last row shown (what
+// lies below belongs to Load more). More than 20 full pages of new rows: the
+// newest rows become the list, and Load more goes on from there.
+function dashLogRefresh(s, isCurrent) {
     if (s.loading) return Promise.resolve();
-    if (!s.rows || !s.rows.length) return dashLogFirst(s, true);
+    if (!dashLogReady(s) || !s.rows.length) return dashLogFirst(s, true, isCurrent);
     var since = s.heads[s.rows[0].id];
-    if (!since) return dashLogFirst(s, true);
+    if (!since) return dashLogFirst(s, true, isCurrent);
     var gen = s.gen;
+    var last = s.rows[s.rows.length - 1];
+    var hasMore = s.hasMore;
     var collected = [];
     var cursors = { heads: {}, nexts: {} };
     var step = function (before, pages) {
         var extra = { limit: String(LOG_SINCE_LIMIT), since: since };
         if (before) extra.before = before;
         return api("GET", dashLogQuery(s, extra)).then(function (res) {
-            if (gen !== s.gen) return null;
-            if (!res.ok || !res.data) return null;
+            if (gen !== s.gen || (isCurrent && !isCurrent())) return null;
+            if (!res.ok || !res.data) return { failed: apiError(res, s.failedText) };
             var logs = res.data.logs || [];
             if (logs.length) {
                 if (res.data.headCursor) cursors.heads[logs[0].id] = res.data.headCursor;
@@ -1639,18 +1686,20 @@ function dashLogRefresh(s) {
             }
             collected = collected.concat(logs);
             if (logs.length < LOG_SINCE_LIMIT || !res.data.nextCursor) return true;
+            if (hasMore && uiLogCompare(logs[logs.length - 1], last) > 0) return true;
             if (pages + 1 >= LOG_REFRESH_MAX_PAGES) return false;
             return step(res.data.nextCursor, pages + 1);
         });
     };
     return step("", 0).then(function (complete) {
-        if (complete === null || gen !== s.gen) return;
-        if (complete === false) {
-            s.capped = true;
+        if (complete === null || gen !== s.gen || (isCurrent && !isCurrent())) return;
+        if (complete && complete.failed) {
+            dashLogRefreshFailed(s, complete.failed);
             dashLogDraw(s, true);
             return;
         }
-        s.capped = false;
+        s.refreshFailed = "";
+        if (complete === false) return dashLogFirst(s, true, isCurrent);
         var fresh = uiLogFresh(s.rows, collected, s.hasMore);
         Object.keys(cursors.heads).forEach(function (id) { s.heads[id] = cursors.heads[id]; });
         Object.keys(cursors.nexts).forEach(function (id) { s.nexts[id] = cursors.nexts[id]; });
@@ -1753,15 +1802,19 @@ function dashLogDraw(s, quiet) {
     pillEl.classList.toggle("hidden", !n);
     pillEl.textContent = n === 1 ? "1 new entry" : uiNum(n) + " new entries";
     var moreHtml = "";
-    if (s.capped) {
-        moreHtml = '<span role="status">Some new entries could not be loaded.</span> <button type="button" class="ui-btn-link" data-log-retry-new>Try again</button>';
-    } else if (s.moreFailed) {
+    if (s.moreFailed) {
         moreHtml = '<span role="alert">Could not load more entries: ' + esc(s.moreFailed) + '</span> <button type="button" class="ui-btn-link" data-log-more>Try again</button>';
     } else if (s.rows && s.rows.length && s.hasMore) {
         moreHtml = s.loading ? '<span class="ui-spin" aria-hidden="true"></span><span role="status">Loading more...</span>'
             : '<button type="button" class="ui-btn ui-btn-sm" data-log-more data-inventory="' + s.id + '.loadmore">Load more</button>';
     } else if (s.rows && s.rows.length > LOG_PAGE_SIZE) {
         moreHtml = '<span role="status">All ' + uiNum(s.rows.length) + " entries shown</span>";
+    }
+    // A failed update keeps the rows and Load more, and says so above them (R7)
+    if (s.refreshFailed && s.rows) {
+        moreHtml = '<span role="status">' + esc(s.failedText) + ": " + esc(s.refreshFailed) +
+            '. The list shows what was loaded before.</span> <button type="button" class="ui-btn-link" data-log-retry-new>Try again</button>' +
+            (moreHtml ? " " + moreHtml : "");
     }
     if (moreEl.innerHTML !== moreHtml) moreEl.innerHTML = moreHtml;
     moreEl.classList.toggle("hidden", !moreHtml);
@@ -1818,7 +1871,7 @@ function dashLogBind(s) {
     panel.addEventListener("click", function (event) {
         if (event.target.closest("[data-log-more]")) dashLogMore(s);
         else if (event.target.closest("[data-log-retry]")) dashLogFirst(s, false);
-        else if (event.target.closest("[data-log-retry-new]")) { s.capped = false; dashLogRefresh(s); }
+        else if (event.target.closest("[data-log-retry-new]")) dashLogRefresh(s);
     });
 }
 
@@ -1841,7 +1894,9 @@ function dashLogShow(s) {
         return dashLogRefresh(s).then(function () { uiRefreshLoaded(s.id); });
     }
     s.rows = null;
+    s.rowsFor = null;
     s.failed = "";
+    s.refreshFailed = "";
     dashLogDraw(s, false);
     return dashLogFirst(s, false).then(function () { uiRefreshLoaded(s.id); });
 }
@@ -1849,8 +1904,8 @@ function dashLogShow(s) {
 DASH_PAGE_IMPL.activity = function () { dashLogShow(dashLogs.activity); };
 DASH_PAGE_IMPL.access = function () { dashLogShow(dashLogs.access); };
 
-registerPageRefresh("activity", 30000, function () { return dashLogRefresh(dashLogs.activity); });
-registerPageRefresh("access", 30000, function () { return dashLogRefresh(dashLogs.access); });
+registerPageRefresh("activity", 30000, function (isCurrent) { return dashLogRefresh(dashLogs.activity, isCurrent); });
+registerPageRefresh("access", 30000, function (isCurrent) { return dashLogRefresh(dashLogs.access, isCurrent); });
 
 var DASH_SEARCH_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
 

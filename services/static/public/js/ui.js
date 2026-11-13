@@ -360,9 +360,8 @@ function uiTextHeld(el) {
 // Toast (FB-2): one at a time, 4 seconds, waits while hovered or focused
 // ===========================================================================
 
-function showToast(message, type, options) {
+function showToast(message, type) {
     if (!uiHasDom()) return null;
-    var opts = options || {};
     var icons = { success: "✓", error: "✗", warning: "!", info: "i" };
     var kind = icons[type] ? type : "info";
     var old = document.getElementById("ui-toast");
@@ -375,32 +374,19 @@ function showToast(message, type, options) {
     toast.setAttribute("role", kind === "error" ? "alert" : "status");
     toast.innerHTML = '<span class="ui-toast-icon" aria-hidden="true">' + icons[kind] + "</span>" +
         "<p>" + esc(message) + "</p>" +
-        (opts.action ? '<button type="button" class="ui-btn ui-btn-sm ui-toast-action">' + esc(opts.action.label) + "</button>" : "") +
         '<button type="button" class="ui-icon-btn" data-toast-x title="Close" aria-label="Close">' + UI_CLOSE_ICON + "</button>";
     toast.querySelector("[data-toast-x]").addEventListener("click", function () { toast.remove(); });
-    var busy = false;
-    if (opts.action) {
-        toast.querySelector(".ui-toast-action").addEventListener("click", function () {
-            if (busy) return;
-            var result = opts.action.onAction();
-            if (!result || typeof result.then !== "function") { toast.remove(); return; }
-            busy = true;
-            Promise.resolve(result).catch(function () {}).then(function () { if (toast.isConnected) toast.remove(); });
-        });
-    }
     document.body.appendChild(toast);
     if (focusWasInIt) toast.querySelector("button").focus({ preventScroll: true });
-    if (opts.duration === Infinity) return toast;
 
-    var left = opts.duration || 4000;
+    var left = 4000;
     var started = Date.now();
     var timer = null;
     var fading = false;
     var removing = null;
-    var hold = function () { return busy || toast.matches(":hover") || toast.contains(document.activeElement); };
+    var hold = function () { return toast.matches(":hover") || toast.contains(document.activeElement); };
     var fade = function () {
         if (!toast.isConnected) return;
-        if (busy) { timer = null; return; }
         fading = true;
         toast.classList.add("is-fading");
         removing = setTimeout(function () { toast.remove(); }, 300);
@@ -552,8 +538,16 @@ function uiFieldsSnapshot(root) {
 }
 
 var uiGuarded = typeof WeakMap !== "undefined" ? new WeakMap() : null;
+var uiGuardedOpen = [];
 function uiGuardDialog(d) {
     if (uiGuarded) uiGuarded.set(d.backdrop, uiFieldsSnapshot(d.body));
+    uiGuardedOpen.push(d);
+}
+// Open typed dialogs that hold a change: they count as unsaved changes for the
+// router's question and for closing or reloading the browser tab (SV-1, DS-9)
+function uiDirtyDialogs() {
+    uiGuardedOpen = uiGuardedOpen.filter(function (d) { return d.backdrop.isConnected; });
+    return uiGuardedOpen.filter(uiDialogDirty);
 }
 function uiDialogDirty(d) {
     if (!uiGuarded || !uiGuarded.has(d.backdrop)) return false;
@@ -711,6 +705,13 @@ function uiOpenLayers() {
         });
 }
 
+// Drop a layer without asking (a jump several steps back, Leave): its owner hears
+// "ui-drop" first, so work it waits for (a reveal) knows the dialog is gone
+function uiLayerDrop(layer) {
+    try { layer.dispatchEvent(new CustomEvent("ui-drop")); } catch (e) { /* old browsers */ }
+    layer.remove();
+}
+
 // Close a layer the way a user would: its X, else its Cancel
 function uiLayerClose(layer) {
     var b = layer.querySelector("[data-dialog-x]") || layer.querySelector("[data-cancel]");
@@ -858,14 +859,22 @@ var uiUnsavedSources = [];
 var uiScrolls = {};
 var uiAppTitle = "Auth Service";
 
-// Who holds unsaved changes: fn() returns how many
-function uiUnsavedRegister(fn) {
-    uiUnsavedSources.push(fn);
+// Who holds unsaved changes: count() returns how many; reset() puts them back
+// to how they were loaded, when the user chose to leave them
+function uiUnsavedRegister(count, reset) {
+    uiUnsavedSources.push({ count: count, reset: reset });
 }
 function uiUnsavedCount() {
-    return uiUnsavedSources.reduce(function (sum, fn) {
-        try { return sum + (Number(fn()) || 0); } catch (e) { return sum; }
-    }, 0);
+    return uiUnsavedSources.reduce(function (sum, src) {
+        try { return sum + (Number(src.count()) || 0); } catch (e) { return sum; }
+    }, 0) + uiDirtyDialogs().length;
+}
+// Leave was chosen: what was unsaved is dropped, so it does not come back and ask again
+function uiUnsavedDiscard() {
+    uiUnsavedSources.forEach(function (src) {
+        try { if (src.count() && typeof src.reset === "function") src.reset(); } catch (e) { /* keep going */ }
+    });
+    uiDirtyDialogs().forEach(function (d) { uiLayerDrop(d.backdrop); });
 }
 function uiConfirmLeave() {
     var n = uiUnsavedCount();
@@ -874,7 +883,11 @@ function uiConfirmLeave() {
         title: "Leave without saving?",
         message: "You have " + uiCountLabel(n, "unsaved change", "unsaved changes") + ". Leaving drops " + (n === 1 ? "it" : "them") + ".",
         confirmText: "Leave", cancelText: "Stay", danger: true, focusCancel: true, noHistory: true,
-    }).then(function (ok) { uiLeaveAsking = false; return ok; });
+    }).then(function (ok) {
+        uiLeaveAsking = false;
+        if (ok) uiUnsavedDiscard();
+        return ok;
+    });
 }
 
 function uiPagePath(id) {
@@ -1048,7 +1061,7 @@ function uiOnPopState(event) {
     for (var i = 0; i < 10; i++) {
         var layers = uiOpenLayers();
         if (!layers.length) break;
-        layers[layers.length - 1].remove();
+        uiLayerDrop(layers[layers.length - 1]);
     }
     uiShowPage(target, { fromHistory: true });
     uiRestoreScroll(uiHistIdx);
@@ -1069,12 +1082,14 @@ var uiBackgroundRefreshers = {};
 var uiRefreshTimer = null;
 var uiMutationGen = 0;
 
+// run(isCurrent): isCurrent() turns false once this run timed out or a newer one
+// started, and the run then publishes nothing
 function registerPageRefresh(id, every, run) {
-    uiPageRefreshers[id] = { every: every, run: run, last: 0, running: false };
+    uiPageRefreshers[id] = { every: every, run: run, last: 0, running: false, cycle: 0 };
 }
 
 function registerBackgroundRefresh(name, every, run) {
-    uiBackgroundRefreshers[name] = { every: every, run: run, last: 0, running: false };
+    uiBackgroundRefreshers[name] = { every: every, run: run, last: 0, running: false, cycle: 0 };
 }
 
 // A save, delete or toggle: answers to reads that started before it are dropped
@@ -1098,10 +1113,15 @@ function uiRefreshRun(entry, force) {
     if (!entry || entry.running) return Promise.resolve(false);
     if (!force && Date.now() - entry.last < entry.every - 2000) return Promise.resolve(false);
     entry.running = true;
+    var cycle = ++entry.cycle;
+    var timedOut = false;
+    var isCurrent = function () { return !timedOut && entry.cycle === cycle; };
     var timer = null;
-    var limit = new Promise(function (resolve) { timer = setTimeout(resolve, PAGE_REFRESH_TIMEOUT); });
+    var limit = new Promise(function (resolve) {
+        timer = setTimeout(function () { timedOut = true; resolve(); }, PAGE_REFRESH_TIMEOUT);
+    });
     var work;
-    try { work = Promise.resolve(entry.run()); } catch (e) { work = Promise.resolve(); }
+    try { work = Promise.resolve(entry.run(isCurrent)); } catch (e) { work = Promise.resolve(); }
     return Promise.race([work.catch(function () {}), limit]).then(function () {
         clearTimeout(timer);
         entry.running = false;

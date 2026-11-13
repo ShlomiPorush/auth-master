@@ -102,19 +102,26 @@ def _cursors(rows: list) -> dict[str, str | None]:
     }
 
 
+def _checked_limit(limit: int, since: str | None) -> int:
+    """Up to 100 rows per request, as before; up to 500 only for a since refresh."""
+    if since is None and limit > DEFAULT_MAX_LIMIT:
+        raise HTTPException(422, f"limit must be at most {DEFAULT_MAX_LIMIT} without since")
+    return limit
+
+
 @router.get("/activity")
 async def get_activity_logs(
     request: Request,
     _sess: FullSession,
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=SINCE_MAX_LIMIT),
+    limit: int = Query(default=50, ge=1, le=SINCE_MAX_LIMIT, description="At most 100, or at most 500 together with since."),
     action: str | None = Query(default=None),
     search: str | None = Query(default=None),
     before: Annotated[str | None, Query()] = None,
     since: Annotated[str | None, Query()] = None,
 ):
     db = request.app.state.db
-    limit = max(1, min(SINCE_MAX_LIMIT if since is not None else DEFAULT_MAX_LIMIT, limit))
+    limit = _checked_limit(limit, since)
     # A cursor gives the position; the page number is ignored.
     offset = 0 if before is not None or since is not None else (page - 1) * limit
 
@@ -183,7 +190,7 @@ async def get_access_logs(
     request: Request,
     _sess: FullSession,
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=SINCE_MAX_LIMIT),
+    limit: int = Query(default=50, ge=1, le=SINCE_MAX_LIMIT, description="At most 100, or at most 500 together with since."),
     result: bool | None = Query(default=None),
     search: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
@@ -191,7 +198,7 @@ async def get_access_logs(
     since: Annotated[str | None, Query()] = None,
 ):
     db = request.app.state.db
-    limit = max(1, min(SINCE_MAX_LIMIT if since is not None else DEFAULT_MAX_LIMIT, limit))
+    limit = _checked_limit(limit, since)
     # A cursor gives the position; the page number is ignored.
     offset = 0 if before is not None or since is not None else (page - 1) * limit
 

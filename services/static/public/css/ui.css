@@ -589,7 +589,6 @@ a.ui-kpi:focus-visible { outline-offset: -2px; }
 .ui-toast .ui-icon-btn { width: 26px; height: 26px; margin-block: calc(-1 * var(--ui-sp-1)) 0; }
 .ui-toast .ui-icon-btn svg { width: 16px; height: 16px; }
 .ui-toast-icon { font-weight: 800; color: var(--ui-info); }
-.ui-toast-action { margin-block: calc(-1 * var(--ui-sp-1)); }
 .ui-toast-success { border-inline-start-color: var(--ui-ok); }
 .ui-toast-success .ui-toast-icon { color: var(--ui-ok); }
 .ui-toast-error { border-inline-start-color: var(--ui-fail); }

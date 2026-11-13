@@ -365,10 +365,26 @@ def test_limit_caps(run, kind):
     async def scenario(db):
         for k in range(120):
             await add(db, BASE - timedelta(seconds=k % 30))
-        assert len((await list_fn(db, limit=500))["logs"]) == 100
+        assert len((await list_fn(db, limit=100))["logs"]) == 100
         head = (await list_fn(db, limit=1))["headCursor"]
         since = await list_fn(db, limit=500, since=head)
         assert len(since["logs"]) == 120 and since["limit"] == 500
+
+    run(scenario)
+
+
+def test_limit_above_100_without_since_is_refused(run, kind):
+    add, list_fn = kind
+
+    async def scenario(db):
+        await add(db, BASE)
+        # The original contract: more than 100 rows per request is refused, not cut
+        with pytest.raises(HTTPException) as exc:
+            await list_fn(db, limit=101)
+        assert exc.value.status_code == 422
+        # A since refresh may ask for up to 500
+        head = (await list_fn(db, limit=1))["headCursor"]
+        assert (await list_fn(db, limit=500, since=head))["limit"] == 500
 
     run(scenario)
 
@@ -581,7 +597,10 @@ def test_http_cursor_paging_and_errors(client, path):
             assert res.json() == {"detail": "Invalid cursor"}
 
     assert client.get(path, params={"limit": 501, "since": body["headCursor"]}).status_code == 422
-    assert len(client.get(path, params={"limit": 500}).json()["logs"]) == 12
+    # Without since the original contract holds: at most 100, more is refused
+    assert client.get(path, params={"limit": 500}).status_code == 422
+    assert client.get(path, params={"limit": 101}).status_code == 422
+    assert len(client.get(path, params={"limit": 100}).json()["logs"]) == 12
 
 
 def test_http_logs_require_a_session(client):

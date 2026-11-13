@@ -10,7 +10,7 @@ const PUBLIC = path.join(__dirname, "..", "..", "static", "public");
 function loadScripts(files, extra) {
     const context = {
         console, Intl, Date, URL, URLSearchParams, Promise, Math, JSON, Number, String, Array, Object,
-        setTimeout, clearTimeout, setInterval, clearInterval,
+        setTimeout, clearTimeout, setInterval, clearInterval, CustomEvent,
         ...(extra || {}),
     };
     context.window = context;
