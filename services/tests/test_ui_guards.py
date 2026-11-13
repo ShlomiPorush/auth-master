@@ -647,7 +647,7 @@ def hygiene_problems(sources: dict[str, str]) -> list[str]:
                 problems.append(f"{name}: references the removed {removed}")
         if name.endswith(".html"):
             # All page code lives in js/*.js, where the popup and date scans read it
-            for m in re.finditer(r"<script\b(?![^>]*\bsrc=)[^>]*>", src):
+            for m in re.finditer(r"<script\b(?![^>]*\bsrc=)[^>]*>", src, re.IGNORECASE):
                 problems.append(f"{name}: inline <script> without src: {m.group(0)}")
         if name.endswith((".html", ".js")):
             for m in CLASS_ATTR.finditer(src):
@@ -675,6 +675,7 @@ def test_no_external_urls_tailwind_or_removed_files():
     ("css/ui.css", "@import url('https://fonts.example.com/x.css');"),
     ("js/dashboard.js", "var x = '<span class=\"text-slate-400\">x</span>';"),
     ("login.html", "<script>document.title = new Date().toLocaleString();</script>"),
+    ("login.html", "<SCRIPT>document.title = 'x';</SCRIPT>"),
 ])
 def test_hygiene_guard_catches(name, extra):
     assert hygiene_problems(_with(name, extra))
