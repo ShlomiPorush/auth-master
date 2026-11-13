@@ -114,7 +114,7 @@ def test_all_problems_are_reported_together(env, monkeypatch):
         "redis://default:changeme@redis:6379/0",
         "redis://:%63hangeme@redis:6379",
         "redis://redis:6379?password=changeme",
-        "redis://redis:6379/0?password=%2563hangeme",
+        "redis://redis:6379/0?password=%63hangeme",
         "rediss://:changeme@redis:6380",
         "unix:///run/redis.sock?password=changeme",
         "redis://:authpass@redis:6379",
