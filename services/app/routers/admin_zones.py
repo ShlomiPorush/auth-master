@@ -7,11 +7,9 @@ from app.datetime_utils import fmt_datetime
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
-from redis.asyncio import Redis
 
 from app.admin_deps import FullSession, csrf_check
 from app.db import UniqueViolationError
-from app.token_cache import cache_delete
 from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/admin/api", tags=["admin-zones"])
@@ -100,7 +98,6 @@ async def patch_zone(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    r: Redis = request.app.state.redis
     try:
         uid = uuid_mod.UUID(zone_id)
     except ValueError as e:
@@ -130,9 +127,9 @@ async def patch_zone(
         raise HTTPException(400, "No updates")
 
     if db.is_pg:
-        await _patch_zone_pg(db, r, uid, body, parts, args, n)
+        await _patch_zone_pg(db, uid, body, parts, args, n)
     else:
-        await _patch_zone_sqlite(db, r, uid, body, parts, args, n)
+        await _patch_zone_sqlite(db, uid, body, parts, args, n)
 
     actor = await get_actor(request, sess)
     ip = request.client.host if request.client else "unknown"
@@ -154,7 +151,7 @@ async def patch_zone(
     return {"ok": True}
 
 
-async def _patch_zone_pg(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
+async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
     """PostgreSQL implementation using jsonb functions inside a transaction."""
     async with db.transaction() as conn:
         row = await conn.fetchrow("SELECT name FROM zones WHERE id = $1::uuid FOR UPDATE", uid)
@@ -170,7 +167,7 @@ async def _patch_zone_pg(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePatch,
 
         if body.name is not None and body.name.strip() != old_name:
             new_name = body.name.strip()
-            updated = await conn.fetch(
+            await conn.execute(
                 """
                 UPDATE tokens t
                 SET grants = (
@@ -187,16 +184,13 @@ async def _patch_zone_pg(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePatch,
                     FROM jsonb_array_elements(t.grants) AS elem
                     WHERE elem->>'area' = $1
                 )
-                RETURNING token_hash
                 """,
                 old_name,
                 new_name,
             )
-            for u in updated:
-                await cache_delete(r, u["token_hash"])
 
 
-async def _patch_zone_sqlite(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
+async def _patch_zone_sqlite(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
     """SQLite implementation — update grants JSON in Python."""
     row = await db.fetchrow("SELECT name FROM zones WHERE id = $1", str(uid))
     if row is None:
@@ -211,7 +205,7 @@ async def _patch_zone_sqlite(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePa
 
     if body.name is not None and body.name.strip() != old_name:
         new_name = body.name.strip()
-        token_rows = await db.fetch("SELECT id, token_hash, grants FROM tokens")
+        token_rows = await db.fetch("SELECT id, grants FROM tokens")
         for tr in token_rows:
             grants = json.loads(tr["grants"]) if isinstance(tr["grants"], str) else tr["grants"]
             changed = False
@@ -221,7 +215,6 @@ async def _patch_zone_sqlite(db: Any, r: Redis, uid: uuid_mod.UUID, body: ZonePa
                     changed = True
             if changed:
                 await db.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(grants), tr["id"])
-                await cache_delete(r, tr["token_hash"])
 
 
 @router.delete("/zones/{zone_id}")
@@ -233,7 +226,6 @@ async def delete_zone(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    r: Redis = request.app.state.redis
     try:
         uid = uuid_mod.UUID(zone_id)
     except ValueError as e:
@@ -245,9 +237,9 @@ async def delete_zone(
     zone_name = row["name"]
 
     if db.is_pg:
-        await _delete_zone_pg(db, r, uid)
+        await _delete_zone_pg(db, uid)
     else:
-        await _delete_zone_sqlite(db, r, uid)
+        await _delete_zone_sqlite(db, uid)
 
     actor = await get_actor(request, sess)
     ip = request.client.host if request.client else "unknown"
@@ -264,12 +256,12 @@ async def delete_zone(
     return {"ok": True}
 
 
-async def _delete_zone_pg(db: Any, r: Redis, uid: uuid_mod.UUID) -> None:
+async def _delete_zone_pg(db: Any, uid: uuid_mod.UUID) -> None:
     async with db.transaction() as conn:
         row = await conn.fetchrow("DELETE FROM zones WHERE id = $1::uuid RETURNING id, name", uid)
         if row is None:
             raise HTTPException(404, "Not found")
-        updated = await conn.fetch(
+        await conn.execute(
             """
             UPDATE tokens t
             SET grants = COALESCE(
@@ -285,15 +277,12 @@ async def _delete_zone_pg(db: Any, r: Redis, uid: uuid_mod.UUID) -> None:
                 FROM jsonb_array_elements(t.grants) AS elem
                 WHERE elem->>'area' = $1
             )
-            RETURNING token_hash
             """,
             row["name"],
         )
-    for u in updated:
-        await cache_delete(r, u["token_hash"])
 
 
-async def _delete_zone_sqlite(db: Any, r: Redis, uid: uuid_mod.UUID) -> None:
+async def _delete_zone_sqlite(db: Any, uid: uuid_mod.UUID) -> None:
     row = await db.fetchrow("SELECT id, name FROM zones WHERE id = $1", str(uid))
     if row is None:
         raise HTTPException(404, "Not found")
@@ -301,10 +290,9 @@ async def _delete_zone_sqlite(db: Any, r: Redis, uid: uuid_mod.UUID) -> None:
     await db.execute("DELETE FROM zones WHERE id = $1", str(uid))
 
     # Remove zone from token grants in Python
-    token_rows = await db.fetch("SELECT id, token_hash, grants FROM tokens")
+    token_rows = await db.fetch("SELECT id, grants FROM tokens")
     for tr in token_rows:
         grants = json.loads(tr["grants"]) if isinstance(tr["grants"], str) else tr["grants"]
         filtered = [g for g in grants if g.get("area") != zone_name]
         if len(filtered) != len(grants):
             await db.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(filtered), tr["id"])
-            await cache_delete(r, tr["token_hash"])

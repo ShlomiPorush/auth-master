@@ -59,7 +59,6 @@ import app.main as main_mod  # noqa: E402
 from app import rate_limit  # noqa: E402
 from app.crypto_tokens import sha256_hex  # noqa: E402
 from app.deps import ALL_SCOPES  # noqa: E402
-from app.token_cache import cache_key  # noqa: E402
 
 
 class FakeRedis:
@@ -208,15 +207,16 @@ def test_unknown_inactive_and_expired_are_identical(client):
     assert len({r.content for r in responses}) == 1
 
 
-def test_stale_cache_entry_does_not_report_revoked_token_active(client):
+def test_leftover_cache_entry_does_not_report_revoked_token_active(client):
     tok = secrets.token_urlsafe(24)
     tid = _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}])
     _run(client, _set_inactive, tid)
-    # A stale active entry left in the validate cache after the revoke.
-    client.fake_redis.data[cache_key(sha256_hex(tok))] = json.dumps(
+    # An active entry left in Redis by a version that cached /validate results.
+    client.fake_redis.data[f"validate:{sha256_hex(tok)}"] = json.dumps(
         {"id": tid, "name": "x", "grants": [{"area": "orders", "level": "read"}], "expires_at": None, "is_active": True}
     )
     assert _grants(client, tok).json() == {"active": False}
+    assert client.post("/validate", json={"token": tok, "area": "orders", "level": "read"}).json() == {"result": False}
 
 
 def test_lookup_does_not_need_redis(client):
@@ -307,9 +307,7 @@ def test_validate_unchanged(client, method):
     assert call("orders", "write") == {"result": True}
     assert _run(client, _last_used, tid) is not None
     assert call("orders", "delete") == {"result": False}
-    # Second calls are served from the cache with the same answers.
     assert call("orders", "read") == {"result": True}
-    assert cache_key(sha256_hex(tok)) in client.fake_redis.data
     logs = _run(client, _access_logs)
     assert [(r["area"], r["level"], bool(r["result"])) for r in logs] == [
         ("billing", "read", False),

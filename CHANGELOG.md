@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checked too. Error messages name the setting and the fix and never show its
   value.
 
+- Revoking, deleting, rotating or narrowing a token, and renaming or deleting a
+  zone, now take effect for the very next validation request. Validation results
+  were cached in Redis for up to `VALIDATE_CACHE_TTL_SEC` seconds (300 by default),
+  and two paths could keep serving the old result until that time ran out: a
+  validation request that read the token just before the change and stored it in
+  the cache just after, and a cache delete that failed after the database change
+  was saved. `/validate` now reads the token from the database on every request.
+  This holds once no instance of an earlier version is serving requests, because an
+  earlier version still reads and fills the cache. Rolling back to an earlier
+  version can bring back results cached before the upgrade: wait at least
+  `VALIDATE_CACHE_TTL_SEC` seconds after the upgrade, or delete the Redis keys that
+  start with `validate:`, before an earlier version serves traffic again.
+
 ### Changed
 
 - **Breaking:** `ADMIN_API_KEY`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and
@@ -77,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expired token. It shares the per-IP rate limit with `/validate`, answers `429`
   when the limit is exceeded, and appears in the access log.
 - API key holders can read the scopes of their key with `GET /tokens/me`.
+
+### Removed
+
+- The `VALIDATE_CACHE_TTL_SEC` setting. It has no effect and can be removed from
+  environment files; leaving it in place is harmless. Validation entries already
+  in Redis are no longer read and expire on their own. Redis is still required
+  for admin sessions.
 
 ### Fixed
 
