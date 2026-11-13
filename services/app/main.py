@@ -21,6 +21,22 @@ from app.token_cache import cache_delete
 from app.logger import purge_old_logs
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
+# The only stylesheets and scripts served from /css and /js.
+STATIC_CSS = frozenset({"ui.css", "swagger-ui.css"})
+STATIC_JS = frozenset({
+    "common.js",
+    "theme.js",
+    "head.js",
+    "ui.js",
+    "dashboard.js",
+    "auth-pages.js",
+    "swagger-ui-bundle.js",
+    "redoc.standalone.js",
+    "qrcode.min.js",
+})
+# Served paths come from these lists, never from the request text itself.
+_CSS_PATHS = {name: f"css/{name}" for name in STATIC_CSS}
+_JS_PATHS = {name: f"js/{name}" for name in STATIC_JS}
 
 _settings = get_settings()
 # Normalise: strip trailing slash, ensure leading slash if non-empty
@@ -228,29 +244,37 @@ async def legacy_admin_js(filename: str):
     return RedirectResponse(_prefixed(f"/js/{filename}"), status_code=302)
 
 
+# Stylesheets and scripts keep their names across releases, so the browser must
+# check them on every load; a cached copy from an older release would not match
+# the page's markup after an upgrade.
+_REVALIDATE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/css/{filename}")
 async def static_css(filename: str):
-    if filename not in ("shared.css", "tailwind.css", "swagger-ui.css", "inter.css"):
+    rel = _CSS_PATHS.get(filename)
+    if rel is None:
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(
-        _safe_static_file(f"css/{filename}"),
+        _safe_static_file(rel),
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers=_REVALIDATE,
     )
 
 
 @app.get("/js/{filename}")
 async def static_js(filename: str):
-    if filename not in ("common.js", "theme.js", "head.js", "swagger-ui-bundle.js", "redoc.standalone.js", "qrcode.min.js"):
+    rel = _JS_PATHS.get(filename)
+    if rel is None:
         raise HTTPException(status_code=404, detail="Not found")
 
     # head.js is served dynamically with BASE_PATH injected
     if filename == "head.js":
         source = _safe_static_file("js/head.js").read_text(encoding="utf-8")
         script = f'window.__BASE_PATH__ = {json.dumps(ROOT_PATH)};\n{source}'
-        return Response(content=script, media_type="application/javascript")
+        return Response(content=script, media_type="application/javascript", headers=_REVALIDATE)
 
-    return FileResponse(_safe_static_file(f"js/{filename}"))
+    return FileResponse(_safe_static_file(rel), headers=_REVALIDATE)
 
 
 @app.get("/fonts/{filename}")

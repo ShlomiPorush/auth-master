@@ -15,6 +15,11 @@ def _get_tz() -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def get_tz_name() -> str:
+    """Return the IANA name of the zone the server formats dates in (UTC if TZ is invalid)."""
+    return _get_tz().key
+
+
 def fmt_datetime(val: Any) -> str | None:
     """Convert a DB datetime value (str or datetime) to an ISO string in the configured TZ.
 

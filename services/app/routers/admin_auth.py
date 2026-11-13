@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from app.crypto_totp import decrypt_totp_secret
+from app.datetime_utils import get_tz_name
 from app.sessions import (
     COOKIE_NAME,
     SESSION_TTL,
@@ -148,4 +149,5 @@ async def me(request: Request):
         "user": {"username": username},
         "csrf": sess["csrf"],
         "allowedAreas": areas,
+        "timeZone": get_tz_name(),
     }

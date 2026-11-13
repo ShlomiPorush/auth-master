@@ -47,6 +47,8 @@ GET /health
 }
 ```
 
+The status is `200` when the database and Redis both respond. When either does not respond within 2 seconds, the status is `503` and the matching field is `false`.
+
 ---
 
 ### Validate Token

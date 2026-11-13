@@ -1,1812 +1,335 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Auth Service — Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Auth Service</title>
     <meta name="description" content="Token management dashboard for Auth Service" />
-    <script src="/js/head.js"></script>
+    <style>.hidden{display:none}</style>
     <script src="/js/theme.js"></script>
-    <style>
-      /* badge styles */
-      .badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
-      .badge-green { background: rgba(16,185,129,.12); color: #34d399; border: 1px solid rgba(16,185,129,.2); }
-      .badge-red { background: rgba(239,68,68,.12); color: #f87171; border: 1px solid rgba(239,68,68,.2); }
-      .badge-amber { background: rgba(245,158,11,.12); color: #fbbf24; border: 1px solid rgba(245,158,11,.2); }
-      .badge-blue { background: rgba(59,130,246,.12); color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
-      .badge-slate { background: rgba(100,116,139,.12); color: #94a3b8; border: 1px solid rgba(100,116,139,.2); }
-      .badge-violet { background: rgba(139,92,246,.12); color: #a78bfa; border: 1px solid rgba(139,92,246,.2); }
-      /* action buttons */
-      .btn-action {
-        display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px;
-        border-radius: 8px; font-size: 12px; font-weight: 500;
-        transition: all .2s; cursor: pointer; border: 1px solid transparent;
-      }
-      .btn-action:hover { filter: brightness(1.15); }
-      .btn-outline { background: transparent; color: #94a3b8; border-color: #334155; }
-      .btn-outline:hover { background: rgba(59,130,246,.08); color: #e2e8f0; border-color: #3b82f6; }
-      .btn-danger { background: transparent; color: #f87171; border-color: rgba(239,68,68,.3); }
-      .btn-danger:hover { background: rgba(239,68,68,.1); }
-      .btn-success { background: transparent; color: #34d399; border-color: rgba(16,185,129,.3); }
-      .btn-success:hover { background: rgba(16,185,129,.1); }
-      .btn-warn { background: transparent; color: #fbbf24; border-color: rgba(245,158,11,.3); }
-      .btn-warn:hover { background: rgba(245,158,11,.1); }
-      /* dashboard input override — slightly smaller padding */
-      .input-dark { padding: 8px 14px; }
-      /* status dot */
-      .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-      .status-ok { background: #34d399; box-shadow: 0 0 6px rgba(16,185,129,.4); }
-      .status-err { background: #f87171; box-shadow: 0 0 6px rgba(239,68,68,.4); }
-      .status-pending { background: #94a3b8; }
-      /* tab nav */
-      .tab-btn {
-        display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
-        font-size: 13px; font-weight: 500; color: #94a3b8;
-        border-bottom: 2px solid transparent; transition: all .2s; cursor: pointer;
-        background: transparent; border-top: none; border-left: none; border-right: none;
-        white-space: nowrap; text-decoration: none;
-      }
-      .tab-btn:hover { color: #e2e8f0; }
-      .tab-btn.active { color: #60a5fa; border-bottom-color: #3b82f6; }
-      /* scrollbar */
-      ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #111827; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-      /* toast animation */
-      @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-      .toast-enter { animation: slideUp .25s ease-out; }
-      /* table — desktop */
-      .data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-      .data-table th { padding: 12px 16px; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; text-align: left; border-bottom: 1px solid #1a2332; overflow: hidden; text-overflow: ellipsis; }
-      .data-table td { padding: 14px 16px; font-size: 13px; color: #cbd5e1; border-bottom: 1px solid rgba(30,41,59,.5); vertical-align: top; overflow: hidden; text-overflow: ellipsis; }
-      .data-table tbody tr { transition: background .15s; }
-      .data-table tbody tr:hover { background: rgba(59,130,246,.03); }
-      /* token table column widths — 5 columns */
-      .col-name { width: 18%; } .col-grants { width: 28%; }
-      .col-status { width: 10%; } .col-last { width: 20%; } .col-actions { width: 24%; }
-      /* zone table column widths */
-      .zcol-name { width: 30%; } .zcol-desc { width: 30%; } .zcol-created { width: 20%; } .zcol-actions { width: 20%; }
-      /* api key table column widths */
-      .akcol-name { width: 22%; } .akcol-scopes { width: 38%; } .akcol-created { width: 20%; } .akcol-actions { width: 20%; }
-      /* modal backdrop */
-      .modal-backdrop { background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
-      /* modal inner */
-      .modal-inner {
-        max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem);
-        overflow-y: auto;
-      }
-      /* scrollable areas list inside modals */
-      .areas-scroll { max-height: 35vh; overflow-y: auto; padding-right: 4px; }
-      /* lock background scroll */
-      body.modal-open { overflow: hidden; }
-      /* ── Mobile card view for tokens ── */
-      .token-card { display: none; }
-      /* search bar */
-      .search-bar { position: relative; }
-      .search-bar svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
-      .search-bar input { padding-left: 36px; }
-      .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-      .filter-pill {
-        display: inline-flex; align-items: center; padding: 5px 14px;
-        border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer;
-        border: 1px solid transparent; background: transparent; color: #94a3b8;
-        transition: all .2s; white-space: nowrap;
-      }
-      .filter-pill:hover { opacity: .85; }
-      /* colored filter pills */
-      .filter-pill[data-filter="all"] { border-color: #334155; color: #94a3b8; }
-      .filter-pill[data-filter="all"].active { background: rgba(59,130,246,.12); border-color: #3b82f6; color: #60a5fa; }
-      .filter-pill[data-filter="active"] { border-color: rgba(16,185,129,.3); color: #34d399; }
-      .filter-pill[data-filter="active"].active { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.5); color: #34d399; }
-      .filter-pill[data-filter="disabled"] { border-color: rgba(239,68,68,.3); color: #f87171; }
-      .filter-pill[data-filter="disabled"].active { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.5); color: #f87171; }
-      /* clear filters */
-      .btn-clear-filter {
-        display: none; align-items: center; gap: 4px; padding: 5px 10px;
-        border-radius: 8px; font-size: 11px; font-weight: 500; cursor: pointer;
-        border: 1px dashed #475569; background: transparent; color: #64748b;
-        transition: all .2s; white-space: nowrap;
-      }
-      .btn-clear-filter:hover { border-color: #94a3b8; color: #94a3b8; }
-      .btn-clear-filter.visible { display: inline-flex; }
-      /* zone dropdown filter */
-      .filter-select {
-        padding: 5px 28px 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 500;
-        border: 1px solid #243044; background: #0b1120; color: #94a3b8; cursor: pointer;
-        transition: all .2s; outline: none;
-        appearance: none; -webkit-appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-position: right 8px center;
-      }
-      .filter-select:hover { border-color: #3b82f6; color: #e2e8f0; }
-      .filter-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
-      /* area grid in modals */
-      .areas-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
-      @media (min-width: 480px) { .areas-grid { grid-template-columns: repeat(2, 1fr); } }
-      @media (max-width: 767px) {
-        .data-table-wrap { display: none; }
-        .token-cards { display: block !important; }
-        .zone-cards { display: block !important; }
-        .token-card {
-          display: block; padding: 16px;
-          border-bottom: 1px solid rgba(30,41,59,.5);
-        }
-        .token-card:last-child { border-bottom: none; }
-        .token-card-field { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; font-size: 13px; }
-        .token-card-label { color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-        .token-card-value { color: #cbd5e1; text-align: right; }
-        .token-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(30,41,59,.3); }
-        .token-card-actions .btn-action { flex: 1; min-width: 70px; justify-content: center; padding: 8px 10px; }
-        /* zone card */
-        .zone-card {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 14px 16px; border-bottom: 1px solid rgba(30,41,59,.5); font-size: 13px;
-        }
-        .zone-card:last-child { border-bottom: none; }
-        /* stat cards compact */
-        .stat-card-compact { padding: 12px !important; }
-        .stat-card-compact .stat-val { font-size: 1.25rem !important; }
-        .stat-card-compact .stat-icon { display: none; }
-        /* header mobile */
-        .header-actions .btn-label { display: none; }
-        .header-user { display: none; }
-        /* footer stacking */
-        .footer-inner { flex-direction: column; gap: 8px; align-items: flex-start !important; }
-      }
-      @media (min-width: 768px) {
-        .token-cards { display: none !important; }
-        .zone-cards { display: none !important; }
-      }
-      /* body flex layout for sticky footer */
-      body { display: flex; flex-direction: column; }
-      main { flex: 1; }
-    </style>
+    <script src="/js/head.js"></script>
   </head>
-  <body class="min-h-screen font-sans text-slate-200 antialiased">
-    <!-- ─── HEADER ─── -->
-    <header class="border-b border-navy-600 bg-navy-800/80 backdrop-blur-sm sticky top-0 z-40">
-      <div class="max-w-[1600px] mx-auto px-3 sm:px-6">
-        <div class="flex items-center justify-between h-14">
-          <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div class="flex items-center gap-2 flex-shrink-0">
-              <svg class="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-              <h1 class="text-sm sm:text-base font-semibold text-white whitespace-nowrap">Auth Service</h1>
-            </div>
-            <div class="flex items-center gap-1" id="serviceIndicators">
-              <span id="dbDot" class="status-dot status-pending" title="Database"></span>
-              <span id="redisDot" class="status-dot status-pending" title="Redis"></span>
-            </div>
-          </div>
-          <div class="flex items-center gap-1.5 sm:gap-2 header-actions flex-shrink-0">
-            <span id="user" class="text-sm text-slate-400 mr-1 header-user truncate max-w-[100px]"></span>
-            <button type="button" id="refresh" class="btn-action btn-outline" title="Refresh">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
-              <span class="btn-label">Refresh</span>
-            </button>
-            <button type="button" id="logout" class="btn-action btn-outline"><span class="btn-label">Log out</span><svg class="w-3.5 h-3.5 sm:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg></button>
-          </div>
-        </div>
-      </div>
-    </header>
+  <body class="ui ui-app">
+    <div id="boot"><div class="ui-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p>Loading the portal...</p></div></div>
 
-    <!-- ─── TAB NAV ─── -->
-    <nav class="border-b border-navy-600 bg-navy-800/50">
-      <div class="max-w-[1600px] mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto whitespace-nowrap">
-        <a id="tabTokens" href="/admin/tokens" class="tab-btn active">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-          Tokens
-        </a>
-        <a id="tabZones" href="/admin/zones" class="tab-btn">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
-          Zones
-        </a>
-        <a id="tabApiKeys" href="/admin/api-keys" class="tab-btn">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-          API Keys
-        </a>
-        <a id="tabActivityLog" href="/admin/logs/activity" class="tab-btn">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
-          Activity Log
-        </a>
-        <a id="tabAccessLogs" href="/admin/logs/access" class="tab-btn">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-          Access Logs
-        </a>
-      </div>
-    </nav>
-
-    <!-- ─── MAIN ─── -->
-    <main class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
-      <!-- ─── STAT CARDS ─── -->
-      <div class="grid grid-cols-3 gap-2 sm:gap-4 mb-6" id="statsRow">
-        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Tokens</span>
-            <svg class="w-5 h-5 text-blue-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-          </div>
-          <p id="statTotal" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
-        </div>
-        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Active</span>
-            <svg class="w-5 h-5 text-emerald-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          </div>
-          <p id="statActive" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
-        </div>
-        <div class="rounded-xl border border-navy-600 bg-navy-800 p-5 card-glow stat-card-compact">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Zones</span>
-            <svg class="w-5 h-5 text-violet-400 opacity-60 stat-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z"/></svg>
-          </div>
-          <p id="statZones" class="text-3xl font-bold text-white mt-2 stat-val">—</p>
-        </div>
-      </div>
-
-      <!-- ─── TOKEN CREATED BANNER ─── -->
-      <div id="once" class="hidden mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-        <p class="font-medium text-emerald-300 text-sm">✓ Token created — copy it now, you can reveal it later with MFA.</p>
-        <pre id="rawtok" class="mt-2 text-sm break-all bg-navy-950 text-emerald-200 p-3 rounded-lg font-mono"></pre>
-        <div class="mt-3 flex gap-3 items-center">
-          <button type="button" id="copyNewToken" class="btn-action btn-success text-xs">Copy token</button>
-          <button type="button" id="dismissOnce" class="text-xs text-blue-400 underline hover:text-blue-300 cursor-pointer">Dismiss</button>
-        </div>
-      </div>
-
-      <!-- ─── TOKENS PANEL ─── -->
-      <section id="panelTokens">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-white">API Tokens</h2>
-          <button type="button" id="newtok" class="btn-action btn-primary">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            New Token
+    <div class="ui-shell hidden" id="ui-shell">
+      <!-- Sidebar (wide screens) and icon rail (761 to 1100px) -->
+      <aside class="ui-side" aria-label="Sidebar">
+        <div class="ui-brand">
+          <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
+          <span class="ui-brand-name">Auth Service</span>
+          <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            <span class="ui-bell-badge hidden" aria-hidden="true"></span>
           </button>
         </div>
-        <!-- Search & Filter -->
-        <div class="flex flex-col sm:flex-row gap-3 mb-4">
-          <div class="search-bar flex-1">
-            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-            <input id="tokenSearch" class="input-dark" placeholder="Search tokens by name or description…" />
-          </div>
-          <div class="filter-pills" id="tokenFilters">
-            <button type="button" class="filter-pill active" data-filter="all">All</button>
-            <button type="button" class="filter-pill" data-filter="active">Active</button>
-            <button type="button" class="filter-pill" data-filter="disabled">Disabled</button>
-            <select id="zoneFilter" class="filter-select">
-              <option value="">All zones</option>
-            </select>
-            <select id="levelFilter" class="filter-select">
-              <option value="">All levels</option>
-              <option value="read">Read</option>
-              <option value="write">Write</option>
-              <option value="delete">Delete</option>
-              <option value="all">All perms</option>
-            </select>
-            <button type="button" id="clearFilters" class="btn-clear-filter" title="Clear all filters">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-              Clear
-            </button>
-          </div>
-        </div>
-        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
-          <!-- Desktop table view -->
-          <div class="overflow-x-auto data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th class="col-name">Name</th>
-                  <th class="col-grants">Grants</th>
-                  <th class="col-status">Status</th>
-                  <th class="col-last">Last Used</th>
-                  <th class="col-actions text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="rows"></tbody>
-            </table>
-          </div>
-          <!-- Mobile card view -->
-          <div id="tokenCards" class="token-cards" style="display:none"></div>
-          <div id="emptyTokens" class="hidden text-center py-12 text-slate-500 text-sm">
-            <svg class="w-10 h-10 mx-auto mb-3 text-slate-600" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-            No tokens yet. Click <strong class="text-blue-400">New Token</strong> to create one.
-          </div>
-        </div>
-      </section>
 
-      <!-- ─── ZONES PANEL ─── -->
-      <section id="panelZones" class="hidden">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-white">Zones</h2>
+        <div class="ui-status-card" aria-label="Service status" role="group">
+          <div class="ui-status-row" data-status="db" data-inventory="shell.status.db"><span class="ui-dot" aria-hidden="true"></span><span>Database</span><b>Not checked yet</b></div>
+          <div class="ui-status-row" data-status="redis" data-inventory="shell.status.redis"><span class="ui-dot" aria-hidden="true"></span><span>Redis</span><b>Not checked yet</b></div>
         </div>
-        <p class="text-sm text-slate-400 mb-4">Zones define allowed API areas for new tokens. If the list is empty, <code class="text-xs bg-navy-700 text-blue-300 px-1.5 py-0.5 rounded">ALLOWED_AREAS</code> from the environment is used.</p>
-        <form id="zoneAdd" class="flex flex-wrap gap-3 mb-5 items-end">
-          <div class="flex-1 min-w-[140px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Zone name</label>
-            <input name="name" placeholder="e.g. orders" class="input-dark" required />
-          </div>
-          <div class="flex-1 min-w-[140px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Description (optional)</label>
-            <input name="description" placeholder="What this zone controls" class="input-dark" />
-          </div>
-          <button type="submit" class="btn-action btn-primary h-[38px]">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-            Add
+
+        <nav class="ui-nav" aria-label="Main">
+          <p class="ui-nav-group">Manage</p>
+          <a class="ui-nav-item" data-page-link="tokens" data-inventory="shell.nav.tokens" href="/admin/tokens">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+            <span class="ui-nav-label">Tokens</span><span class="ui-fly" aria-hidden="true">Tokens</span>
+          </a>
+          <a class="ui-nav-item" data-page-link="zones" data-inventory="shell.nav.zones" href="/admin/zones">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+            <span class="ui-nav-label">Zones</span><span class="ui-fly" aria-hidden="true">Zones</span>
+          </a>
+          <a class="ui-nav-item" data-page-link="apikeys" data-inventory="shell.nav.apikeys" href="/admin/api-keys">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+            <span class="ui-nav-label">API Keys</span><span class="ui-fly" aria-hidden="true">API Keys</span>
+          </a>
+          <p class="ui-nav-group">Logs</p>
+          <a class="ui-nav-item" data-page-link="activity" data-inventory="shell.nav.activity" href="/admin/logs/activity">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
+            <span class="ui-nav-label">Activity Log</span><span class="ui-fly" aria-hidden="true">Activity Log</span>
+          </a>
+          <a class="ui-nav-item" data-page-link="access" data-inventory="shell.nav.access" href="/admin/logs/access">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            <span class="ui-nav-label">Access Logs</span><span class="ui-fly" aria-hidden="true">Access Logs</span>
+          </a>
+        </nav>
+
+        <div class="ui-side-foot">
+          <button type="button" class="ui-tool" data-theme-toggle>
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+            <span class="ui-tool-label">Theme</span><span class="ui-fly" aria-hidden="true">Theme</span>
           </button>
-        </form>
-        <p id="zoneErr" class="text-sm text-red-400 hidden mb-3"></p>
-        <!-- Zone search -->
-        <div class="search-bar mb-4">
-          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-          <input id="zoneSearch" class="input-dark" placeholder="Search zones…" />
+          <button type="button" class="ui-tool" data-prefs aria-label="Preferences">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/></svg>
+            <span class="ui-tool-label">Preferences</span><span class="ui-fly" aria-hidden="true">Preferences</span>
+          </button>
+          <p class="ui-side-user">Signed in as <bdi dir="auto" data-user data-inventory="shell.user"></bdi></p>
+          <button type="button" class="ui-tool" data-logout data-inventory="shell.logout" aria-label="Log out">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+            <span class="ui-tool-label">Log out</span><span class="ui-fly" aria-hidden="true">Log out</span>
+          </button>
         </div>
-        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
-          <div class="overflow-x-auto data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th class="zcol-name">Name</th>
-                  <th class="zcol-desc">Description</th>
-                  <th class="zcol-created">Created</th>
-                  <th class="zcol-actions text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="zoneRows"></tbody>
-            </table>
-          </div>
-          <!-- Mobile zone cards -->
-          <div id="zoneCards" class="zone-cards" style="display:none"></div>
-        </div>
-      </section>
+      </aside>
 
-      <!-- ─── API KEYS PANEL ─── -->
-      <section id="panelApiKeys" class="hidden">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-white">API Keys</h2>
-          <button type="button" id="newApiKeyBtn" class="btn-action btn-primary"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg> New Key</button>
-        </div>
-        <p class="text-sm text-slate-400 mb-4">API keys allow programmatic access to the Auth Service (e.g. from n8n). Each key can have specific permission scopes.</p>
-        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
-          <div class="overflow-x-auto data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th class="akcol-name">Name</th>
-                  <th class="akcol-scopes">Scopes</th>
-                  <th class="akcol-created">Created</th>
-                  <th class="akcol-actions text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="apiKeyRows"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+      <!-- Phone top bar -->
+      <header class="ui-mtop">
+        <a class="ui-mtop-home" data-go="tokens" data-query="" href="/admin/tokens" aria-label="Tokens"><img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" /></a>
+        <div class="ui-mtop-title"><small>Auth Service</small><b id="mtop-page">Tokens</b></div>
+        <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+          <span class="ui-bell-badge hidden" aria-hidden="true"></span>
+        </button>
+      </header>
 
-      <!-- ─── ACTIVITY LOG PANEL ─── -->
-      <section id="panelActivityLog" class="hidden">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-white">Activity Log</h2>
-        </div>
-        <p class="text-sm text-slate-400 mb-4">History of all administrative actions performed on this Auth Service.</p>
-        
-        <!-- Filters -->
-        <div class="flex flex-wrap gap-3 mb-4 items-end bg-navy-900/50 p-4 rounded-xl border border-navy-600">
-          <div class="flex-1 min-w-[200px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Search (Actor or Entity Name)</label>
-            <div class="search-bar">
-              <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-              <input id="actSearch" class="input-dark text-sm" placeholder="Filter actor, entity name..." style="padding-left: 2.25rem;" />
+      <main class="ui-main" id="ui-main">
+
+        <!-- ─── Tokens ─── -->
+        <section class="ui-page hidden" data-page="tokens" aria-labelledby="h-tokens">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-tokens">Tokens</h1>
+              <p>Who can call your services, in which zones, and until when.</p>
+            </div>
+            <div class="ui-page-actions">
+              <button type="button" class="ui-btn ui-btn-primary" id="tok-new" data-inventory="tokens.new">New Token</button>
             </div>
           </div>
-          <div class="w-[180px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Action Type</label>
-            <select id="actActionFilter" class="input-dark text-sm bg-navy-800 border-navy-600 text-white rounded-lg h-[38px] w-full px-3">
-              <option value="">All actions</option>
-              <option value="token_create">Token Create</option>
-              <option value="token_patch">Token Patch</option>
-              <option value="token_delete">Token Delete</option>
-              <option value="token_reveal">Token Reveal</option>
-              <option value="zone_create">Zone Create</option>
-              <option value="zone_patch">Zone Patch</option>
-              <option value="zone_delete">Zone Delete</option>
-              <option value="api_key_create">API Key Create</option>
-              <option value="api_key_patch">API Key Patch</option>
-              <option value="api_key_reveal">API Key Reveal</option>
-              <option value="api_key_delete">API Key Delete</option>
-              <option value="login">Login</option>
-              <option value="logout">Logout</option>
-            </select>
-          </div>
-          <button type="button" id="btnFilterActivity" class="btn-action btn-primary h-[38px] px-5 text-sm font-medium">Filter</button>
-          <button type="button" id="btnResetActivity" class="btn-action btn-outline h-[38px] px-5 text-sm font-medium">Reset</button>
-        </div>
 
-        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
-          <div class="overflow-x-auto data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Actor</th>
-                  <th>Action</th>
-                  <th>Entity Type</th>
-                  <th>Entity Name</th>
-                  <th>Details</th>
-                  <th>IP Address</th>
-                </tr>
-              </thead>
-              <tbody id="activityLogRows"></tbody>
-            </table>
-          </div>
-          <div id="emptyActivity" class="hidden text-center py-12 text-slate-500 text-sm">No activity logs found.</div>
-          <div class="p-4 flex justify-center border-t border-navy-600" id="activityLoadMoreContainer">
-            <button type="button" id="btnActivityLoadMore" class="btn-action btn-outline text-xs">Load More</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ─── ACCESS LOGS PANEL ─── -->
-      <section id="panelAccessLogs" class="hidden">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-semibold text-white">Access Logs</h2>
-        </div>
-        <p class="text-sm text-slate-400 mb-4">History of all token validation requests verified by the `/validate` endpoint.</p>
-        
-        <!-- Filters -->
-        <div class="flex flex-wrap gap-3 mb-4 items-end bg-navy-900/50 p-4 rounded-xl border border-navy-600">
-          <div class="flex-1 min-w-[200px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Search (Token Name or Zone)</label>
-            <div class="search-bar">
-              <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-              <input id="accSearch" class="input-dark text-sm" placeholder="Filter token, area/zone..." style="padding-left: 2.25rem;" />
+          <div class="ui-banner ui-banner-ok hidden" id="tok-created" role="status" data-inventory="tokens.created.banner">
+            <div>
+              <b>Token created — copy it now, you can reveal it later with MFA.</b>
+              <code class="ui-secret" id="tok-created-value"></code>
+            </div>
+            <div class="ui-banner-actions">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" id="tok-created-copy" data-inventory="tokens.created.copy">Copy token</button>
+              <button type="button" class="ui-btn ui-btn-sm" id="tok-created-dismiss" data-inventory="tokens.created.dismiss">Dismiss</button>
             </div>
           </div>
-          <div class="w-[180px]">
-            <label class="block text-xs font-medium text-slate-400 mb-1.5">Result</label>
-            <select id="accResultFilter" class="input-dark text-sm bg-navy-800 border-navy-600 text-white rounded-lg h-[38px] w-full px-3">
-              <option value="">All results</option>
-              <option value="true">Allowed (Success)</option>
-              <option value="false">Denied (Failure)</option>
-            </select>
-          </div>
-          <button type="button" id="btnFilterAccess" class="btn-action btn-primary h-[38px] px-5 text-sm font-medium">Filter</button>
-          <button type="button" id="btnResetAccess" class="btn-action btn-outline h-[38px] px-5 text-sm font-medium">Reset</button>
-        </div>
 
-        <div class="rounded-xl border border-navy-600 bg-navy-800 overflow-hidden card-glow">
-          <div class="overflow-x-auto data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Token Name</th>
-                  <th>Area (Zone)</th>
-                  <th>Level</th>
-                  <th>Result</th>
-                  <th>IP Address</th>
-                </tr>
-              </thead>
-              <tbody id="accessLogRows"></tbody>
-            </table>
-          </div>
-          <div id="emptyAccess" class="hidden text-center py-12 text-slate-500 text-sm">No access logs found.</div>
-          <div class="p-4 flex justify-center border-t border-navy-600" id="accessLoadMoreContainer">
-            <button type="button" id="btnAccessLoadMore" class="btn-action btn-outline text-xs">Load More</button>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <!-- ─── FOOTER ─── -->
-    <footer class="border-t border-navy-600 bg-navy-800/80 backdrop-blur-sm mt-auto">
-      <div class="max-w-[1600px] mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between text-xs footer-inner">
-        <span class="text-slate-500">Service status</span>
-        <div class="flex items-center gap-3 sm:gap-5 flex-wrap">
-          <span id="dbStatus" class="flex items-center gap-1.5 text-slate-400">
-            <span class="status-dot status-pending"></span> DB: checking…
-          </span>
-          <span id="redisStatus" class="flex items-center gap-1.5 text-slate-400">
-            <span class="status-dot status-pending"></span> Redis: checking…
-          </span>
-        </div>
-      </div>
-    </footer>
-
-    <!-- ─── CREATE TOKEN MODAL ─── -->
-    <div id="modal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
-      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-3xl w-full p-4 sm:p-6 border border-navy-600 modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-4">New Token</h2>
-        <form id="createForm" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
-            <input name="name" required class="input-dark" placeholder="My API token" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description (optional)</label>
-            <input name="description" class="input-dark" placeholder="What this token is used for" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Existing token (optional)</label>
-            <input name="existingToken" class="input-dark" placeholder="Leave empty to auto-generate" />
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-slate-300">Zone permissions</label>
-              <div class="flex gap-2">
-                <button type="button" id="bulkNone" class="btn-action btn-outline text-xs">None</button>
-                <button type="button" id="bulkRead" class="btn-action btn-outline text-xs">Read</button>
-                <button type="button" id="bulkWrite" class="btn-action btn-outline text-xs">Write</button>
-                <button type="button" id="bulkDelete" class="btn-action btn-outline text-xs">Delete</button>
-                <button type="button" id="bulkAll" class="btn-action btn-outline text-xs">All</button>
+          <div class="ui-panel" id="tok-panel">
+            <div class="ui-fbar">
+              <div class="ui-fbar-row">
+                <label class="ui-search">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                  <input type="search" id="tok-search" aria-label="Search tokens" placeholder="Search tokens by name or description…" autocomplete="off" data-inventory="tokens.search" />
+                </label>
+                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="tok-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
+                </button>
+              </div>
+              <div class="ui-fbar-row">
+                <select id="tok-status" data-inventory="tokens.filter.status">
+                  <option value="all" data-status="all">All</option>
+                  <option value="active" data-status="active" data-dot="ok">Active</option>
+                  <option value="disabled" data-status="disabled" data-dot="">Disabled</option>
+                  <option value="expired" data-status="expired" data-dot="warn">Expired</option>
+                  <option value="expiring" data-status="expiring" data-dot="warn">Expiring soon</option>
+                </select>
+                <select id="tok-zone" data-inventory="tokens.filter.zone"><option value="">All zones</option></select>
+                <select id="tok-level" data-inventory="tokens.filter.level">
+                  <option value="">All levels</option>
+                  <option value="read">Read</option>
+                  <option value="write">Write</option>
+                  <option value="delete">Delete</option>
+                  <option value="all">All perms</option>
+                </select>
               </div>
             </div>
-            <div class="search-bar mb-2">
-              <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-              <input id="createAreaSearch" class="input-dark text-xs" placeholder="Filter zones…" style="padding-top:6px;padding-bottom:6px" />
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="tok-count"></span><button type="button" class="ui-clear-filters hidden" id="tok-clear" data-inventory="tokens.filter.clear">Clear filters</button></p>
+            <div class="ui-table ui-stack" id="tok-table" role="table" aria-label="Tokens" data-inventory="tokens.table">
+              <div class="ui-tr ui-tr-head" role="row" id="tok-head"></div>
+              <div class="ui-table-body" id="tok-rows" role="rowgroup"></div>
             </div>
-            <div id="areasBox" class="areas-grid areas-scroll"></div>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Expires (optional)</label>
-            <input name="expires" type="datetime-local" class="input-dark" />
-          </div>
-          <p id="cerr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Create</button>
-            <button type="button" id="cancelModal" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </section>
 
-    <!-- ─── MFA MODAL ─── -->
-    <div id="mfaModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
-      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-sm w-full p-4 sm:p-6 border border-navy-600 modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-2">MFA Verification</h2>
-        <p class="text-sm text-slate-400 mb-4">Enter your 6-digit authenticator code to copy the token.</p>
-        <form id="mfaForm" class="space-y-4">
-          <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" class="input-dark text-center text-xl tracking-[.3em] font-mono" placeholder="000000" required />
-          <p id="mfaErr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Verify & copy</button>
-            <button type="button" id="mfaCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+        <!-- ─── Zones ─── -->
+        <section class="ui-page hidden" data-page="zones" aria-labelledby="h-zones">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-zones">Zones</h1>
+              <p>Zones define allowed API areas for new tokens. If the list is empty, <code>ALLOWED_AREAS</code> from the environment is used.</p>
+            </div>
           </div>
-        </form>
-      </div>
-    </div>
 
-    <!-- ─── EDIT TOKEN MODAL ─── -->
-    <div id="editModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
-      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 border border-navy-600 modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-4">Edit Token</h2>
-        <form id="editForm" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
-            <input id="editName" required class="input-dark" />
+          <div class="ui-panel">
+            <div class="ui-panel-head">Add a zone</div>
+            <form class="ui-panel-body ui-form" id="zone-add" novalidate>
+              <div class="ui-form-row">
+                <div class="ui-field">
+                  <label class="ui-label" for="zone-add-name">Zone name</label>
+                  <input class="ui-input" id="zone-add-name" name="name" required autocomplete="off" placeholder="e.g. orders" data-inventory="zones.add.name" />
+                </div>
+                <div class="ui-field">
+                  <label class="ui-label" for="zone-add-desc">Description <small>(optional)</small></label>
+                  <input class="ui-input" id="zone-add-desc" name="description" dir="auto" autocomplete="off" placeholder="What this zone controls" data-inventory="zones.add.description" />
+                </div>
+                <div><button type="submit" class="ui-btn ui-btn-primary" data-inventory="zones.add.submit">Add</button></div>
+              </div>
+              <p class="ui-error hidden" id="zone-err" role="alert"></p>
+            </form>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description (optional)</label>
-            <input id="editDescription" class="input-dark" placeholder="Token description" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Replace token (optional)</label>
-            <input id="editToken" class="input-dark" placeholder="Leave empty to keep current token" />
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="block text-sm font-medium text-slate-300">Zone permissions</label>
-              <div class="flex gap-2">
-                <button type="button" id="editBulkNone" class="btn-action btn-outline text-xs">None</button>
-                <button type="button" id="editBulkRead" class="btn-action btn-outline text-xs">Read</button>
-                <button type="button" id="editBulkWrite" class="btn-action btn-outline text-xs">Write</button>
-                <button type="button" id="editBulkDelete" class="btn-action btn-outline text-xs">Delete</button>
-                <button type="button" id="editBulkAll" class="btn-action btn-outline text-xs">All</button>
+
+          <div class="ui-panel" id="zone-panel">
+            <div class="ui-fbar">
+              <div class="ui-fbar-row">
+                <label class="ui-search">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                  <input type="search" id="zone-search" aria-label="Search zones" placeholder="Search zones…" autocomplete="off" data-inventory="zones.search" />
+                </label>
+                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="zone-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
+                </button>
               </div>
             </div>
-            <div class="search-bar mb-2">
-              <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-              <input id="editAreaSearch" class="input-dark text-xs" placeholder="Filter zones…" style="padding-top:6px;padding-bottom:6px" />
-            </div>
-            <div id="editAreasBox" class="areas-grid areas-scroll"></div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Expires (optional)</label>
-            <input id="editExpires" type="datetime-local" class="input-dark" />
-          </div>
-          <p id="editErr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
-            <button type="button" id="editCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- ─── EDIT ZONE MODAL ─── -->
-    <div id="editZoneModal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center p-2 sm:p-4 z-50">
-      <div class="bg-navy-800 rounded-2xl shadow-2xl max-w-md w-full p-4 sm:p-6 border border-navy-600 modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-4">Edit Zone</h2>
-        <form id="editZoneForm" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
-            <input id="editZoneName" required class="input-dark" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Description</label>
-            <input id="editZoneDesc" class="input-dark" placeholder="What this zone controls" />
-          </div>
-          <p id="editZoneErr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
-            <button type="button" id="editZoneCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- ─── CREATE API KEY MODAL ─── -->
-    <div id="apiKeyModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
-      <div class="w-full max-w-md mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-4">New API Key</h2>
-        <form id="apiKeyForm" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
-            <input name="akName" required class="input-dark" placeholder="e.g. n8n integration" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-2">Scopes</label>
-            <div class="grid grid-cols-1 gap-2">
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="validate" checked class="rounded"> <span class="badge badge-green">validate</span> — Validate tokens</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="tokens:read" checked class="rounded"> <span class="badge badge-blue">tokens:read</span> — List tokens &amp; zones</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="tokens:write" class="rounded"> <span class="badge badge-amber">tokens:write</span> — Create/edit/delete tokens</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="zones:read" checked class="rounded"> <span class="badge badge-blue">zones:read</span> — List zones</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="scope" value="zones:write" class="rounded"> <span class="badge badge-amber">zones:write</span> — Create zones</label>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="zone-count"></span><button type="button" class="ui-clear-filters hidden" id="zone-clear">Clear filters</button></p>
+            <div class="ui-table ui-stack" id="zone-table" role="table" aria-label="Zones" data-inventory="zones.table">
+              <div class="ui-tr ui-tr-head" role="row" id="zone-head"></div>
+              <div class="ui-table-body" id="zone-rows" role="rowgroup"></div>
             </div>
           </div>
-          <p id="akErr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Create</button>
-            <button type="button" id="akCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </section>
 
-    <!-- ─── API KEY REVEAL MODAL ─── -->
-    <div id="akRevealModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
-      <div class="w-full max-w-lg mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
-        <h2 id="akRevealTitle" class="text-lg font-semibold text-white mb-2">API Key</h2>
-        <p id="akRevealNote" class="text-sm text-amber-300/80 mb-4">Copy this key now — it will not be shown again.</p>
-        <div class="rounded-lg bg-navy-900 border border-navy-600 p-4 mb-4">
-          <code id="akRevealKey" class="text-sm text-emerald-300 break-all select-all font-mono"></code>
-        </div>
-        <button type="button" id="akRevealCopy" class="btn-action btn-primary w-full justify-center py-2.5 text-sm">Copy to clipboard</button>
-        <button type="button" id="akRevealClose" class="btn-action btn-outline w-full justify-center py-2.5 text-sm mt-2">Close</button>
-      </div>
-    </div>
-
-
-    <!-- ─── EDIT API KEY MODAL ─── -->
-    <div id="editAkModal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop">
-      <div class="w-full max-w-md mx-4 rounded-2xl border border-navy-600 bg-navy-800 p-6 shadow-2xl modal-inner">
-        <h2 class="text-lg font-semibold text-white mb-4">Edit API Key</h2>
-        <form id="editAkForm" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1.5">Name</label>
-            <input id="editAkName" required class="input-dark" />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-2">Scopes</label>
-            <div class="grid grid-cols-1 gap-2" id="editAkScopes">
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="validate" class="rounded"> <span class="badge badge-green">validate</span> — Validate tokens</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="tokens:read" class="rounded"> <span class="badge badge-blue">tokens:read</span> — List tokens &amp; zones</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="tokens:write" class="rounded"> <span class="badge badge-amber">tokens:write</span> — Create/edit/delete tokens</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="zones:read" class="rounded"> <span class="badge badge-blue">zones:read</span> — List zones</label>
-              <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="escope" value="zones:write" class="rounded"> <span class="badge badge-amber">zones:write</span> — Create zones</label>
+        <!-- ─── API Keys ─── -->
+        <section class="ui-page hidden" data-page="apikeys" aria-labelledby="h-apikeys">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-apikeys">API Keys</h1>
+              <p>API keys allow programmatic access to the Auth Service (e.g. from n8n). Each key can have specific permission scopes.</p>
+            </div>
+            <div class="ui-page-actions">
+              <button type="button" class="ui-btn ui-btn-primary" id="key-new" data-inventory="apikeys.new">New Key</button>
             </div>
           </div>
-          <p id="editAkErr" class="text-sm text-red-400 hidden"></p>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="flex-1 btn-action btn-primary justify-center py-2.5 text-sm">Save</button>
-            <button type="button" id="editAkCancel" class="flex-1 btn-action btn-outline justify-center py-2.5 text-sm">Cancel</button>
+          <div class="ui-panel" id="key-panel">
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="key-count"></span>
+              <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="key-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
+              </button>
+            </p>
+            <div class="ui-table ui-stack" id="key-table" role="table" aria-label="API keys" data-inventory="apikeys.table">
+              <div class="ui-tr ui-tr-head" role="row" id="key-head"></div>
+              <div class="ui-table-body" id="key-rows" role="rowgroup"></div>
+            </div>
           </div>
-        </form>
-      </div>
-    </div>
+        </section>
 
-    <!-- ─── TOAST ─── -->
-    <div id="toast" class="hidden fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 rounded-xl text-sm px-4 py-3 shadow-lg z-50 border toast-enter"></div>
+        <!-- ─── Activity Log ─── -->
+        <section class="ui-page hidden" data-page="activity" aria-labelledby="h-activity">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-activity">Activity Log</h1>
+              <p>History of all administrative actions performed on this Auth Service.</p>
+            </div>
+          </div>
+          <div class="ui-panel" id="activity-panel">
+            <div class="ui-fbar">
+              <div class="ui-fbar-row">
+                <label class="ui-search">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                  <input type="search" id="activity-search" enterkeyhint="search" aria-label="Search (Actor or Entity Name)" placeholder="Filter actor, entity name..." autocomplete="off" data-inventory="activity.search" />
+                </label>
+                <select id="activity-filter" data-inventory="activity.filter.action">
+                  <option value="">All actions</option>
+                  <option value="token_create">Token Create</option>
+                  <option value="token_patch">Token Patch</option>
+                  <option value="token_delete">Token Delete</option>
+                  <option value="token_reveal">Token Reveal</option>
+                  <option value="zone_create">Zone Create</option>
+                  <option value="zone_patch">Zone Patch</option>
+                  <option value="zone_delete">Zone Delete</option>
+                  <option value="api_key_create">API Key Create</option>
+                  <option value="api_key_patch">API Key Patch</option>
+                  <option value="api_key_reveal">API Key Reveal</option>
+                  <option value="api_key_delete">API Key Delete</option>
+                  <option value="login">Login</option>
+                  <option value="logout">Logout</option>
+                </select>
+                <button type="button" class="ui-clear-filters hidden" id="activity-reset" data-inventory="activity.filter.reset">Reset</button>
+              </div>
+            </div>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="activity-count"></span></p>
+            <div class="ui-table ui-stack" id="activity-table" role="table" aria-label="Activity log" data-nosort>
+              <div class="ui-tr ui-tr-head" role="row">
+                <div class="ui-td" role="columnheader">Timestamp</div>
+                <div class="ui-td" role="columnheader">Actor</div>
+                <div class="ui-td" role="columnheader">Action</div>
+                <div class="ui-td" role="columnheader">Entity Type</div>
+                <div class="ui-td" role="columnheader">Entity Name</div>
+                <div class="ui-td" role="columnheader">Details</div>
+                <div class="ui-td" role="columnheader">IP Address</div>
+              </div>
+              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="activity-new"></button></div>
+              <div class="ui-table-body" id="activity-rows" role="rowgroup"></div>
+            </div>
+            <div class="ui-more-line hidden" id="activity-more" aria-live="polite" data-inventory="activity.loadmore"></div>
+          </div>
+        </section>
+
+        <!-- ─── Access Logs ─── -->
+        <section class="ui-page hidden" data-page="access" aria-labelledby="h-access">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-access">Access Logs</h1>
+              <p>History of all token validation requests verified by the <code>/validate</code> endpoint.</p>
+            </div>
+          </div>
+          <div class="ui-panel" id="access-panel">
+            <div class="ui-fbar">
+              <div class="ui-fbar-row">
+                <label class="ui-search">
+                  <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                  <input type="search" id="access-search" enterkeyhint="search" aria-label="Search (Token Name or Zone)" placeholder="Filter token, area/zone..." autocomplete="off" data-inventory="access.search" />
+                </label>
+                <select id="access-filter" data-inventory="access.filter.result">
+                  <option value="">All results</option>
+                  <option value="true">Allowed (Success)</option>
+                  <option value="false">Denied (Failure)</option>
+                </select>
+                <button type="button" class="ui-clear-filters hidden" id="access-reset" data-inventory="access.filter.reset">Reset</button>
+              </div>
+            </div>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="access-count"></span></p>
+            <div class="ui-table ui-stack" id="access-table" role="table" aria-label="Access logs" data-nosort>
+              <div class="ui-tr ui-tr-head" role="row">
+                <div class="ui-td" role="columnheader">Timestamp</div>
+                <div class="ui-td" role="columnheader">Token Name</div>
+                <div class="ui-td" role="columnheader">Area (Zone)</div>
+                <div class="ui-td" role="columnheader">Level</div>
+                <div class="ui-td" role="columnheader">Result</div>
+                <div class="ui-td" role="columnheader">IP Address</div>
+              </div>
+              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="access-new"></button></div>
+              <div class="ui-table-body" id="access-rows" role="rowgroup"></div>
+            </div>
+            <div class="ui-more-line hidden" id="access-more" aria-live="polite" data-inventory="access.loadmore"></div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Phone tab bar -->
+      <nav class="ui-tabbar" aria-label="Main tabs">
+        <a class="ui-tab" data-page-link="tokens" href="/admin/tokens">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+          <span>Tokens</span>
+        </a>
+        <a class="ui-tab" data-page-link="zones" href="/admin/zones">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
+          <span>Zones</span>
+        </a>
+        <a class="ui-tab" data-page-link="apikeys" href="/admin/api-keys">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <span>API Keys</span>
+        </a>
+        <button type="button" class="ui-tab" id="tab-more" aria-haspopup="dialog">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+          <span>More</span>
+        </button>
+      </nav>
+    </div>
 
     <script src="/js/common.js"></script>
-    <script>
-      var state = { areas: [], csrf: "", username: "", zonesList: [], activeTab: "tokens", pendingRevealTokenId: "", pendingRevealAkId: "", editTokenId: "", editZoneId: "", tokenRows: [] };
-
-      function esc(s) {
-        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-      }
-
-      function fmtDateUTC(iso) {
-        if (!iso) return "-";
-        var d = new Date(iso);
-        var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
-        return pad(d.getDate()) + "." + pad(d.getMonth() + 1) + "." + d.getFullYear() +
-          ", " + pad(d.getHours()) + ":" + pad(d.getMinutes());
-      }
-
-      function isoToLocalInput(iso) {
-        // Convert UTC ISO string to local datetime-local value (YYYY-MM-DDTHH:MM)
-        var d = new Date(iso);
-        var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
-        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
-          "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
-      }
-
-      function lockScroll() { document.body.classList.add("modal-open"); }
-      function unlockScroll() { document.body.classList.remove("modal-open"); }
-
-      function showToast(message, isError) {
-        var toast = document.getElementById("toast");
-        toast.textContent = message;
-        toast.className =
-          "fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 rounded-xl text-sm px-4 py-3 shadow-lg z-50 border toast-enter " +
-          (isError
-            ? "bg-red-500/10 text-red-300 border-red-500/30"
-            : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30");
-        setTimeout(function () { toast.classList.add("hidden"); }, 2500);
-      }
-
-      async function copyTextToClipboard(text) {
-        if (!text) return false;
-        try { await navigator.clipboard.writeText(text); return true; } catch (_e) {
-          var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-          document.body.appendChild(ta); ta.focus(); ta.select();
-          var ok = false; try { ok = document.execCommand("copy"); } catch (_i) {}
-          document.body.removeChild(ta); return ok;
-        }
-      }
-
-      function openEditModal(tokenRow) {
-        state.editTokenId = tokenRow.id;
-        document.getElementById("editErr").classList.add("hidden");
-        document.getElementById("editName").value = tokenRow.name || "";
-        document.getElementById("editDescription").value = tokenRow.description || "";
-        document.getElementById("editToken").value = "";
-        document.getElementById("editExpires").value = tokenRow.expiresAt ? isoToLocalInput(tokenRow.expiresAt) : "";
-        document.getElementById("editAreasBox").innerHTML = renderAreaRadios("m", mapGrantsFromRow(tokenRow.grants || []));
-        document.getElementById("editAreaSearch").value = "";
-        document.getElementById("editModal").classList.remove("hidden");
-        lockScroll();
-        bindAllToggles();
-      }
-
-      function closeEditModal() { state.editTokenId = ""; document.getElementById("editModal").classList.add("hidden"); unlockScroll(); }
-
-      /* ── Page routing: every tab is a real page with its own URL ── */
-      var TAB_PATHS = { tokens: "/admin/tokens", zones: "/admin/zones", apiKeys: "/admin/api-keys", activityLog: "/admin/logs/activity", accessLogs: "/admin/logs/access" };
-      var TAB_TITLES = { tokens: "Tokens", zones: "Zones", apiKeys: "API Keys", activityLog: "Activity Log", accessLogs: "Access Logs" };
-
-      function tabFromPath(pathname) {
-        var p = pathname, b = basePath();
-        if (b && p.indexOf(b) === 0) p = p.slice(b.length);
-        if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
-        for (var k in TAB_PATHS) { if (TAB_PATHS[k] === p) return k; }
-        return "tokens";
-      }
-
-      function syncTabUrl(which, replace) {
-        var url = basePath() + TAB_PATHS[which];
-        if (replace) history.replaceState({ tab: which }, "", url);
-        else history.pushState({ tab: which }, "", url);
-      }
-
-      function loadTabData(which) {
-        if (which === "tokens" || which === "zones") { refreshActiveTabData(); refreshServiceStatus(); }
-        else if (which === "apiKeys") { loadApiKeys(); }
-        else if (which === "activityLog") { loadActivityLogs(true); }
-        else if (which === "accessLogs") { loadAccessLogs(true); }
-      }
-
-      function bindTabLink(id, which) {
-        var el = document.getElementById(id);
-        el.href = basePath() + TAB_PATHS[which];
-        el.addEventListener("click", function (e) {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-          e.preventDefault();
-          syncTabUrl(which, false);
-          setTab(which);
-          loadTabData(which);
-        });
-      }
-
-      window.addEventListener("popstate", function () {
-        var which = tabFromPath(location.pathname);
-        setTab(which);
-        loadTabData(which);
-      });
-
-      function setTab(which) {
-        state.activeTab = which;
-        document.title = TAB_TITLES[which] + " — Auth Service";
-        var tok = document.getElementById("panelTokens"),
-            zon = document.getElementById("panelZones"),
-            ak = document.getElementById("panelApiKeys"),
-            act = document.getElementById("panelActivityLog"),
-            acc = document.getElementById("panelAccessLogs");
-        var bt = document.getElementById("tabTokens"),
-            bz = document.getElementById("tabZones"),
-            bk = document.getElementById("tabApiKeys"),
-            bact = document.getElementById("tabActivityLog"),
-            bacc = document.getElementById("tabAccessLogs");
-        var newBtn = document.getElementById("newtok");
-        [tok, zon, ak, act, acc].forEach(function(p) { if (p) p.classList.add("hidden"); });
-        [bt, bz, bk, bact, bacc].forEach(function(b) { if (b) b.classList.remove("active"); });
-        newBtn.classList.add("hidden");
-        if (which === "tokens") {
-          tok.classList.remove("hidden"); bt.classList.add("active");
-          newBtn.classList.remove("hidden");
-        } else if (which === "zones") {
-          zon.classList.remove("hidden"); bz.classList.add("active");
-        } else if (which === "apiKeys") {
-          ak.classList.remove("hidden"); bk.classList.add("active");
-        } else if (which === "activityLog") {
-          act.classList.remove("hidden"); bact.classList.add("active");
-        } else if (which === "accessLogs") {
-          acc.classList.remove("hidden"); bacc.classList.add("active");
-        }
-      }
-
-      async function refreshActiveTabData() {
-        if (state.activeTab === "tokens") { await refreshAreasFromApi(); await loadTokens(); }
-        else if (state.activeTab === "zones") { await loadZonesTable(); await refreshAreasFromApi(); }
-        else if (state.activeTab === "apiKeys") { await loadApiKeys(); }
-        else if (state.activeTab === "activityLog") {
-          if (state.activityPage === 1) {
-            await loadActivityLogs(true);
-          }
-        }
-        else if (state.activeTab === "accessLogs") {
-          if (state.accessPage === 1) {
-            await loadAccessLogs(true);
-          }
-        }
-      }
-
-      function setStatusChip(id, label, ok) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        var dotClass = ok === null ? "status-pending" : ok ? "status-ok" : "status-err";
-        var textClass = ok === null ? "text-slate-400" : ok ? "text-emerald-400" : "text-red-400";
-        var statusText = ok === null ? "checking…" : ok ? "connected" : "down";
-        el.className = "flex items-center gap-1.5 " + textClass;
-        el.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + label + ": " + statusText;
-      }
-
-      function setHeaderDot(id, ok) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.className = "status-dot " + (ok === null ? "status-pending" : ok ? "status-ok" : "status-err");
-      }
-
-      async function refreshServiceStatus() {
-        setStatusChip("dbStatus", "DB", null); setStatusChip("redisStatus", "Redis", null);
-        setHeaderDot("dbDot", null); setHeaderDot("redisDot", null);
-        var res = await fetch(basePath() + "/health", { credentials: "include" }).catch(function () { return null; });
-        if (!res || !res.ok) {
-          setStatusChip("dbStatus", "DB", false); setStatusChip("redisStatus", "Redis", false);
-          setHeaderDot("dbDot", false); setHeaderDot("redisDot", false);
-          return;
-        }
-        var j = await res.json().catch(function () { return {}; });
-        setStatusChip("dbStatus", "DB", !!j.db); setStatusChip("redisStatus", "Redis", !!j.redis);
-        setHeaderDot("dbDot", !!j.db); setHeaderDot("redisDot", !!j.redis);
-      }
-
-
-
-      async function refreshAreasFromApi() {
-        var zr = await adminApi("/admin/api/zones"); var zj = await zr.json();
-        state.zonesList = zj;
-        if (zj.length) { state.areas = zj.map(function (z) { return z.name; }); }
-        else { var mr = await adminApi("/admin/api/me"); var mj = await mr.json(); state.areas = mj.allowedAreas && mj.allowedAreas.length ? mj.allowedAreas : ["default"]; }
-        if (typeof populateZoneFilter === "function") populateZoneFilter();
-      }
-
-      async function loadMe() {
-        var r = await adminApi("/admin/api/me"); var j = await r.json();
-        if (!j.user) {
-          var next = TAB_PATHS[tabFromPath(location.pathname)];
-          window.location.href = basePath() + "/login" + (next !== "/admin/tokens" ? "?next=" + encodeURIComponent(next) : "");
-          return;
-        }
-        state.username = j.user.username; state.csrf = j.csrf || readCsrf(); writeCsrf(state.csrf);
-        document.getElementById("user").textContent = state.username;
-        await refreshAreasFromApi();
-      }
-
-      function renderAreaRadios(prefix, selected) {
-        var areas = state.areas, html = "";
-        var flags = ["read", "write", "delete"];
-        var flagColors = { read: "accent-green-500", write: "accent-blue-500", delete: "accent-red-500" };
-        var flagLabels = { read: "Read", write: "Write", delete: "Delete" };
-        for (var i = 0; i < areas.length; i++) {
-          var a = areas[i], selStr = selected && selected[a] ? selected[a] : "";
-          var selFlags = selStr ? selStr.split(",") : [];
-          var allChecked = flags.every(function(fl) { return selFlags.indexOf(fl) !== -1; });
-          html += '<div class="rounded-lg border border-navy-600 bg-navy-900 p-3" data-area="' + esc(a).toLowerCase() + '">' +
-            '<div class="font-medium text-sm text-slate-300 mb-1.5">' + esc(a) + '</div>' +
-            '<div class="flex gap-5 text-xs text-slate-400">';
-          for (var f = 0; f < flags.length; f++) {
-            var chk = selFlags.indexOf(flags[f]) !== -1 ? " checked" : "";
-            html += '<label class="flex items-center gap-1 cursor-pointer hover:text-slate-200">' +
-              '<input type="checkbox" name="' + prefix + '_' + esc(a) + '" value="' + flags[f] + '"' + chk + ' class="' + flagColors[flags[f]] + '" /> ' + flagLabels[flags[f]] + '</label>';
-          }
-          html += '<label class="flex items-center gap-1 cursor-pointer hover:text-slate-200">' +
-            '<input type="checkbox" data-all-toggle="' + prefix + '_' + esc(a) + '"' + (allChecked ? ' checked' : '') + ' class="accent-violet-500" /> All</label>';
-          html += '</div></div>';
-        }
-        return html;
-      }
-
-      function bindAllToggles() {
-        document.querySelectorAll('[data-all-toggle]').forEach(function(allCb) {
-          allCb.addEventListener('change', function() {
-            var name = allCb.getAttribute('data-all-toggle');
-            var cbs = document.querySelectorAll('input[name="' + name + '"]');
-            cbs.forEach(function(cb) { cb.checked = allCb.checked; });
-          });
-        });
-        document.querySelectorAll('.areas-scroll input[type="checkbox"]').forEach(function(cb) {
-          if (cb.hasAttribute('data-all-toggle')) return;
-          cb.addEventListener('change', function() {
-            var name = cb.getAttribute('name');
-            if (!name) return;
-            var cbs = document.querySelectorAll('input[name="' + name + '"]');
-            var allCb = document.querySelector('[data-all-toggle="' + name + '"]');
-            if (!allCb) return;
-            var allChecked = true;
-            cbs.forEach(function(c) { if (!c.checked) allChecked = false; });
-            allCb.checked = allChecked;
-          });
-        });
-      }
-
-      function filterAreasList(searchId, boxId) {
-        var q = (document.getElementById(searchId).value || "").trim().toLowerCase();
-        var items = document.getElementById(boxId).querySelectorAll("[data-area]");
-        for (var i = 0; i < items.length; i++) {
-          items[i].style.display = (!q || items[i].getAttribute("data-area").indexOf(q) !== -1) ? "" : "none";
-        }
-      }
-
-      function grantsFromForm(prefix) {
-        var grants = [];
-        for (var i = 0; i < state.areas.length; i++) {
-          var a = state.areas[i], els = document.getElementsByName(prefix + "_" + a), flags = [];
-          for (var j = 0; j < els.length; j++) { if (els[j].checked) flags.push(els[j].value); }
-          if (flags.length) grants.push({ area: a, level: flags.join(",") });
-        }
-        return grants;
-      }
-
-      function applyBulkLevel(prefix, level) {
-        var checkFlags = level === "all" ? ["read", "write", "delete"] : level === "none" ? [] : [level];
-        for (var i = 0; i < state.areas.length; i++) {
-          var area = state.areas[i];
-          var els = document.getElementsByName(prefix + "_" + area);
-          for (var j = 0; j < els.length; j++) {
-            els[j].checked = checkFlags.indexOf(els[j].value) !== -1;
-          }
-        }
-      }
-
-      function mapGrantsFromRow(grants) { var m = {}; for (var i = 0; i < grants.length; i++) m[grants[i].area] = grants[i].level; return m; }
-
-      function renderGrantsBadges(grants) {
-        if (!grants || !grants.length) return '<span class="badge badge-slate">No grants</span>';
-        var html = '<div class="flex flex-wrap gap-1.5">';
-        for (var i = 0; i < grants.length; i++) {
-          var lvl = grants[i].level;
-          var flags = lvl.split(",");
-          var isAll = flags.indexOf("read") !== -1 && flags.indexOf("write") !== -1 && flags.indexOf("delete") !== -1;
-          var cls = isAll ? "badge-violet" : flags.length > 1 ? "badge-blue" : flags[0] === "delete" ? "badge-red" : flags[0] === "write" ? "badge-blue" : "badge-green";
-          var label = isAll ? "all" : lvl.replace(/,/g, "+");
-          html += '<span class="badge ' + cls + '">' + esc(grants[i].area) + ': ' + esc(label) + '</span>';
-        }
-        return html + '</div>';
-      }
-
-      function openMfaModalForToken(tokenId) {
-        state.pendingRevealTokenId = tokenId;
-        document.getElementById("mfaCode").value = "";
-        document.getElementById("mfaErr").classList.add("hidden");
-        document.getElementById("mfaModal").classList.remove("hidden");
-        lockScroll();
-        setTimeout(function () { document.getElementById("mfaCode").focus(); }, 20);
-      }
-
-      function closeMfaModal() { state.pendingRevealTokenId = ""; state.pendingRevealAkId = ""; document.getElementById("mfaModal").classList.add("hidden"); unlockScroll(); }
-
-      function updateStats() {
-        var total = state.tokenRows.length;
-        var active = state.tokenRows.filter(function (t) { return t.isActive && !t.isExpired; }).length;
-        var zones = state.zonesList.length;
-        document.getElementById("statTotal").textContent = total;
-        document.getElementById("statActive").textContent = active;
-        document.getElementById("statZones").textContent = zones || state.areas.length;
-      }
-
-      function bindZoneDeleteButtons(container) {
-        container.querySelectorAll("[data-del-zone]").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var id = btn.getAttribute("data-del-zone");
-            if (!confirm("Delete this zone? Tokens referencing it may need updating.")) return;
-            var r2 = await adminApi("/admin/api/zones/" + id, { method: "DELETE", csrf: state.csrf });
-            if (!r2.ok) { var ej = await r2.json().catch(function () { return {}; }); alert(ej.detail || "Delete failed"); return; }
-            await refreshAreasFromApi(); await loadZonesTable();
-            if (state.activeTab === "tokens") await loadTokens();
-            updateStats();
-          });
-        });
-        container.querySelectorAll("[data-edit-zone]").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var id = btn.getAttribute("data-edit-zone");
-            var zone = state.zonesList.find(function (z) { return z.id === id; });
-            if (!zone) return;
-            openEditZone(zone);
-          });
-        });
-      }
-
-      function openEditZone(zone) {
-        state.editZoneId = zone.id;
-        document.getElementById("editZoneErr").classList.add("hidden");
-        document.getElementById("editZoneName").value = zone.name || "";
-        document.getElementById("editZoneDesc").value = zone.description || "";
-        document.getElementById("editZoneModal").classList.remove("hidden");
-        lockScroll();
-      }
-
-      function closeEditZone() { state.editZoneId = ""; document.getElementById("editZoneModal").classList.add("hidden"); unlockScroll(); }
-
-      async function loadZonesTable() {
-        var zr = await adminApi("/admin/api/zones"); if (!zr.ok) return;
-        var rows = await zr.json(); state.zonesList = rows;
-        // Desktop table
-        var tb = document.getElementById("zoneRows"); tb.innerHTML = "";
-        // Mobile cards
-        var mc = document.getElementById("zoneCards"); mc.innerHTML = "";
-        for (var i = 0; i < rows.length; i++) {
-          var z = rows[i];
-          var created = z.createdAt ? fmtDateUTC(z.createdAt) : "—";
-          var desc = z.description || '';
-          // Desktop row
-          var tr = document.createElement("tr");
-          tr.innerHTML = '<td><span class="text-white font-medium">' + esc(z.name) + '</span></td>' +
-            '<td class="text-slate-400 text-xs">' + esc(desc) + '</td>' +
-            '<td>' + esc(created) + '</td>' +
-            '<td class="text-right"><div class="flex gap-2 justify-end">' +
-            '<button type="button" class="btn-action btn-outline text-xs" data-edit-zone="' + esc(z.id) + '">Edit</button>' +
-            '<button type="button" class="btn-action btn-danger text-xs" data-del-zone="' + esc(z.id) + '">Delete</button>' +
-            '</div></td>';
-          tb.appendChild(tr);
-          // Mobile card
-          mc.innerHTML += '<div class="zone-card"><div style="flex:1"><span class="text-white font-medium">' + esc(z.name) + '</span>' +
-            (desc ? '<div class="text-xs text-slate-500 mt-0.5">' + esc(desc) + '</div>' : '') +
-            '<div class="text-xs text-slate-600 mt-0.5">' + esc(created) + '</div></div>' +
-            '<div class="flex gap-2">' +
-            '<button type="button" class="btn-action btn-outline text-xs" data-edit-zone="' + esc(z.id) + '">Edit</button>' +
-            '<button type="button" class="btn-action btn-danger text-xs" data-del-zone="' + esc(z.id) + '">Delete</button>' +
-            '</div></div>';
-        }
-        bindZoneDeleteButtons(tb);
-        bindZoneDeleteButtons(mc);
-        updateStats();
-      }
-
-      function bindTokenButtons(container) {
-        container.querySelectorAll("[data-toggle-active]").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var id = btn.getAttribute("data-toggle-active"), nextActive = btn.getAttribute("data-next-active") === "true";
-            if (!confirm(nextActive ? "Enable this token?" : "Disable this token?")) return;
-            var r2 = await adminApi("/admin/api/tokens/" + id, { method: "PATCH", body: { isActive: nextActive }, csrf: state.csrf });
-            if (r2.ok) await loadTokens();
-          });
-        });
-        container.querySelectorAll("[data-del-token]").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var id = btn.getAttribute("data-del-token");
-            if (!confirm("Delete this token permanently?")) return;
-            var r2 = await adminApi("/admin/api/tokens/" + id, { method: "DELETE", csrf: state.csrf });
-            if (!r2.ok) { alert("Delete failed"); return; }
-            await loadTokens();
-          });
-        });
-        container.querySelectorAll("[data-copy-token]").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            if (btn.disabled) return;
-            openMfaModalForToken(btn.getAttribute("data-copy-token"));
-          });
-        });
-        container.querySelectorAll("[data-edit-token]").forEach(function (btn) {
-          btn.addEventListener("click", function () {
-            var id = btn.getAttribute("data-edit-token"), row = null;
-            for (var i = 0; i < state.tokenRows.length; i++) { if (state.tokenRows[i].id === id) { row = state.tokenRows[i]; break; } }
-            if (row) openEditModal(row);
-          });
-        });
-      }
-
-      function renderTokenActions(t) {
-        var toggleLabel = t.isActive ? "Disable" : "Enable";
-        var toggleBtnCls = t.isActive ? "btn-warn" : "btn-success";
-        return '<button type="button" class="btn-action ' + toggleBtnCls + ' text-xs" data-toggle-active="' + esc(t.id) + '" data-next-active="' + (t.isActive ? "false" : "true") + '">' + toggleLabel + '</button>' +
-          '<button type="button" class="btn-action btn-outline text-xs" data-copy-token="' + esc(t.id) + '"' + (t.canReveal ? '' : ' disabled style="opacity:.4;cursor:not-allowed"') + '>' + (t.canReveal ? 'Copy' : 'N/A') + '</button>' +
-          '<button type="button" class="btn-action btn-outline text-xs" data-edit-token="' + esc(t.id) + '">Edit</button>' +
-          '<button type="button" class="btn-action btn-danger text-xs" data-del-token="' + esc(t.id) + '">Delete</button>';
-      }
-
-      async function loadTokens() {
-        var r = await adminApi("/admin/api/tokens"); if (!r.ok) return;
-        var rows = await r.json(); state.tokenRows = rows;
-        var tb = document.getElementById("rows"); tb.innerHTML = "";
-        var mc = document.getElementById("tokenCards"); mc.innerHTML = "";
-        var empty = document.getElementById("emptyTokens");
-        if (!rows.length) { empty.classList.remove("hidden"); updateStats(); return; }
-        empty.classList.add("hidden");
-        for (var i = 0; i < rows.length; i++) {
-          var t = rows[i];
-          var exp = t.expiresAt ? fmtDateUTC(t.expiresAt) : "";
-          var lu = t.lastUsedAt ? fmtDateUTC(t.lastUsedAt) : "-";
-          var activeBadge = !t.isActive ? '<span class="badge badge-red">Disabled</span>' : t.isExpired ? '<span class="badge badge-amber">Expired</span>' : '<span class="badge badge-green">Active</span>';
-          var descHtml = t.description ? '<div class="text-xs text-slate-500 mt-0.5">' + esc(t.description) + '</div>' : '';
-          var expLine = exp ? '<div class="text-xs text-slate-500 mt-1">Exp: ' + esc(exp) + '</div>' : '';
-          // Desktop row
-          var tr = document.createElement("tr");
-          tr.innerHTML =
-            '<td><span class="font-medium text-white">' + esc(t.name) + '</span>' + descHtml + '</td>' +
-            '<td>' + renderGrantsBadges(t.grants) + '</td>' +
-            '<td>' + activeBadge + '</td>' +
-            '<td>' + esc(lu) + expLine + '</td>' +
-            '<td class="text-right"><div class="flex gap-2 justify-end whitespace-nowrap">' + renderTokenActions(t) + '</div></td>';
-          tb.appendChild(tr);
-          // Mobile card
-          mc.innerHTML += '<div class="token-card">' +
-            '<div class="token-card-field"><span class="token-card-label">Name</span><span class="font-medium text-white">' + esc(t.name) + '</span></div>' +
-            (t.description ? '<div class="token-card-field"><span class="token-card-label">Description</span><span class="token-card-value">' + esc(t.description) + '</span></div>' : '') +
-            '<div class="token-card-field"><span class="token-card-label">Status</span><span>' + activeBadge + '</span></div>' +
-            '<div class="token-card-field"><span class="token-card-label">Grants</span><span class="token-card-value">' + renderGrantsBadges(t.grants) + '</span></div>' +
-            '<div class="token-card-field"><span class="token-card-label">Last Used</span><span class="token-card-value">' + esc(lu) + (exp ? '<br><span class="text-xs text-slate-500">Exp: ' + esc(exp) + '</span>' : '') + '</span></div>' +
-            '<div class="token-card-actions">' + renderTokenActions(t) + '</div></div>';
-        }
-        bindTokenButtons(tb);
-        bindTokenButtons(mc);
-        updateStats();
-        applyTokenFilters();
-      }
-
-      /* ── Search & Filter Logic ── */
-      var tokenFilterState = { search: "", status: "all", zone: "", level: "" };
-
-      function populateZoneFilter() {
-        var sel = document.getElementById("zoneFilter");
-        var current = sel.value;
-        sel.innerHTML = '<option value="">All zones</option>';
-        for (var i = 0; i < state.areas.length; i++) {
-          sel.innerHTML += '<option value="' + esc(state.areas[i]) + '">' + esc(state.areas[i]) + '</option>';
-        }
-        sel.value = current;
-      }
-
-      function applyTokenFilters() {
-        var query = tokenFilterState.search.toLowerCase();
-        var filter = tokenFilterState.status;
-        var zoneFilter = tokenFilterState.zone;
-        // Desktop rows
-        var desktopRows = document.getElementById("rows").querySelectorAll("tr");
-        // Mobile cards
-        var mobileCards = document.getElementById("tokenCards").querySelectorAll(".token-card");
-        var visibleCount = 0;
-        for (var i = 0; i < state.tokenRows.length; i++) {
-          var t = state.tokenRows[i];
-          var nameMatch = !query || t.name.toLowerCase().indexOf(query) !== -1 || (t.description && t.description.toLowerCase().indexOf(query) !== -1);
-          var statusMatch = filter === "all" || (filter === "active" && t.isActive && !t.isExpired) || (filter === "disabled" && (!t.isActive || t.isExpired));
-          var zoneMatch = !zoneFilter;
-          if (zoneFilter && t.grants) {
-            for (var g = 0; g < t.grants.length; g++) {
-              if (t.grants[g].area === zoneFilter) { zoneMatch = true; break; }
-            }
-          }
-          var levelMatch = !tokenFilterState.level;
-          if (tokenFilterState.level && t.grants) {
-            var lf = tokenFilterState.level;
-            for (var g = 0; g < t.grants.length; g++) {
-              var gflags = t.grants[g].level.split(",");
-              if (lf === "all") {
-                if (gflags.indexOf("read") !== -1 && gflags.indexOf("write") !== -1 && gflags.indexOf("delete") !== -1) { levelMatch = true; break; }
-              } else {
-                if (gflags.indexOf(lf) !== -1) { levelMatch = true; break; }
-              }
-            }
-          }
-          var show = nameMatch && statusMatch && zoneMatch && levelMatch;
-          if (desktopRows[i]) desktopRows[i].style.display = show ? "" : "none";
-          if (mobileCards[i]) mobileCards[i].style.display = show ? "" : "none";
-          if (show) visibleCount++;
-        }
-        // Show/hide clear button
-        var hasFilters = tokenFilterState.search || tokenFilterState.status !== "all" || tokenFilterState.zone || tokenFilterState.level;
-        var clearBtn = document.getElementById("clearFilters");
-        if (clearBtn) clearBtn.className = 'btn-clear-filter' + (hasFilters ? ' visible' : '');
-        var empty = document.getElementById("emptyTokens");
-        if (state.tokenRows.length && !visibleCount) {
-          empty.textContent = "No tokens match your search.";
-          empty.classList.remove("hidden");
-        } else if (!state.tokenRows.length) {
-          empty.classList.remove("hidden");
-        } else {
-          empty.classList.add("hidden");
-        }
-      }
-
-      document.getElementById("tokenSearch").addEventListener("input", function (e) {
-        tokenFilterState.search = (e.target.value || "").trim();
-        applyTokenFilters();
-      });
-
-      document.getElementById("tokenFilters").addEventListener("click", function (e) {
-        var pill = e.target.closest(".filter-pill");
-        if (!pill) return;
-        document.querySelectorAll("#tokenFilters .filter-pill").forEach(function (p) { p.classList.remove("active"); });
-        pill.classList.add("active");
-        tokenFilterState.status = pill.getAttribute("data-filter");
-        applyTokenFilters();
-      });
-
-      document.getElementById("zoneFilter").addEventListener("change", function (e) {
-        tokenFilterState.zone = e.target.value;
-        applyTokenFilters();
-      });
-
-      document.getElementById("levelFilter").addEventListener("change", function (e) {
-        tokenFilterState.level = e.target.value;
-        applyTokenFilters();
-      });
-
-      document.getElementById("clearFilters").addEventListener("click", function () {
-        tokenFilterState.search = ""; tokenFilterState.status = "all"; tokenFilterState.zone = ""; tokenFilterState.level = "";
-        document.getElementById("tokenSearch").value = "";
-        document.getElementById("zoneFilter").value = "";
-        document.getElementById("levelFilter").value = "";
-        document.querySelectorAll("#tokenFilters .filter-pill").forEach(function (p) { p.classList.remove("active"); });
-        document.querySelector('#tokenFilters .filter-pill[data-filter="all"]').classList.add("active");
-        applyTokenFilters();
-      });
-
-      document.getElementById("zoneSearch").addEventListener("input", function (e) {
-        var query = (e.target.value || "").trim().toLowerCase();
-        // Desktop
-        var desktopRows = document.getElementById("zoneRows").querySelectorAll("tr");
-        // Mobile
-        var mobileCards = document.getElementById("zoneCards").querySelectorAll(".zone-card");
-        for (var i = 0; i < state.zonesList.length; i++) {
-          var z = state.zonesList[i];
-          var show = !query || z.name.toLowerCase().indexOf(query) !== -1 || (z.description && z.description.toLowerCase().indexOf(query) !== -1);
-          if (desktopRows[i]) desktopRows[i].style.display = show ? "" : "none";
-          if (mobileCards[i]) mobileCards[i].style.display = show ? "" : "none";
-        }
-      });
-
-      document.getElementById("refresh").addEventListener("click", async function () {
-        if (state.activeTab === "activityLog") {
-          await loadActivityLogs(true);
-        } else if (state.activeTab === "accessLogs") {
-          await loadAccessLogs(true);
-        } else {
-          await refreshActiveTabData();
-        }
-        await refreshServiceStatus();
-      });
-      document.getElementById("logout").addEventListener("click", async function () { await adminApi("/admin/api/logout", { method: "POST" }); writeCsrf(""); window.location.href = basePath() + "/login"; });
-      document.getElementById("newtok").addEventListener("click", async function () {
-        await refreshAreasFromApi();
-        document.getElementById("areasBox").innerHTML = renderAreaRadios("c", {});
-        document.getElementById("createAreaSearch").value = "";
-        document.getElementById("modal").classList.remove("hidden");
-        lockScroll();
-        bindAllToggles();
-      });
-      document.getElementById("bulkNone").addEventListener("click", function () { applyBulkLevel("c", "none"); });
-      document.getElementById("bulkRead").addEventListener("click", function () { applyBulkLevel("c", "read"); });
-      document.getElementById("bulkWrite").addEventListener("click", function () { applyBulkLevel("c", "write"); });
-      document.getElementById("bulkDelete").addEventListener("click", function () { applyBulkLevel("c", "delete"); });
-      document.getElementById("bulkAll").addEventListener("click", function () { applyBulkLevel("c", "all"); });
-      document.getElementById("createAreaSearch").addEventListener("input", function () { filterAreasList("createAreaSearch", "areasBox"); });
-      document.getElementById("editBulkNone").addEventListener("click", function () { applyBulkLevel("m", "none"); });
-      document.getElementById("editBulkRead").addEventListener("click", function () { applyBulkLevel("m", "read"); });
-      document.getElementById("editBulkWrite").addEventListener("click", function () { applyBulkLevel("m", "write"); });
-      document.getElementById("editBulkDelete").addEventListener("click", function () { applyBulkLevel("m", "delete"); });
-      document.getElementById("editBulkAll").addEventListener("click", function () { applyBulkLevel("m", "all"); });
-      document.getElementById("editAreaSearch").addEventListener("input", function () { filterAreasList("editAreaSearch", "editAreasBox"); });
-      document.getElementById("cancelModal").addEventListener("click", function () { document.getElementById("modal").classList.add("hidden"); unlockScroll(); });
-      document.getElementById("dismissOnce").addEventListener("click", function () { document.getElementById("once").classList.add("hidden"); });
-      document.getElementById("copyNewToken").addEventListener("click", async function () {
-        var token = document.getElementById("rawtok").textContent || "";
-        if (!token) return;
-        var ok = await copyTextToClipboard(token);
-        showToast(ok ? "Token copied to clipboard" : "Failed to copy token", !ok);
-      });
-      document.getElementById("mfaCancel").addEventListener("click", function () { closeMfaModal(); });
-      document.getElementById("mfaForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        var code = (document.getElementById("mfaCode").value || "").trim();
-        var err = document.getElementById("mfaErr"); err.classList.add("hidden");
-
-        if (state.pendingRevealAkId) {
-          // API key reveal
-          var r = await adminApi("/admin/api/api-keys/" + state.pendingRevealAkId + "/reveal", { method: "POST", body: { code: code }, csrf: state.csrf });
-          var j = await r.json().catch(function () { return {}; });
-          if (!r.ok) { err.textContent = j.detail || "Verification failed"; err.classList.remove("hidden"); return; }
-          var ok = await copyTextToClipboard(j.key || ""); closeMfaModal();
-          showToast(ok ? "API key copied to clipboard" : "Failed to copy", !ok);
-        } else if (state.pendingRevealTokenId) {
-          // Token reveal
-          var r = await adminApi("/admin/api/tokens/" + state.pendingRevealTokenId + "/reveal", { method: "POST", body: { code: code }, csrf: state.csrf });
-          var j = await r.json().catch(function () { return {}; });
-          if (!r.ok) { err.textContent = j.detail || "Verification failed"; err.classList.remove("hidden"); return; }
-          var ok = await copyTextToClipboard(j.token || ""); closeMfaModal();
-          showToast(ok ? "Token copied to clipboard" : "Failed to copy token", !ok);
-        }
-      });
-      document.getElementById("editCancel").addEventListener("click", function () { closeEditModal(); });
-      document.getElementById("editForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        if (!state.editTokenId) return;
-        var err = document.getElementById("editErr"); err.classList.add("hidden");
-        var body = {};
-        var nm = (document.getElementById("editName").value || "").trim();
-        if (!nm) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
-        body.name = nm;
-        body.description = (document.getElementById("editDescription").value || "").trim();
-        var replacement = (document.getElementById("editToken").value || "").trim();
-        if (replacement) body.token = replacement;
-        var grants = grantsFromForm("m");
-        if (!grants.length) { err.textContent = "Select at least one area"; err.classList.remove("hidden"); return; }
-        body.grants = grants;
-        var expv = document.getElementById("editExpires").value;
-        body.expiresAt = expv ? new Date(expv).toISOString() : "";
-        var r = await adminApi("/admin/api/tokens/" + state.editTokenId, { method: "PATCH", body: body, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
-        closeEditModal(); await loadTokens(); showToast("Token updated", false);
-      });
-      document.getElementById("createForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        var fd = new FormData(e.target);
-        var grants = grantsFromForm("c");
-        if (!grants.length) { document.getElementById("cerr").textContent = "Select at least one area"; document.getElementById("cerr").classList.remove("hidden"); return; }
-        var body = { name: fd.get("name"), grants: grants, description: (fd.get("description") || "").trim() };
-        var existingToken = (fd.get("existingToken") || "").trim();
-        if (existingToken) body.token = existingToken;
-        if (fd.get("expires")) body.expiresAt = new Date(fd.get("expires")).toISOString();
-        var r = await adminApi("/admin/api/tokens", { method: "POST", body: body, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { document.getElementById("cerr").textContent = j.detail || j.error || "Failed"; document.getElementById("cerr").classList.remove("hidden"); return; }
-        document.getElementById("modal").classList.add("hidden");
-        unlockScroll();
-        document.getElementById("rawtok").textContent = j.token;
-        document.getElementById("once").classList.remove("hidden");
-        e.target.reset(); await loadTokens();
-      });
-      document.getElementById("zoneAdd").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        var fd = new FormData(e.target), name = (fd.get("name") || "").trim();
-        var err = document.getElementById("zoneErr"); err.classList.add("hidden");
-        var r = await adminApi("/admin/api/zones", { method: "POST", body: { name: name, description: (fd.get("description") || "").trim() }, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { err.textContent = j.detail || "Failed to add zone"; err.classList.remove("hidden"); return; }
-        e.target.reset(); await refreshAreasFromApi(); await loadZonesTable();
-      });
-      document.getElementById("editZoneCancel").addEventListener("click", function () { closeEditZone(); });
-      document.getElementById("editZoneForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        if (!state.editZoneId) return;
-        var err = document.getElementById("editZoneErr"); err.classList.add("hidden");
-        var nm = (document.getElementById("editZoneName").value || "").trim();
-        if (!nm) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
-        var body = { name: nm, description: (document.getElementById("editZoneDesc").value || "").trim() };
-        var r = await adminApi("/admin/api/zones/" + state.editZoneId, { method: "PATCH", body: body, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
-        closeEditZone();
-        await refreshAreasFromApi(); await loadZonesTable();
-        if (state.activeTab === "tokens") await loadTokens();
-        showToast("Zone updated", false);
-      });
-
-      /* ── API Keys ── */
-      function scopeBadge(s) {
-        var cls = "badge-slate";
-        if (s === "validate") cls = "badge-green";
-        else if (s.endsWith(":read")) cls = "badge-blue";
-        else if (s.endsWith(":write")) cls = "badge-amber";
-        return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
-      }
-
-      var state_apiKeys = [];
-      var state_editAkId = "";
-
-      async function loadApiKeys() {
-        var r = await adminApi("/admin/api/api-keys");
-        if (!r.ok) return;
-        state_apiKeys = await r.json();
-        var tb = document.getElementById("apiKeyRows");
-        if (!state_apiKeys.length) {
-          tb.innerHTML = '<tr><td colspan="4" class="text-center text-slate-500 py-8">No API keys yet</td></tr>';
-          return;
-        }
-        tb.innerHTML = state_apiKeys.map(function (k) {
-          var scopes = (k.scopes || "").split(",").filter(Boolean).map(scopeBadge).join(" ");
-          return '<tr>' +
-            '<td class="akcol-name font-medium text-white">' + esc(k.name) + '</td>' +
-            '<td class="akcol-scopes"><div class="flex flex-wrap gap-1">' + scopes + '</div></td>' +
-            '<td class="akcol-created text-slate-400">' + fmtDateUTC(k.createdAt) + '</td>' +
-            '<td class="akcol-actions text-right"><div class="flex gap-1 justify-end">' +
-              '<button type="button" class="btn-action btn-outline" onclick="editApiKey(\'' + k.id + '\')">Edit</button>' +
-              '<button type="button" class="btn-action btn-success" onclick="revealApiKey(\'' + k.id + '\')">Copy</button>' +
-              '<button type="button" class="btn-action btn-danger" onclick="deleteApiKey(\'' + k.id + '\',\'' + esc(k.name) + '\')">Delete</button>' +
-            '</div></td>' +
-            '</tr>';
-        }).join("");
-      }
-
-      async function deleteApiKey(id, name) {
-        if (!confirm("Delete API key \"" + name + "\"?")) return;
-        var r = await adminApi("/admin/api/api-keys/" + id, { method: "DELETE", csrf: state.csrf });
-        if (r.ok) { showToast("API key deleted", false); await loadApiKeys(); }
-        else { showToast("Failed to delete key", true); }
-      }
-
-      function editApiKey(id) {
-        var k = state_apiKeys.find(function(x) { return x.id === id; });
-        if (!k) return;
-        state_editAkId = id;
-        document.getElementById("editAkName").value = k.name;
-        document.getElementById("editAkErr").classList.add("hidden");
-        var scopes = (k.scopes || "").split(",");
-        document.getElementById("editAkScopes").querySelectorAll('input[name="escope"]').forEach(function(cb) {
-          cb.checked = scopes.indexOf(cb.value) !== -1;
-        });
-        document.getElementById("editAkModal").classList.remove("hidden");
-        lockScroll();
-      }
-
-      function revealApiKey(id) {
-        state.pendingRevealAkId = id;
-        document.getElementById("mfaCode").value = "";
-        document.getElementById("mfaErr").classList.add("hidden");
-        document.getElementById("mfaModal").classList.remove("hidden");
-        lockScroll();
-        setTimeout(function () { document.getElementById("mfaCode").focus(); }, 20);
-      }
-
-      function showRevealModal(key) {
-        document.getElementById("akRevealTitle").textContent = "API Key Created";
-        document.getElementById("akRevealNote").textContent = "Copy the key. You can also copy it later from the API Keys table.";
-        document.getElementById("akRevealKey").textContent = key;
-        document.getElementById("akRevealModal").classList.remove("hidden");
-        lockScroll();
-      }
-
-      // --- LOG LOADING LOGIC ---
-      state.activityPage = 1;
-      state.activityHasMore = true;
-      state.accessPage = 1;
-      state.accessHasMore = true;
-
-      function formatLogDetails(log) {
-        if (!log.details) return '<span class="text-slate-500">—</span>';
-        
-        var act = log.action;
-        var det = log.details;
-        
-        function formatGrantsList(grants) {
-          if (!grants || !grants.length) return "None";
-          return grants.map(function(g) {
-            return g.area + ": " + g.level.replace(/,/g, "+");
-          }).join(", ");
-        }
-
-        try {
-          if (act === "token_create") {
-            var items = [];
-            if (det.grants) items.push("<strong>Grants:</strong> " + formatGrantsList(det.grants));
-            if (det.expiresAt) items.push("<strong>Expires:</strong> " + fmtDateUTC(det.expiresAt));
-            else items.push("<strong>Expires:</strong> Never");
-            return '<div class="text-xs text-slate-300 space-y-0.5">' + items.join("<br>") + '</div>';
-          }
-          
-          if (act === "token_patch") {
-            var updates = det.updates || {};
-            var items = [];
-            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
-            if (updates.description !== undefined) items.push("Description: \"" + esc(updates.description) + "\"");
-            if (updates.isActive !== undefined) items.push("Status: " + (updates.isActive ? "Enabled" : "Disabled"));
-            if (updates.grants !== undefined) items.push("Grants: " + formatGrantsList(updates.grants));
-            if (updates.expiresAt !== undefined) {
-              items.push("Expires: " + (updates.expiresAt ? fmtDateUTC(updates.expiresAt) : "Never"));
-            }
-            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
-            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
-          }
-          
-          if (act === "zone_create") {
-            if (det.description) return '<span class="text-xs text-slate-300"><strong>Description:</strong> ' + esc(det.description) + '</span>';
-            return '<span class="text-slate-500">—</span>';
-          }
-          
-          if (act === "zone_patch") {
-            var updates = det.updates || {};
-            var items = [];
-            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
-            if (updates.description !== undefined) items.push("Description: \"" + esc(updates.description) + "\"");
-            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
-            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
-          }
-          
-          if (act === "api_key_create") {
-            if (det.scopes) return '<span class="text-xs text-slate-300"><strong>Scopes:</strong> ' + esc(det.scopes) + '</span>';
-            return '<span class="text-slate-500">—</span>';
-          }
-          
-          if (act === "api_key_patch") {
-            var updates = det.updates || {};
-            var items = [];
-            if (updates.name !== undefined) items.push("Name: \"" + esc(updates.name) + "\"");
-            if (updates.scopes !== undefined) items.push("Scopes: " + esc(updates.scopes.join(", ")));
-            if (!items.length) return '<span class="text-slate-500">No modifications</span>';
-            return '<div class="text-xs text-slate-300"><strong>Updated:</strong> ' + items.join(", ") + '</div>';
-          }
-          
-          return '<pre class="text-[10px] text-slate-400 bg-navy-900/50 p-1 rounded max-w-xs overflow-x-auto font-mono">' + esc(JSON.stringify(det, null, 2)) + '</pre>';
-        } catch(e) {
-          return '<pre class="text-[10px] text-slate-400 bg-navy-900/50 p-1 rounded max-w-xs overflow-x-auto font-mono">' + esc(JSON.stringify(det)) + '</pre>';
-        }
-      }
-
-      async function loadActivityLogs(reset) {
-        if (reset) {
-          state.activityPage = 1;
-          state.activityHasMore = true;
-        }
-        if (!state.activityHasMore) return;
-
-        var search = document.getElementById("actSearch").value.trim();
-        var action = document.getElementById("actActionFilter").value;
-        
-        var url = "/admin/api/logs/activity?page=" + state.activityPage + "&limit=30";
-        if (search) url += "&search=" + encodeURIComponent(search);
-        if (action) url += "&action=" + encodeURIComponent(action);
-
-        var r = await adminApi(url);
-        if (!r.ok) { showToast("Failed to load activity logs", true); return; }
-        var j = await r.json();
-        
-        var tb = document.getElementById("activityLogRows");
-        var logs = j.logs || [];
-        
-        if (reset && logs.length === 0) {
-          tb.innerHTML = "";
-          document.getElementById("emptyActivity").classList.remove("hidden");
-          document.getElementById("activityLoadMoreContainer").classList.add("hidden");
-          return;
-        }
-        document.getElementById("emptyActivity").classList.add("hidden");
-
-        var html = "";
-        for (var i = 0; i < logs.length; i++) {
-          var log = logs[i];
-          var detailsStr = formatLogDetails(log);
-
-          var actionBadge = '<span class="badge badge-slate">' + esc(log.action) + '</span>';
-          if (log.action.indexOf("create") !== -1) actionBadge = '<span class="badge badge-green">' + esc(log.action) + '</span>';
-          else if (log.action.indexOf("patch") !== -1) actionBadge = '<span class="badge badge-blue">' + esc(log.action) + '</span>';
-          else if (log.action.indexOf("delete") !== -1) actionBadge = '<span class="badge badge-red">' + esc(log.action) + '</span>';
-          else if (log.action.indexOf("reveal") !== -1) actionBadge = '<span class="badge badge-amber">' + esc(log.action) + '</span>';
-          else if (log.action === "login") actionBadge = '<span class="badge badge-violet">' + esc(log.action) + '</span>';
-          else if (log.action === "logout") actionBadge = '<span class="badge badge-slate">' + esc(log.action) + '</span>';
-
-          html += '<tr>' +
-            '<td><span class="text-slate-400 text-xs">' + fmtDateUTC(log.createdAt) + '</span></td>' +
-            '<td><span class="text-white font-medium">' + esc(log.actor) + '</span></td>' +
-            '<td>' + actionBadge + '</td>' +
-            '<td><span class="text-xs text-slate-500">' + esc(log.entityType || '—') + '</span></td>' +
-            '<td><span class="text-slate-300 text-xs">' + esc(log.entityName || '—') + '</span></td>' +
-            '<td>' + detailsStr + '</td>' +
-            '<td><code class="text-xs text-slate-400">' + esc(log.ipAddress) + '</code></td>' +
-            '</tr>';
-        }
-
-        if (reset) {
-          tb.innerHTML = html;
-        } else {
-          tb.innerHTML += html;
-        }
-
-        state.activityHasMore = (state.activityPage * 30) < j.total;
-        var moreBtn = document.getElementById("activityLoadMoreContainer");
-        if (state.activityHasMore) {
-          moreBtn.classList.remove("hidden");
-        } else {
-          moreBtn.classList.add("hidden");
-        }
-      }
-
-      async function loadAccessLogs(reset) {
-        if (reset) {
-          state.accessPage = 1;
-          state.accessHasMore = true;
-        }
-        if (!state.accessHasMore) return;
-
-        var search = document.getElementById("accSearch").value.trim();
-        var result = document.getElementById("accResultFilter").value;
-        
-        var url = "/admin/api/logs/access?page=" + state.accessPage + "&limit=30";
-        if (search) url += "&search=" + encodeURIComponent(search);
-        if (result) url += "&result=" + encodeURIComponent(result);
-
-        var r = await adminApi(url);
-        if (!r.ok) { showToast("Failed to load access logs", true); return; }
-        var j = await r.json();
-        
-        var tb = document.getElementById("accessLogRows");
-        var logs = j.logs || [];
-        
-        if (reset && logs.length === 0) {
-          tb.innerHTML = "";
-          document.getElementById("emptyAccess").classList.remove("hidden");
-          document.getElementById("accessLoadMoreContainer").classList.add("hidden");
-          return;
-        }
-        document.getElementById("emptyAccess").classList.add("hidden");
-
-        var html = "";
-        for (var i = 0; i < logs.length; i++) {
-          var log = logs[i];
-          var resBadge = log.result 
-            ? '<span class="badge badge-green flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Allowed</span>'
-            : '<span class="badge badge-red flex items-center gap-1 w-max"><span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Denied</span>';
-
-          html += '<tr>' +
-            '<td><span class="text-slate-400 text-xs">' + fmtDateUTC(log.createdAt) + '</span></td>' +
-            '<td><span class="text-white font-medium">' + esc(log.tokenName) + '</span></td>' +
-            '<td><span class="badge badge-blue">' + esc(log.area) + '</span></td>' +
-            '<td><span class="text-xs text-slate-400 font-mono">' + esc(log.level) + '</span></td>' +
-            '<td>' + resBadge + '</td>' +
-            '<td><code class="text-xs text-slate-400">' + esc(log.ipAddress) + '</code></td>' +
-            '</tr>';
-        }
-
-        if (reset) {
-          tb.innerHTML = html;
-        } else {
-          tb.innerHTML += html;
-        }
-
-        state.accessHasMore = (state.accessPage * 30) < j.total;
-        var moreBtn = document.getElementById("accessLoadMoreContainer");
-        if (state.accessHasMore) {
-          moreBtn.classList.remove("hidden");
-        } else {
-          moreBtn.classList.add("hidden");
-        }
-      }
-
-      // Tab navigation links
-      bindTabLink("tabTokens", "tokens");
-      bindTabLink("tabZones", "zones");
-      bindTabLink("tabApiKeys", "apiKeys");
-      bindTabLink("tabActivityLog", "activityLog");
-      bindTabLink("tabAccessLogs", "accessLogs");
-
-      document.getElementById("btnActivityLoadMore").addEventListener("click", function () {
-        state.activityPage++;
-        loadActivityLogs(false);
-      });
-      document.getElementById("btnFilterActivity").addEventListener("click", function () {
-        loadActivityLogs(true);
-      });
-      document.getElementById("btnResetActivity").addEventListener("click", function () {
-        document.getElementById("actSearch").value = "";
-        document.getElementById("actActionFilter").value = "";
-        loadActivityLogs(true);
-      });
-
-      document.getElementById("btnAccessLoadMore").addEventListener("click", function () {
-        state.accessPage++;
-        loadAccessLogs(false);
-      });
-      document.getElementById("btnFilterAccess").addEventListener("click", function () {
-        loadAccessLogs(true);
-      });
-      document.getElementById("btnResetAccess").addEventListener("click", function () {
-        document.getElementById("accSearch").value = "";
-        document.getElementById("accResultFilter").value = "";
-        loadAccessLogs(true);
-      });
-
-      document.getElementById("newApiKeyBtn").addEventListener("click", function () {
-        document.getElementById("akErr").classList.add("hidden");
-        document.getElementById("apiKeyForm").reset();
-        document.getElementById("apiKeyModal").classList.remove("hidden");
-        lockScroll();
-      });
-      document.getElementById("akCancel").addEventListener("click", function () {
-        document.getElementById("apiKeyModal").classList.add("hidden"); unlockScroll();
-      });
-      document.getElementById("apiKeyForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        var err = document.getElementById("akErr"); err.classList.add("hidden");
-        var name = e.target.akName.value.trim();
-        var checks = e.target.querySelectorAll('input[name="scope"]:checked');
-        var scopes = []; checks.forEach(function(c) { scopes.push(c.value); });
-        if (!scopes.length) { err.textContent = "Select at least one scope"; err.classList.remove("hidden"); return; }
-        var r = await adminApi("/admin/api/api-keys", { method: "POST", body: { name: name, scopes: scopes }, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { err.textContent = j.detail || "Failed"; err.classList.remove("hidden"); return; }
-        document.getElementById("apiKeyModal").classList.add("hidden"); unlockScroll();
-        showRevealModal(j.key);
-        await loadApiKeys();
-      });
-      document.getElementById("akRevealCopy").addEventListener("click", async function () {
-        var key = document.getElementById("akRevealKey").textContent;
-        var ok = await copyTextToClipboard(key);
-        showToast(ok ? "Copied to clipboard" : "Failed to copy", !ok);
-      });
-      document.getElementById("akRevealClose").addEventListener("click", function () {
-        document.getElementById("akRevealModal").classList.add("hidden"); unlockScroll();
-      });
-
-      /* Edit API Key */
-      document.getElementById("editAkCancel").addEventListener("click", function () {
-        document.getElementById("editAkModal").classList.add("hidden"); unlockScroll(); state_editAkId = "";
-      });
-      document.getElementById("editAkForm").addEventListener("submit", async function (e) {
-        e.preventDefault();
-        if (!state_editAkId) return;
-        var err = document.getElementById("editAkErr"); err.classList.add("hidden");
-        var name = document.getElementById("editAkName").value.trim();
-        if (!name) { err.textContent = "Name is required"; err.classList.remove("hidden"); return; }
-        var checks = document.getElementById("editAkScopes").querySelectorAll('input[name="escope"]:checked');
-        var scopes = []; checks.forEach(function(c) { scopes.push(c.value); });
-        if (!scopes.length) { err.textContent = "Select at least one scope"; err.classList.remove("hidden"); return; }
-        var r = await adminApi("/admin/api/api-keys/" + state_editAkId, { method: "PATCH", body: { name: name, scopes: scopes }, csrf: state.csrf });
-        var j = await r.json().catch(function () { return {}; });
-        if (!r.ok) { err.textContent = j.detail || "Save failed"; err.classList.remove("hidden"); return; }
-        document.getElementById("editAkModal").classList.add("hidden"); unlockScroll(); state_editAkId = "";
-        showToast("API key updated", false);
-        await loadApiKeys();
-      });
-
-      (async function init() {
-        var initialTab = tabFromPath(location.pathname);
-        setTab(initialTab);
-        syncTabUrl(initialTab, true); // canonicalise "/" to "/tokens"
-        var st = await adminApi("/admin/api/setup/status"); var sj = await st.json();
-        if (sj.needsSetup) { window.location.href = basePath() + "/setup"; return; }
-        await loadMe(); await loadTokens(); await loadZonesTable(); await refreshServiceStatus();
-        if (initialTab === "apiKeys") { await loadApiKeys(); }
-        else if (initialTab === "activityLog") { await loadActivityLogs(true); }
-        else if (initialTab === "accessLogs") { await loadAccessLogs(true); }
-        setInterval(refreshServiceStatus, 15000);
-        setInterval(async function () {
-          if (document.hidden) return;
-          try {
-            await refreshActiveTabData();
-          } catch (e) {
-            console.error("Auto-refresh active tab failed:", e);
-          }
-        }, 5000);
-      })();
-    </script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/dashboard.js"></script>
   </body>
 </html>

@@ -1,11 +1,3 @@
-FROM --platform=$BUILDPLATFORM node:20-alpine AS css
-WORKDIR /build
-COPY services/styles/package.json ./auth/styles/
-RUN cd auth/styles && npm install
-COPY services/styles/ ./auth/styles/
-COPY services/static/public/ ./auth/static/public/
-RUN cd auth/styles && npm run build
-
 FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONPATH=/app
@@ -18,7 +10,6 @@ RUN python -m pip install --upgrade pip \
 
 COPY services/app ./app
 COPY services/static ./static
-COPY --from=css /build/auth/static/public/css/tailwind.css ./static/public/css/tailwind.css
 
 RUN mkdir -p /data
 
