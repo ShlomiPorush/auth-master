@@ -285,9 +285,41 @@ async def create_database(url: str) -> Database:
         conn.row_factory = None  # we handle row mapping ourselves
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
-        return SqliteDatabase(conn)
+        db = SqliteDatabase(conn)
+        db.path = path
+        return db
     else:
         import asyncpg  # type: ignore[import-untyped]
 
         pool = await asyncpg.create_pool(url, min_size=1, max_size=10)
         return PgDatabase(pool)
+
+
+SETTINGS_LOCK_TIMEOUT_SEC = 5.0
+
+
+async def open_settings_database(main: Database) -> tuple[Database, bool]:
+    """The database handle for settings reads and writes, and whether the caller must close it.
+
+    SQLite: a dedicated connection in autocommit mode (``isolation_level=None``), so each
+    statement is its own transaction, committed when it returns or not at all.  The shared
+    request connection, and transactions opened on it, can neither include nor roll back a
+    settings write, and a failed write leaves no transaction open.  ``timeout`` is how long a
+    statement waits for another connection's write lock.
+
+    PostgreSQL: the main pool; a single statement outside a transaction is autocommit.
+    """
+    if not main.is_sqlite:
+        return main, False
+    import aiosqlite  # type: ignore[import-untyped]
+
+    # The same file the main connection opened, whatever the settings say now.
+    path = getattr(main, "path", "")
+    if path in ("", ":memory:") or path.startswith("file::memory:"):
+        raise RuntimeError(
+            "DATABASE_URL points to an in-memory SQLite database. The service needs a database "
+            "file, because settings are read and written on a second connection."
+        )
+    conn = await aiosqlite.connect(path, isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC)
+    conn.row_factory = None
+    return SqliteDatabase(conn), True

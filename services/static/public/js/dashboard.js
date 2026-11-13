@@ -1,6 +1,6 @@
 /*
  * The admin dashboard: the shell (navigation, Needs attention, preferences) and
- * its five pages: Tokens, Zones, API Keys, Activity Log and Access Logs.
+ * its pages: Tokens, Zones, API Keys, Activity Log, Access Logs and Settings.
  *
  * Builds on js/ui.js (builders, router, refresh scheduler, date helpers) and
  * js/common.js (requests). Everything from the server is escaped with esc() or
@@ -14,6 +14,7 @@ var PAGES = {
     apikeys: { path: "/admin/api-keys", title: "API Keys" },
     activity: { path: "/admin/logs/activity", title: "Activity Log" },
     access: { path: "/admin/logs/access", title: "Access Logs" },
+    settings: { path: "/admin/settings", title: "Settings" },
 };
 
 var TOKEN_FLAGS = ["read", "write", "delete"];
@@ -223,7 +224,7 @@ function dashShowPage(id, info) {
     });
     var more = document.getElementById("tab-more");
     if (more) {
-        if (id === "activity" || id === "access") more.setAttribute("aria-current", "page");
+        if (id === "activity" || id === "access" || id === "settings") more.setAttribute("aria-current", "page");
         else more.removeAttribute("aria-current");
     }
     var title = document.getElementById("mtop-page");
@@ -322,7 +323,7 @@ function dashMoreOpen() {
     };
     d = uiDialog({
         title: "More", size: "sm", backdropClass: "ui-more-layer", close: close, backdropClose: close,
-        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") +
+        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("settings") +
             '<button type="button" class="ui-tool" data-more-prefs><span class="ui-tool-label">Preferences</span></button>' +
             '<button type="button" class="ui-tool" data-more-theme><span class="ui-tool-label"></span></button>' +
             '<p class="ui-side-user">Signed in as&nbsp;<bdi dir="auto">' + esc(dash.user) + "</bdi></p>" +
@@ -2025,7 +2026,327 @@ function dashLimitDraw() {
     box.innerHTML = html;
 }
 
-var DASH_SEARCH_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
+// ===========================================================================
+// Settings: the rate limit and the addresses exempt from it. The form edits a
+// draft based on one saved version (base); a refresh never touches a changed
+// draft, and the base only moves on a save or an explicit choice after a conflict.
+// ===========================================================================
+
+var DASH_LOCK_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>';
+
+var dashSet = {
+    snap: null, baseSnap: null, draft: null, dirty: false, saving: false, failed: "", refreshFailed: "",
+    conflict: null, error: "", errorField: "", askOwn: false, seq: 0, bound: false,
+};
+
+function dashSetDraftFrom(s) {
+    var f = s.fields;
+    return {
+        maxReq: String(f.maxReq.value),
+        windowSeconds: String(f.windowMs.value / 1000),
+        exempt: f.exempt.value.join("\n"),
+    };
+}
+
+function dashSetExemptList(text) {
+    return text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l; });
+}
+
+function dashSetChanges() {
+    var base = dashSetDraftFrom(dashSet.baseSnap);
+    var d = dashSet.draft;
+    var f = dashSet.baseSnap.fields;
+    var out = {};
+    if (!f.maxReq.locked && d.maxReq.trim() !== base.maxReq) out.maxReq = d.maxReq.trim();
+    if (!f.windowMs.locked && d.windowSeconds.trim() !== base.windowSeconds) out.windowSeconds = d.windowSeconds.trim();
+    if (dashSetExemptList(d.exempt).join("\n") !== dashSetExemptList(base.exempt).join("\n")) out.exempt = dashSetExemptList(d.exempt);
+    return out;
+}
+
+// The own address is being added (it was not exempt in the saved version)
+function dashSetAddsOwn() {
+    var own = dashSet.snap && dashSet.snap.yourAddress;
+    if (!own || !dashSet.draft) return false;
+    var was = dashSet.baseSnap.fields.exempt.value.indexOf(own) >= 0;
+    return !was && dashSetExemptList(dashSet.draft.exempt).indexOf(own) >= 0;
+}
+
+function dashSettingsLoad(isCurrent) {
+    var seq = ++dashSet.seq;
+    return api("GET", "/admin/api/settings/rate-limit").then(function (res) {
+        // A newer load, a save in flight, or a save that finished after this load began owns the page
+        if (seq !== dashSet.seq || dashSet.saving || (isCurrent && !isCurrent())) return;
+        var d = res.data;
+        if (!res.ok || !d || !d.fields) {
+            var why = apiError(res, "The server did not answer.");
+            if (dashSet.snap) dashSet.refreshFailed = why;
+            else dashSet.failed = why;
+            dashSettingsDraw();
+            return;
+        }
+        dashSet.failed = "";
+        dashSet.refreshFailed = "";
+        dashSet.snap = d;
+        if (!dashSet.dirty && !dashSet.saving && !dashSet.conflict) {
+            dashSet.baseSnap = d;
+            dashSet.draft = dashSetDraftFrom(d);
+            dashSet.error = "";
+            dashSet.errorField = "";
+            dashSet.askOwn = false;
+            dashSettingsDrawForm();
+        }
+        dashSettingsDraw();
+    });
+}
+
+function dashSetSourceHint(field) {
+    if (field.source === "stored") return "Saved here.";
+    if (field.source === "default") return "Default value.";
+    return "";
+}
+
+function dashSetLocked(field, shown) {
+    return '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(field.envName) + "</code> environment variable (" +
+        esc(shown) + "). Remove it there to change the value here.</span></p>";
+}
+
+function dashSettingsDrawForm() {
+    var body = document.getElementById("settings-body");
+    if (!body || !dashSet.baseSnap) return;
+    var f = dashSet.baseSnap.fields;
+    var d = dashSet.draft;
+    var own = dashSet.snap.yourAddress;
+    var maxField = f.maxReq.locked
+        ? dashSetLocked(f.maxReq, uiCountLabel(f.maxReq.value, "request", "requests"))
+        : '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
+          '" step="1" required value="' + esc(d.maxReq) + '" aria-describedby="set-max-hint" />' +
+          '<span class="ui-hint" id="set-max-hint">' + esc(dashSetSourceHint(f.maxReq)) + " From 1 to " + esc(uiNum(f.maxReq.max)) + ".</span>";
+    var winField = f.windowMs.locked
+        ? dashSetLocked(f.windowMs, uiNum(f.windowMs.value) + " ms")
+        : '<input class="ui-input" id="set-window" type="number" inputmode="numeric" min="' + esc(f.windowMs.minSeconds) + '" max="' +
+          esc(f.windowMs.maxSeconds) + '" step="1" required value="' + esc(d.windowSeconds) + '" aria-describedby="set-window-hint" />' +
+          '<span class="ui-hint" id="set-window-hint">' + esc(dashSetSourceHint(f.windowMs)) + " Whole seconds, from 1 to " + esc(uiNum(f.windowMs.maxSeconds)) + ".</span>";
+    body.innerHTML =
+        '<form class="ui-form" id="settings-form" novalidate><fieldset class="ui-settings-fields" id="settings-fields">' +
+        '<div class="ui-form-row">' +
+        '<div class="ui-field"><label class="ui-label" for="set-max">Requests per window, from one address</label>' + maxField + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="set-window">Window, in seconds</label>' + winField + "</div>" +
+        "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="set-exempt">Exempt addresses <small>(one per line, up to ' + esc(uiNum(f.exempt.max)) + ")</small></label>" +
+        '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint set-exempt-warn" placeholder="203.0.113.10">' +
+        esc(d.exempt) + "</textarea>" +
+        '<span class="ui-hint" id="set-exempt-hint">Single IPv4 or IPv6 addresses. Requests from these addresses are never limited or counted.' +
+        (own ? " Your request to this page came from <code>" + esc(own) + "</code>." : "") + "</span>" +
+        '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>An exempt address is not limited at all</p>' +
+        "<small>If a reverse proxy sits in front of this service and <code>FORWARDED_ALLOW_IPS</code> is not set, every caller arrives from the proxy's address, " +
+        "and exempting it removes the limit for everyone.</small></div><span></span></div>" +
+        '<label class="ui-check-label hidden" id="set-own-wrap"><input type="checkbox" class="ui-check" id="set-own" /> <span>Exempt <code>' + esc(own || "") +
+        "</code>, the address my own request came from, anyway</span></label>" +
+        "</div>" +
+        '<p class="ui-error hidden" id="set-err" role="alert"></p>' +
+        '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-save">Save</button>' +
+        '<button type="button" class="ui-btn hidden" id="set-discard">Discard changes</button></div>' +
+        "</fieldset></form>";
+    dashSettingsSyncForm();
+}
+
+// Parts of the form that follow the draft and the last answer, without redrawing the inputs
+function dashSettingsSyncForm() {
+    var form = document.getElementById("settings-form");
+    if (!form) return;
+    var addsOwn = dashSetAddsOwn();
+    var wrap = document.getElementById("set-own-wrap");
+    wrap.classList.toggle("hidden", !(addsOwn || dashSet.askOwn));
+    if (!(addsOwn || dashSet.askOwn)) document.getElementById("set-own").checked = false;
+    var err = document.getElementById("set-err");
+    err.textContent = dashSet.error;
+    err.classList.toggle("hidden", !dashSet.error);
+    [["set-max", "maxReq"], ["set-window", "windowMs"], ["set-exempt", "exempt"]].forEach(function (pair) {
+        var el = document.getElementById(pair[0]);
+        if (!el) return;
+        if (dashSet.errorField === pair[1]) el.setAttribute("aria-invalid", "true");
+        else el.removeAttribute("aria-invalid");
+    });
+    document.getElementById("settings-fields").disabled = dashSet.saving;
+    document.getElementById("set-save").textContent = dashSet.saving ? "Saving..." : "Save";
+    document.getElementById("set-discard").classList.toggle("hidden", !dashSet.dirty);
+}
+
+function dashSettingsDraw() {
+    var info = document.getElementById("settings-info");
+    var body = document.getElementById("settings-body");
+    if (!info || !body) return;
+    if (!dashSet.snap) {
+        info.innerHTML = "";
+        body.innerHTML = dashSet.failed ? dashFailed("Could not load the settings", dashSet.failed, "data-settings-retry") : dashLoading("Loading settings...");
+        return;
+    }
+    var s = dashSet.snap;
+    var alerts = [];
+    var addAlert = function (tone, title, sub, actions) {
+        alerts.push('<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub +
+            "</small></div>" + (actions || "<span></span>") + "</div>");
+    };
+    if (dashSet.conflict) {
+        var c = dashSet.conflict;
+        var f = c.fields;
+        addAlert(" is-warn", "Someone else saved these settings after you opened the page",
+            "Saved now: " + esc(uiCountLabel(f.maxReq.value, "request", "requests")) + " per " + esc(uiNum(f.windowMs.value / 1000)) + " s; exempt: " +
+            (f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : "none") +
+            ". Your changes are still in the form.",
+            '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-set-discard>Discard my changes</button>' +
+            '<button type="button" class="ui-btn ui-btn-sm" data-set-keep>Keep my changes</button></div>');
+    }
+    if (dashSet.refreshFailed) {
+        addAlert(" is-fail", "Could not refresh the settings", esc(dashSet.refreshFailed) + " They are checked again every 30 seconds.");
+    }
+    var a = s.applied || {};
+    if (a.lastReloadError) {
+        addAlert(" is-fail", "This server process could not reload the settings",
+            esc(a.lastReloadError) + " It keeps using version " + esc(uiNum(a.version)) + ".");
+    } else if (a.version < s.version) {
+        addAlert(" is-warn", "This server process still uses version " + uiNum(a.version), "It reloads the settings every 15 seconds.");
+    }
+    var applied = "This server process enforces version " + esc(uiNum(a.version || 0)) +
+        (a.lastReload ? ", checked " + uiTime(a.lastReload) : "") + ".";
+    var saved = s.version
+        ? "Version " + esc(uiNum(s.version)) + ", saved by " + uiUserText(s.savedBy || "?") + (s.savedFrom ? " from <code>" + esc(s.savedFrom) + "</code>" : "") +
+          " " + uiTime(s.savedAt) + "."
+        : "Nothing saved here yet. The values come from the defaults and the environment.";
+    addAlert("", "Saved settings", saved + " " + applied + " Changes apply at once in this server process and within about 15 seconds in any other.");
+    var html = alerts.join("");
+    if (!uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = html; });
+    if (!document.getElementById("settings-form")) dashSettingsDrawForm();
+    dashSettingsSyncForm();
+}
+
+function dashSettingsInput() {
+    var d = dashSet.draft;
+    var max = document.getElementById("set-max");
+    var win = document.getElementById("set-window");
+    if (max) d.maxReq = max.value;
+    if (win) d.windowSeconds = win.value;
+    d.exempt = document.getElementById("set-exempt").value;
+    var changes = dashSetChanges();
+    dashSet.dirty = Object.keys(changes).length > 0;
+    dashSettingsSyncForm();
+}
+
+function dashSettingsSave() {
+    if (dashSet.saving) return;
+    var changes = dashSetChanges();
+    var body = { baseVersion: dashSet.baseSnap.version };
+    var whole = /^\d+$/;
+    if ("maxReq" in changes) {
+        if (!whole.test(changes.maxReq)) return dashSettingsFail("Requests per window must be a whole number.", "maxReq");
+        body.maxReq = Number(changes.maxReq);
+    }
+    if ("windowSeconds" in changes) {
+        if (!whole.test(changes.windowSeconds)) return dashSettingsFail("The window must be a whole number of seconds.", "windowMs");
+        body.windowSeconds = Number(changes.windowSeconds);
+    }
+    if ("exempt" in changes) body.exempt = changes.exempt;
+    var ownBox = document.getElementById("set-own");
+    if (ownBox && ownBox.checked) body.confirmOwnAddress = true;
+    dashSet.saving = true;
+    dashSet.error = "";
+    dashSet.errorField = "";
+    dashSettingsSyncForm();
+    dashSet.seq += 1; // a load that started before this save must not draw over its result
+    uiMutated();
+    return api("PUT", "/admin/api/settings/rate-limit", body).then(function (res) {
+        dashSet.saving = false;
+        dashSet.seq += 1; // and so must a load that started while it ran
+        var d = res.data || {};
+        if (res.ok && d.fields) {
+            dashSet.snap = d;
+            dashSet.baseSnap = d;
+            dashSet.draft = dashSetDraftFrom(d);
+            dashSet.dirty = false;
+            dashSet.conflict = null;
+            dashSet.askOwn = false;
+            dashSettingsDrawForm();
+            dashSettingsDraw();
+            showToast(d.warning || "Settings saved", d.warning ? "error" : "success");
+            return;
+        }
+        if (res.status === 409 && d.code === "conflict" && d.current) {
+            dashSet.conflict = d.current;
+            dashSet.snap = d.current;
+            dashSettingsDraw();
+            return;
+        }
+        if (res.status === 409 && d.code === "own_address") dashSet.askOwn = true;
+        dashSettingsFail(apiError(res, "Could not save the settings."), d.field || "");
+        if (d.code === "locked") dashSettingsLoad();
+    });
+}
+
+function dashSettingsFail(message, field) {
+    dashSet.error = message;
+    dashSet.errorField = field;
+    dashSettingsSyncForm();
+}
+
+function dashSettingsBind() {
+    if (dashSet.bound) return;
+    dashSet.bound = true;
+    var page = document.querySelector('[data-page="settings"]');
+    page.addEventListener("input", function (event) {
+        if (event.target.closest("#settings-form") && event.target.id !== "set-own") dashSettingsInput();
+    });
+    page.addEventListener("submit", function (event) {
+        if (event.target.id !== "settings-form") return;
+        event.preventDefault();
+        dashSettingsSave();
+    });
+    page.addEventListener("click", function (event) {
+        var t = event.target;
+        if (t.closest("[data-settings-retry]")) {
+            dashSet.failed = "";
+            dashSettingsDraw();
+            dashSettingsLoad();
+        } else if (t.closest("#set-discard") || t.closest("[data-set-discard]")) {
+            var to = dashSet.conflict || dashSet.snap;
+            dashSet.baseSnap = to;
+            dashSet.snap = to;
+            dashSet.draft = dashSetDraftFrom(to);
+            dashSet.dirty = false;
+            dashSet.conflict = null;
+            dashSet.askOwn = false;
+            dashSet.error = "";
+            dashSet.errorField = "";
+            dashSettingsDrawForm();
+            dashSettingsDraw();
+        } else if (t.closest("[data-set-keep]")) {
+            // An explicit choice: the draft now changes the version saved by the other admin
+            dashSet.baseSnap = dashSet.conflict;
+            dashSet.conflict = null;
+            dashSettingsInput();
+            dashSettingsDraw();
+        }
+    });
+    // A changed draft is an unsaved change
+    uiUnsavedRegister(function () {
+        return dashSet.dirty ? 1 : 0;
+    }, function () {
+        if (!dashSet.baseSnap) return;
+        dashSet.draft = dashSetDraftFrom(dashSet.baseSnap);
+        dashSet.dirty = false;
+        dashSet.conflict = null;
+        dashSettingsDrawForm();
+    });
+}
+
+DASH_PAGE_IMPL.settings = function () {
+    dashSettingsBind();
+    dashSettingsDraw();
+    dashSettingsLoad().then(function () { uiRefreshLoaded("settings"); });
+};
+
+registerPageRefresh("settings", 30000, function (isCurrent) { return dashSettingsLoad(isCurrent); });
+
+var DASH_SEARCH_ICON ='<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
 
 if (typeof document !== "undefined" && document.readyState !== undefined) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", dashBoot);

@@ -385,6 +385,17 @@ body.ui-app { overflow: hidden; }
 .ui-failed b { color: var(--ui-fail); font-weight: 650; }
 .ui-locked-note { display: flex; align-items: center; gap: var(--ui-sp-3); color: var(--ui-muted); font-size: var(--ui-fs-meta); }
 .ui-locked-note svg { width: 14px; height: 14px; }
+.ui-textarea { width: 100%; min-height: 132px; padding: var(--ui-sp-4) var(--ui-sp-6); border-radius: var(--ui-radius-sm);
+    border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-ink); font-family: var(--ui-mono);
+    font-size: var(--ui-fs-code); line-height: 1.6; resize: vertical; }
+.ui-textarea:focus { outline: none; border-color: var(--ui-accent); }
+.ui-textarea[aria-invalid="true"] { border-color: var(--ui-fail); }
+.ui-settings-fields { display: grid; gap: var(--ui-sp-7); margin: 0; padding: 0; border: 0; min-width: 0; }
+.ui-settings-fields .ui-form-row { align-items: start; }
+.ui-settings-fields .ui-alert { border-top: 0; }
+.ui-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-4); }
+.ui-settings-info { display: grid; }
+.ui-settings-info > .ui-alert:first-child { border-top: 0; }
 
 /* ---------- Filter bar and count line ---------- */
 

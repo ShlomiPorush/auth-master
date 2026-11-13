@@ -162,6 +162,14 @@
     {"key": "setupmfa.secret", "kind": "field", "old": "'Manual entry secret:'", "expect": ["Manual entry secret:"]},
     {"key": "setupmfa.expired", "kind": "message", "old": "'Session expired. Start over' linking to /setup (hard-coded path)", "expect": ["Session expired.", "Start over"]},
     {"key": "setupmfa.code", "kind": "field", "old": "code numeric, one-time-code, required", "expect": ["data-inventory=\"setupmfa.code\""]},
-    {"key": "setupmfa.submit", "kind": "action", "old": "'Verify & Finish' -> POST /admin/api/bootstrap/mfa-verify with CSRF, writeCsrf, go to /", "expect": ["Verify &amp; Finish", "adminApi(\"/admin/api/bootstrap/mfa-verify\", { method: \"POST\""]}
+    {"key": "setupmfa.submit", "kind": "action", "old": "'Verify & Finish' -> POST /admin/api/bootstrap/mfa-verify with CSRF, writeCsrf, go to /", "expect": ["Verify &amp; Finish", "adminApi(\"/admin/api/bootstrap/mfa-verify\", { method: \"POST\""]},
+    {"key": "settings.nav", "kind": "action", "old": "added with the rate limit Settings page", "expect": ["data-page-link=\"settings\"", "\"/admin/settings\""]},
+    {"key": "settings.api.read", "kind": "endpoint", "old": "added with the rate limit Settings page: GET the settings", "expect": ["api(\"GET\", \"/admin/api/settings/rate-limit\")"]},
+    {"key": "settings.api.save", "kind": "endpoint", "old": "added with the rate limit Settings page: PUT with baseVersion and the changed fields", "expect": ["api(\"PUT\", \"/admin/api/settings/rate-limit\", body)", "baseVersion: dashSet.baseSnap.version"]},
+    {"key": "settings.fields", "kind": "field", "old": "added with the rate limit Settings page: requests per window, window seconds, exempt addresses", "expect": ["id=\"set-max\"", "id=\"set-window\"", "id=\"set-exempt\""]},
+    {"key": "settings.locked", "kind": "locked", "old": "added with the rate limit Settings page: a field set by the environment is locked", "expect": ["environment variable (", "Remove it there to change the value here."]},
+    {"key": "settings.exempt.warning", "kind": "message", "old": "added with the rate limit Settings page: what an exemption means behind a proxy", "expect": ["An exempt address is not limited at all", "exempting it removes the limit for everyone."]},
+    {"key": "settings.own.confirm", "kind": "action", "old": "added with the rate limit Settings page: confirmation before exempting the admin's own address", "expect": ["id=\"set-own\"", "body.confirmOwnAddress = true"]},
+    {"key": "settings.conflict", "kind": "message", "old": "added with the rate limit Settings page: someone else saved first", "expect": ["Someone else saved these settings after you opened the page", "Discard my changes", "Keep my changes"]}
   ]
 }

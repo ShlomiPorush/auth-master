@@ -245,7 +245,7 @@ def test_lookup_logs_access_and_keeps_last_used(client):
 def test_lookup_rate_limit_returns_429_and_is_shared(client, monkeypatch):
     tok = secrets.token_urlsafe(24)
     _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}])
-    monkeypatch.setattr(rate_limit, "MAX_REQ", 2)
+    monkeypatch.setattr(rate_limit, "_limits", rate_limit.Limits(0, 2, 60_000))
     assert _grants(client, tok).status_code == 200
     assert _grants(client, tok).status_code == 200
     r = _grants(client, tok)
@@ -259,7 +259,7 @@ def test_lookup_rate_limit_returns_429_and_is_shared(client, monkeypatch):
 def test_validate_budget_limits_lookup(client, monkeypatch):
     tok = secrets.token_urlsafe(24)
     _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}])
-    monkeypatch.setattr(rate_limit, "MAX_REQ", 1)
+    monkeypatch.setattr(rate_limit, "_limits", rate_limit.Limits(0, 1, 60_000))
     assert client.post("/validate", json={"token": tok, "area": "orders", "level": "read"}).json() == {"result": True}
     assert _grants(client, tok).status_code == 429
 

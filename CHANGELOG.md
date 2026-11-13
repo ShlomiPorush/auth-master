@@ -98,7 +98,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected, when the last one was, and from which addresses, read from the new
   `GET /admin/api/rate-limit`. Counts are kept in memory per server process and
   reset on restart.
-
+- A Settings page (`/admin/settings`) sets the `/validate` rate limit (requests per
+  window and window length) and up to 100 exempt IP addresses, which are never
+  limited or counted. `RATE_LIMIT_MAX_REQ` and `RATE_LIMIT_WINDOW_MS` still work and,
+  when set, lock their field on the page. Every save is kept as a new version in the
+  new table `rate_limit_settings` with who saved it, when and from where, and is also
+  shown on the Activity Log. Saving from an outdated page is refused with the current
+  values, and the page asks for a confirmation before exempting the address the
+  admin's own request came from. The service refuses to start when the newest stored
+  version is invalid; README.md explains the repair. Going back to an earlier version
+  of the service ignores the table, so its limits and exemptions stop applying.
+- In-memory SQLite (`DATABASE_URL=sqlite:///:memory:`) is refused at startup: the
+  rate limit settings are read on a second connection to the same database file.
 ### Removed
 
 - The `VALIDATE_CACHE_TTL_SEC` setting. It has no effect and can be removed from

@@ -14,9 +14,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 
 from app.config import get_settings
 from app.datetime_utils import is_expired
-from app.db import create_database
-from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit
+from app.db import create_database, open_settings_database
+from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings
 from app.schema import ensure_database_schema
+from app import rate_limit_settings
 from app.logger import purge_old_logs
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
@@ -78,31 +79,47 @@ async def expired_tokens_cleanup_loop(db) -> None:
             print(f"Error in expired_tokens_cleanup_loop: {e}")
 
 
+async def _stop(task: asyncio.Task) -> None:
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     s = get_settings()
     app.state.db = await create_database(s.database_url)
-    await ensure_database_schema(app.state.db)
-    app.state.redis = redis.from_url(s.redis_url, decode_responses=True)
-    
-    # Start cleanup background task
-    cleanup_task = asyncio.create_task(
-        expired_tokens_cleanup_loop(app.state.db)
-    )
-    app.state.cleanup_task = cleanup_task
-    # Trigger one cleanup immediately in the background
-    asyncio.create_task(cleanup_expired_tokens(app.state.db))
-    
-    yield
-    
-    cleanup_task.cancel()
     try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-        
-    await app.state.redis.aclose()
-    await app.state.db.close()
+        await ensure_database_schema(app.state.db)
+        settings_db, close_settings_db = await open_settings_database(app.state.db)
+        try:
+            app.state.settings_db = settings_db
+            # Before serving: invalid stored settings stop the start (the limits are unknown).
+            await rate_limit_settings.load(settings_db)
+            app.state.redis = redis.from_url(s.redis_url, decode_responses=True)
+
+            # Start cleanup background task
+            cleanup_task = asyncio.create_task(
+                expired_tokens_cleanup_loop(app.state.db)
+            )
+            app.state.cleanup_task = cleanup_task
+            # Trigger one cleanup immediately in the background
+            asyncio.create_task(cleanup_expired_tokens(app.state.db))
+            # Settings saved by another process (or by a request that was cut off) arrive here.
+            settings_reload_task = asyncio.create_task(rate_limit_settings.reload_loop(settings_db))
+
+            yield
+
+            await _stop(settings_reload_task)
+            await _stop(cleanup_task)
+            await app.state.redis.aclose()
+        finally:
+            if close_settings_db:
+                await settings_db.close()
+    finally:
+        await app.state.db.close()
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -163,6 +180,7 @@ app.include_router(admin_zones.router)
 app.include_router(admin_api_keys.router)
 app.include_router(admin_logs.router)
 app.include_router(admin_rate_limit.router)
+app.include_router(admin_settings.router)
 
 
 def _safe_static_file(rel: str) -> Path:
@@ -309,6 +327,7 @@ async def page_login_mfa():
 @app.get("/admin/api-keys")
 @app.get("/admin/logs/activity")
 @app.get("/admin/logs/access")
+@app.get("/admin/settings")
 async def page_dashboard():
     return _serve_html("index.html")
 
