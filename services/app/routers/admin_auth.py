@@ -44,7 +44,15 @@ async def login(request: Request, response: Response, body: LoginBody):
     stored = row["password_hash"]
     if isinstance(stored, str):
         stored = stored.encode("utf-8")
-    if not bcrypt.checkpw(body.password.encode("utf-8"), stored):
+    try:
+        password = body.password.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate (e.g. from a JSON "\ud800" escape) has no UTF-8 encoding,
+        # so no stored password contains one.
+        raise HTTPException(401, "Invalid credentials") from None
+    # bcrypt uses only the first 72 bytes. bcrypt 5 refuses longer input and says to
+    # truncate it; hashes made by bcrypt 4 came from the same first 72 bytes.
+    if not bcrypt.checkpw(password[:72], stored):
         raise HTTPException(401, "Invalid credentials")
     if not row["totp_enabled"] or not row["totp_secret_enc"]:
         raise HTTPException(403, "MFA not configured")
