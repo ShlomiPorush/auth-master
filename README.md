@@ -10,7 +10,7 @@ A self-hosted token authentication and authorization service. Manage API tokens,
 - **MFA-Protected** — Admin dashboard requires TOTP two-factor authentication
 - **Fast Validation** — Redis-cached token validation with rate limiting
 - **Dual Database Support** — PostgreSQL for production, SQLite for lightweight/dev setups
-- **Modern Dashboard** — Dark-themed admin UI for managing tokens, zones, and API keys
+- **Modern Dashboard** — Admin UI with light and dark themes and phone layouts for managing tokens, zones, and API keys
 - **n8n Integration** — Community nodes for workflow automation: action node + webhook trigger with built-in token validation ([n8n-nodes-auth-service](https://www.npmjs.com/package/n8n-nodes-auth-service))
 
 ## Quick Start

@@ -45,8 +45,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Windows) create `.env` once with new random secrets, readable by its owner
   only. They never replace an existing file. `.env.example` no longer contains
   values.
+- The admin dashboard and the sign-in and setup pages have a new design with
+  light and dark themes (following the system by default), a sidebar that
+  becomes an icon rail on narrow screens and a tab bar on phones, and dialogs
+  that open as bottom sheets on phones. Pages update by themselves, so the
+  Refresh button is gone. Filters are kept in the page address. Dates show in
+  the server's time zone (`TZ`), in the date and time format chosen under
+  Preferences.
+- Enabling or disabling a token takes one click and no longer asks for
+  confirmation. Deleting still asks.
+- `GET /health` answers `503` with `{"ok": false, ...}` when the database or
+  Redis does not respond, instead of failing with `500`. The Docker health check
+  still fails during such an outage.
+- The log endpoints list entries with the same timestamp in a fixed order
+  (newest first, then by ID).
 
 ### Added
+
+- A Needs attention bell on every dashboard page shows a database or Redis
+  outage and the tokens that expire within 7 days.
+- The admin log endpoints accept `before` and `since` cursors and return
+  `nextCursor` and `headCursor`, so a list can be paged without gaps or repeats
+  while new entries arrive. With `since`, `limit` can be up to 500.
+- `GET /admin/api/me` returns the server's time zone as `timeZone`.
+- A CI workflow runs the Python and JavaScript tests and builds the Docker image
+  on every pull request and push to `main`.
 
 - Token holders can read the grants of their token with `POST /validate/grants`.
   The call is public, returns the zones and permission levels together with the
@@ -57,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An API key name containing a quote no longer breaks the key's actions or
+  inserts script into the page, and activity log details no longer insert unescaped text
+  into the page.
+- After signing in, the `next` address can no longer lead to another site.
 - The access log page no longer fails on PostgreSQL deployments. The listing
   matched each log entry to its token by comparing the entry's token ID, stored as
   text, with the token's UUID, and PostgreSQL rejects a comparison between those
