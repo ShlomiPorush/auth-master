@@ -7,8 +7,8 @@
 - The answers to rejected requests are unchanged and write no access-log row.
 
 Limits are fixed when app.rate_limit is imported, and another test module may have
-imported it first with other values, so the tests set MAX_REQ and WINDOW_MS with
-monkeypatch and pass the clock in.  Every secret the app needs is generated per
+imported it first with other values, so the tests set the limits with
+rate_limit.reset_state(Limits(...)) and pass the clock in.  Every secret the app needs is generated per
 run with ``secrets``; Redis is faked.  Requires pytest and httpx.
 """
 from __future__ import annotations
@@ -92,9 +92,7 @@ def limiter(monkeypatch):
     _, rate_limit, _, _ = _app()
     clock = _Clock()
     monkeypatch.setattr(rate_limit, "time", clock)
-    monkeypatch.setattr(rate_limit, "MAX_REQ", 500)
-    monkeypatch.setattr(rate_limit, "WINDOW_MS", 60_000)
-    rate_limit.reset_state()
+    rate_limit.reset_state(rate_limit.Limits(0, 500, 60_000))
     yield _Limiter(rate_limit, clock)
     monkeypatch.undo()
     rate_limit.reset_state()
@@ -143,7 +141,7 @@ def test_burst_shaped_like_production_is_reported_in_full(limiter, caplog):
 
 def test_at_most_one_line_per_window(limiter, caplog, monkeypatch):
     caplog.set_level(logging.WARNING, logger=LOGGER)
-    monkeypatch.setattr(limiter._m, "MAX_REQ", 1)
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
     line_times = []
     for i in range(6_000):  # ten minutes, ten requests a second, one admitted per window
         limiter.allow_validate("10.0.0.1", T0 + i * 100)
@@ -186,7 +184,7 @@ def test_no_line_without_rejections(limiter, caplog):
 
 def test_many_addresses_stay_bounded_and_one_line_per_window(limiter, caplog, monkeypatch):
     caplog.set_level(logging.WARNING, logger=LOGGER)
-    monkeypatch.setattr(limiter._m, "MAX_REQ", 1)
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
     n = limiter.MAX_TRACKED_KEYS + 500
     for k in range(n):
         ip = f"2001:db8::{k:x}"
@@ -235,13 +233,11 @@ def client(monkeypatch):
     main_mod, rate_limit, _, _ = _app()
     fake = FakeRedis()
     monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
-    monkeypatch.setattr(rate_limit, "MAX_REQ", 2)
-    monkeypatch.setattr(rate_limit, "WINDOW_MS", 60_000)
     # The cached settings may come from another module or the environment: whatever
     # they name, the app opens this module's own database file.
     create_database = main_mod.create_database
     monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
-    rate_limit.reset_state()
+    rate_limit.reset_state(rate_limit.Limits(0, 2, 60_000))
     with TestClient(main_mod.app) as c:
         c.fake_redis = fake
         yield c

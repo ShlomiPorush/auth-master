@@ -51,8 +51,8 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
-| `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute) |
+| `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP. Also editable on the Settings page; when this variable is set, the page shows the field locked. See [Rate limit settings](#rate-limit-settings) |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute). Also editable on the Settings page, like `RATE_LIMIT_MAX_REQ` |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Read by uvicorn, not by the app: the addresses of reverse proxies whose `X-Forwarded-For` header is trusted. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
 ### Behind a reverse proxy
@@ -76,6 +76,51 @@ Requests over the limit are not written to the access log. The Access Logs page
 shows how many there were and from which addresses, and each server process writes
 a `Rate limit:` line to its log at most once per window.
 
+### Rate limit settings
+
+The Settings page (`/admin/settings`) sets the rate limit and the addresses it never
+applies to:
+
+- **Requests per window** and **window length** (whole seconds). When
+  `RATE_LIMIT_MAX_REQ` or `RATE_LIMIT_WINDOW_MS` is set in the environment or `.env`,
+  that value wins and the field is locked on the page. Remove the variable to manage
+  the value on the page.
+- **Exempt addresses**: up to 100 single IPv4 or IPv6 addresses, one per line.
+  Requests from them are never limited or counted. They are still validated and
+  logged. An exempt address is not limited at all: behind a reverse proxy without
+  `FORWARDED_ALLOW_IPS`, every caller arrives from the proxy's address, and exempting
+  it removes the limit for everyone. The page asks for a confirmation before it
+  exempts the address your own request came from.
+
+Each save is kept as a new version in the table `rate_limit_settings`, with who saved
+it, when and from which address; older versions are never changed or deleted, and
+log retention does not remove them. The Activity Log shows each change as well. If
+two admins save from the same version, the second one is told that the settings
+changed and can compare before saving again. A change applies at once in the server
+process that saved it and within about 15 seconds in any other.
+
+#### Repairing stored rate limit settings
+
+If the newest stored version cannot be read, for example after a manual edit, the
+service refuses to start and names the version. To repair it:
+
+1. Back up the database: copy the SQLite file while the service is stopped, or take a
+   PostgreSQL dump.
+2. Look at the newest rows:
+   `SELECT version, actor, created_at, value FROM rate_limit_settings ORDER BY version DESC LIMIT 5;`
+3. Add a new version with the defaults. This keeps the history, removes every
+   exemption and takes the limits from the environment or the defaults:
+
+   ```sql
+   INSERT INTO rate_limit_settings (version, value, actor)
+   SELECT COALESCE(MAX(version), 0) + 1,
+          '{"exempt": [], "format": 1, "maxReq": null, "windowMs": null}',
+          'manual repair'
+   FROM rate_limit_settings;
+   ```
+4. Start the service and set the values again on the Settings page.
+
+Do not delete rows: a running process only moves to a higher version.
 ### Secrets
 
 - Generate every secret with `tools/generate-env.sh` or `tools/generate-env.ps1`, or with `openssl rand -hex 32`. The service rejects every value that was ever published in this repository, in any of these settings.
@@ -123,6 +168,7 @@ Every dashboard section is a page with its own URL, so it can be bookmarked, sha
 - **API Keys** (`/admin/api-keys`) — Create scoped API keys for external integrations, edit permissions, copy keys (MFA-protected)
 - **Activity Log** (`/admin/logs/activity`) — Audit trail of admin actions
 - **Access Logs** (`/admin/logs/access`) — History of token validation requests, and the requests the rate limit rejected
+- **Settings** (`/admin/settings`) — The rate limit and the addresses exempt from it
 
 Opening a page while signed out redirects to the login flow and returns to the same page after signing in.
 

@@ -86,7 +86,7 @@ GET /validate?token=tok_abc123...&area=orders&level=read
 
 **Permission Levels:** `read`, `write`, `delete`, `all`
 
-> Rate-limited per client address, as the server sees it, and per server process. Returns `{"result": false}` when the rate limit is exceeded. These requests are not written to the access log; the Access Logs page of the dashboard shows how many there were. Behind a reverse proxy, see "Behind a reverse proxy" in the README.
+> Rate-limited per client address, as the server sees it, and per server process. Returns `{"result": false}` when the rate limit is exceeded. These requests are not written to the access log; the Access Logs page of the dashboard shows how many there were. Addresses listed on the dashboard's Settings page are exempt and never limited. Behind a reverse proxy, see "Behind a reverse proxy" in the README.
 
 ---
 

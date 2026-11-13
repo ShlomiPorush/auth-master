@@ -1,8 +1,12 @@
 """Per-address request limit shared by /validate and /validate/grants.
 
 A fixed window per key (the client address uvicorn reports), kept in memory in each
-server process: a key may make MAX_REQ requests per WINDOW_MS, counted from its first
+server process: a key may make `max_req` requests per `window_ms`, counted from its first
 request after the previous window ended.  Restarting the process resets every count.
+Exempt addresses are never limited or counted.
+
+The limits come from the environment at import, then from app.rate_limit_settings, which
+loads the values saved on the admin Settings page and calls apply().
 
 Rejected requests are not written to the access log, so this module also keeps a
 bounded record of them for operators:
@@ -17,18 +21,68 @@ inside them.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
-settings = get_settings()
-WINDOW_MS = settings.rate_limit_window_ms
-MAX_REQ = settings.rate_limit_max_req
+# The longest text form of an IP address (IPv6 with an embedded IPv4 part).
+MAX_ADDRESS_LEN = 45
+
+
+@dataclass(frozen=True)
+class Limits:
+    """The limits one process enforces.  `version` is the saved settings version they
+    come from (0: environment and defaults only); apply() never goes back to a lower one."""
+
+    version: int
+    max_req: int
+    window_ms: int
+    exempt: frozenset[str] = frozenset()
+
+
+def limits_from_environment() -> Limits:
+    s = get_settings()
+    return Limits(0, s.rate_limit_max_req, s.rate_limit_window_ms)
+
+
+_limits = limits_from_environment()
+
+
+def current() -> Limits:
+    return _limits
+
+
+def apply(limits: Limits) -> bool:
+    """Use `limits` if they come from a newer settings version than the current ones."""
+    global _limits
+    if limits.version <= _limits.version:
+        return False
+    _limits = limits
+    return True
+
+
+def address_key(text: str | None) -> str | None:
+    """One text form per IP address, or None for anything that is not a plain address.
+
+    IPv4-mapped IPv6 addresses become their IPv4 form, so `::ffff:192.0.2.1` and
+    `192.0.2.1` are the same key.  Scoped IPv6 (`fe80::1%eth0`) and networks are refused.
+    """
+    if not text or len(text) > MAX_ADDRESS_LEN or "%" in text:
+        return None
+    try:
+        addr = ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    if addr.version == 6 and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return str(addr)
 
 # Addresses counted by name, separately for the totals and for the pending summary.
 # Rejections from further addresses are counted without a name, so memory stays
@@ -76,20 +130,25 @@ class _Rejections:
 _rejections = _Rejections()
 
 
-def reset_state() -> None:
-    """Forget all counts and rejections (tests)."""
-    global _rejections
+def reset_state(limits: Limits | None = None) -> None:
+    """Forget all counts and rejections, and set the limits (tests)."""
+    global _rejections, _limits
     _buckets.clear()
     _rejections = _Rejections()
+    _limits = limits if limits is not None else limits_from_environment()
 
 
 def allow_validate(ip: str) -> bool:
     now = time.time() * 1000
+    lim = _limits
+    if lim.exempt and address_key(ip) in lim.exempt:
+        _maybe_log_summary(now)
+        return True
     n, t0 = _buckets[ip]
-    if now - t0 > WINDOW_MS:
+    if now - t0 > lim.window_ms:
         _buckets[ip] = (1, now)
         allowed = True
-    elif n >= MAX_REQ:
+    elif n >= lim.max_req:
         _record_rejection(ip, now)
         allowed = False
     else:
@@ -115,7 +174,8 @@ def _maybe_log_summary(now: float) -> None:
     if not r.pending.total:
         return
     mono = time.monotonic() * 1000
-    if r.last_summary_mono_ms is not None and mono - r.last_summary_mono_ms < WINDOW_MS:
+    lim = _limits
+    if r.last_summary_mono_ms is not None and mono - r.last_summary_mono_ms < lim.window_ms:
         return
     pending, first = r.pending, r.pending_first_ms
     r.pending = _Tally()
@@ -130,8 +190,8 @@ def _maybe_log_summary(now: float) -> None:
         pending.total,
         _iso(first),
         _iso(now),
-        MAX_REQ,
-        WINDOW_MS,
+        lim.max_req,
+        lim.window_ms,
         shown,
         tops or "none",
         f"; {rest} more from other addresses" if rest else "",
@@ -148,9 +208,11 @@ def rejection_stats() -> dict:
     """Totals since this process started, for the admin API.  Read-only."""
     r = _rejections
     t = r.since_start
+    lim = _limits
     return {
-        "limit": MAX_REQ,
-        "windowMs": WINDOW_MS,
+        "limit": lim.max_req,
+        "windowMs": lim.window_ms,
+        "exemptAddresses": len(lim.exempt),
         "since": _iso(r.started_ms),
         "rejectedTotal": t.total,
         "lastRejectedAt": _iso(r.last_ms),

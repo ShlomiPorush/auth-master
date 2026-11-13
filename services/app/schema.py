@@ -109,6 +109,18 @@ async def _ensure_pg(db: "Database") -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
 
+    # Rate limit settings from the admin Settings page: one row per saved version, never
+    # updated or deleted, so it is also the history of who changed what (app.rate_limit_settings).
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limit_settings (
+            version INTEGER PRIMARY KEY CHECK (version > 0),
+            value TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            ip_address TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+
 
 async def _ensure_sqlite(db: "Database") -> None:
     await db.execute("""
@@ -195,3 +207,14 @@ async def _ensure_sqlite(db: "Database") -> None:
     """)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
+
+    # See _ensure_pg.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limit_settings (
+            version INTEGER PRIMARY KEY CHECK (version > 0),
+            value TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            ip_address TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
