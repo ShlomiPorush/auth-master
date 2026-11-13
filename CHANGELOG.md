@@ -140,6 +140,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response failed for such text, so the request answered `500`. Non-ASCII characters
   in `422` response bodies are now sent as JSON `\uXXXX` escapes; the parsed
   content is unchanged.
+- Admin registration now refuses a password longer than 72 bytes with a clear
+  message, both in the setup page and in the API (`400`). bcrypt uses only the
+  first 72 bytes of a password. Earlier versions dropped the rest without saying
+  so; with bcrypt 5 such a password would fail with `500`. Letters outside English,
+  such as Hebrew, and emoji take 2 to 4 bytes each. Signing in is not limited:
+  an existing password longer than 72 bytes keeps working, and as before only
+  its first 72 bytes are checked.
+- Admin registration answers `400` and sign-in answers `401` when the password
+  is text that cannot be encoded as UTF-8, such as a lone `\ud800` escape in a
+  JSON body. Both answered `500`.
 
 ## [1.2.0] - 2026-09-22
 
