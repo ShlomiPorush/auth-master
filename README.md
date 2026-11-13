@@ -8,7 +8,7 @@ A self-hosted token authentication and authorization service. Manage API tokens,
 - **Zone-Based Authorization** — Define zones (areas) and assign `read` / `write` / `delete` / `all` access levels
 - **API Key Management** — Create scoped API keys for programmatic access (e.g. n8n, CI/CD)
 - **MFA-Protected** — Admin dashboard requires TOTP two-factor authentication
-- **Fast Validation** — Redis-cached token validation with rate limiting
+- **Fast Validation** — Token validation with rate limiting; revocations and other token changes apply to the next request
 - **Dual Database Support** — PostgreSQL for production, SQLite for lightweight/dev setups
 - **Modern Dashboard** — Admin UI with light and dark themes and phone layouts for managing tokens, zones, and API keys
 - **n8n Integration** — Community nodes for workflow automation: action node + webhook trigger with built-in token validation ([n8n-nodes-auth-service](https://www.npmjs.com/package/n8n-nodes-auth-service))
@@ -38,7 +38,7 @@ The service refuses to start while a required secret is missing, empty, or has a
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///data/auth.db` | Database connection string. Use `postgres://…` for PostgreSQL. A password in it must not be a published value, and a URL with more than one `@` before the host is refused (write `@` as `%40`) |
-| `REDIS_URL` | _(required)_ | Redis connection string with a password (required for caching + sessions). The bundled compose file builds it from `REDIS_PASSWORD` |
+| `REDIS_URL` | _(required)_ | Redis connection string with a password (required for admin sessions). The bundled compose file builds it from `REDIS_PASSWORD` |
 | `REDIS_PASSWORD` | _(required with the bundled Redis)_ | Password of the bundled Redis server |
 | `ADMIN_API_KEY` | _(required)_ | Master API key with full access to all scopes |
 | `SESSION_SECRET` | _(required)_ | Together with `APP_ENCRYPTION_KEY`, derives the key that encrypts stored MFA secrets and revealable token and API key values |
@@ -48,7 +48,6 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `BOOTSTRAP_TOKEN` | _(empty)_ | Optional token for bootstrapping the first admin account via API |
 | `TOTP_ISSUER` | `AuthService` | Issuer name shown in authenticator apps |
 | `ENVIRONMENT` | `production` | Application environment (`production` or `development`) |
-| `VALIDATE_CACHE_TTL_SEC` | `300` | How long validated tokens are cached in Redis (seconds) |
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
@@ -83,7 +82,7 @@ The service refuses to start while a required secret is missing, empty, or has a
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
 │   Client /   │     │              │     │   Redis      │
-│   n8n Node   │────▶│ Auth Service │────▶│  (cache +    │
+│   n8n Node   │────▶│ Auth Service │────▶│  (admin      │
 │              │     │  (FastAPI)   │     │   sessions)  │
 └──────────────┘     └──────┬───────┘     └──────────────┘
                             │

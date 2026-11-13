@@ -8,13 +8,11 @@ from app.datetime_utils import fmt_datetime, is_expired
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from redis.asyncio import Redis
 
 from app.crypto_tokens import encrypt_token_value, generate_raw_token, sha256_hex
 from app.db import UniqueViolationError
 from app.deps import require_admin_api_key, require_scope
 from app.grants import assert_grants_allowed, parse_grants
-from app.token_cache import cache_delete
 from app.zones import allowed_area_names
 from app.logger import log_activity, get_actor
 
@@ -197,11 +195,9 @@ async def create_token(request: Request, body: TokenCreate):
 @router.patch("/{token_id}", dependencies=[require_scope("tokens:write")])
 async def patch_token(request: Request, token_id: str, body: TokenPatch):
     db = request.app.state.db
-    r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
-    th_old = row["token_hash"]
     parts: list[str] = []
     args: list[Any] = []
     n = 1
@@ -253,9 +249,6 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
         await db.execute(q, *args)
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
-    await cache_delete(r, th_old)
-    if body.token is not None:
-        await cache_delete(r, sha256_hex(body.token.strip()))
 
     actor = await get_actor(request)
     ip = request.client.host if request.client else "unknown"
@@ -286,13 +279,10 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
 @router.delete("/{token_id}", dependencies=[require_scope("tokens:write")])
 async def delete_token(request: Request, token_id: str):
     db = request.app.state.db
-    r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
-    th = row["token_hash"]
     await db.execute("DELETE FROM tokens WHERE id = $1", token_id)
-    await cache_delete(r, th)
 
     actor = await get_actor(request)
     ip = request.client.host if request.client else "unknown"

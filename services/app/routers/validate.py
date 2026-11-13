@@ -5,13 +5,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from redis.asyncio import Redis
 
 from app.crypto_tokens import sha256_hex
 from app.datetime_utils import fmt_datetime, is_expired
 from app.grants import grant_covers, parse_grants
 from app.rate_limit import allow_validate
-from app.token_cache import cache_delete, cache_get, cache_set
 from app.logger import log_access
 
 
@@ -71,31 +69,25 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
 
     # A lone surrogate (e.g. from a JSON "\ud800" escape) is a valid Python str but
     # not UTF-8 text: it matches no stored token and cannot be written to the access
-    # log.  Answer like any other rejected input, before cache, database or logging.
+    # log.  Answer like any other rejected input, before database or logging.
     try:
         area.encode("utf-8")
         h = sha256_hex(token)
     except UnicodeEncodeError:
         return JSONResponse(content={"result": False}, media_type="application/json")
     db = request.app.state.db
-    r: Redis = request.app.state.redis
 
-    row = await cache_get(r, h)
-    if row is not None and "name" not in row:
-        await cache_delete(r, h)
-        row = None
-
-    if row is None:
-        rec = await db.fetchrow(_TOKEN_SELECT, h)
-        if not rec:
-            await log_access(db, None, None, area, level, False, ip)
-            return JSONResponse(content={"result": False}, media_type="application/json")
-        grants = _grants_from_record(rec)
-        exp = rec["expires_at"]
-        if exp and not isinstance(exp, str):
-            exp = exp.isoformat()
-        row = {"id": str(rec["id"]), "name": rec["name"], "grants": grants, "expires_at": exp, "is_active": rec["is_active"]}
-        await cache_set(r, h, row)
+    # Always read the token from the database: a revoke, rotate, grant change or delete
+    # takes effect for the next request, with no cache entry that could outlive it.
+    rec = await db.fetchrow(_TOKEN_SELECT, h)
+    if not rec:
+        await log_access(db, None, None, area, level, False, ip)
+        return JSONResponse(content={"result": False}, media_type="application/json")
+    grants = _grants_from_record(rec)
+    exp = rec["expires_at"]
+    if exp and not isinstance(exp, str):
+        exp = exp.isoformat()
+    row = {"id": str(rec["id"]), "name": rec["name"], "grants": grants, "expires_at": exp, "is_active": rec["is_active"]}
 
     # SQLite stores booleans as 0/1
     is_active = row.get("is_active")
@@ -118,8 +110,8 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
 async def token_grants(request: Request, body: GrantsBody):
     """Return the grants of the presented token to its holder.
 
-    Reads the database directly (not the validate cache) so a revoked, deleted or
-    rotated token is reported inactive immediately.  Unknown, inactive and expired
+    Reads the database on every request, like ``/validate``, so a revoked, deleted
+    or rotated token is reported inactive immediately.  Unknown, inactive and expired
     tokens get the same answer.  Shares the per-IP rate limit with ``/validate``.
     """
     ip = request.client.host if request.client else "unknown"

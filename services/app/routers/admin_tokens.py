@@ -8,14 +8,12 @@ from app.datetime_utils import fmt_datetime, is_expired
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 import pyotp
-from redis.asyncio import Redis
 
 from app.admin_deps import FullSession, csrf_check
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, generate_raw_token, sha256_hex
 from app.crypto_totp import decrypt_totp_secret
 from app.db import UniqueViolationError
 from app.grants import assert_grants_allowed, parse_grants
-from app.token_cache import cache_delete
 from app.zones import allowed_area_names
 from app.logger import log_activity, get_actor
 
@@ -153,11 +151,9 @@ async def admin_patch_token(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
-    th_old = row["token_hash"]
     parts: list[str] = []
     args: list[Any] = []
     n = 1
@@ -213,9 +209,6 @@ async def admin_patch_token(
         await db.execute(q, *args)
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
-    await cache_delete(r, th_old)
-    if body.token is not None:
-        await cache_delete(r, sha256_hex(body.token.strip()))
 
     actor = await get_actor(request, sess)
     ip = request.client.host if request.client else "unknown"
@@ -253,13 +246,10 @@ async def admin_delete_token(
 ):
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
-    r: Redis = request.app.state.redis
-    row = await db.fetchrow("SELECT name, token_hash FROM tokens WHERE id = $1", token_id)
+    row = await db.fetchrow("SELECT name FROM tokens WHERE id = $1", token_id)
     if not row:
         raise HTTPException(404, "Not found")
-    th = row["token_hash"]
     await db.execute("DELETE FROM tokens WHERE id = $1", token_id)
-    await cache_delete(r, th)
 
     actor = await get_actor(request, sess)
     ip = request.client.host if request.client else "unknown"

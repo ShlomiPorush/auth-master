@@ -108,7 +108,6 @@ class Settings(BaseSettings):
     bootstrap_token: str = Field(default="", validation_alias="BOOTSTRAP_TOKEN")
     totp_issuer: str = Field(default="AuthService", validation_alias="TOTP_ISSUER")
     environment: str = Field(default="development", validation_alias="ENVIRONMENT")
-    validate_cache_ttl_sec: int = Field(default=300, validation_alias="VALIDATE_CACHE_TTL_SEC")
     root_path: str = Field(default="", validation_alias="ROOT_PATH")
     # Must be explicit: True breaks session cookies on plain http://localhost (Secure not sent).
     cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
