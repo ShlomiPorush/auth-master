@@ -1327,10 +1327,14 @@ function uiFloatRoom(el) {
         var cs = getComputedStyle(box);
         if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
         var r = box.getBoundingClientRect();
-        room.top = Math.max(room.top, r.top + 8);
-        room.bottom = Math.min(room.bottom, r.bottom - 8);
-        room.left = Math.max(room.left, r.left + 8);
-        room.right = Math.min(room.right, r.right - 8);
+        // The visible inside of the box, without its scrollbars
+        var top = r.top + (box.clientTop || 0), left = r.left + (box.clientLeft || 0);
+        var bottom = box.clientHeight ? top + box.clientHeight : r.bottom;
+        var right = box.clientWidth ? left + box.clientWidth : r.right;
+        room.top = Math.max(room.top, top + 8);
+        room.bottom = Math.min(room.bottom, bottom - 8);
+        room.left = Math.max(room.left, left + 8);
+        room.right = Math.min(room.right, right - 8);
     }
     return room;
 }
@@ -1352,8 +1356,11 @@ function uiPickerPlace(picker) {
     // Never taller than the room on its side, so it cannot run under a bar
     panel.style.maxHeight = Math.max(0, up ? above : below) + "px";
     var pr = panel.getBoundingClientRect();
+    var fits = function (d) { return pr.left + d >= room.left && pr.right + d <= room.right; };
     var dx = 0;
-    if (pr.right > room.right) dx = room.right - pr.right;
+    // Past an edge: line the panel up with the button's other edge when that fits, else keep it 8px inside
+    if (pr.right > room.right) dx = fits(rect.right - pr.right) ? rect.right - pr.right : room.right - pr.right;
+    else if (pr.left < room.left) dx = fits(rect.left - pr.left) ? rect.left - pr.left : room.left - pr.left;
     if (pr.left + dx < room.left) dx = room.left - pr.left;
     if (dx) panel.style.transform = "translateX(" + Math.round(dx) + "px)";
 }

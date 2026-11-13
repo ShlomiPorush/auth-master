@@ -54,8 +54,25 @@ test("on a phone the panel opens under its button, inside the room above the tab
     assert.equal(panel.classList.has("is-up"), false);
     // 780 - 8 (above the tab bar) - 330 (button bottom) - 6
     assert.equal(panel.style.maxHeight, "436px");
-    // 200 + 260 = 460 passes 390 - 8: shifted back by 78px
-    assert.equal(panel.style.transform, "translateX(-78px)");
+    // 200 + 260 = 460 passes 390 - 8: lined up with the button's end edge (330), 70..330
+    assert.equal(panel.style.transform, "translateX(-130px)");
+});
+
+test("a scrolling box's scrollbar is not room, and a panel that cannot line up is kept 8px inside", () => {
+    // main scrolls (539 wide, 15px scrollbar: clientWidth 524); the Level button sits at 284..418
+    const { ctx, host } = page({ mtop: rect(0, 0, 539, 56), tabbar: rect(886, 0, 539, 64), boxes: [{ rect: rect(56, 0, 539, 830), overflow: "auto" }] });
+    ctx.innerWidth = 539;
+    const box = host.parentElement;
+    box.clientWidth = 524; box.clientHeight = 830; box.clientLeft = 0; box.clientTop = 0;
+    const panel = panelAt(284, 260, 170);
+    ctx.uiPickerPlace({ panel, host, button: { getBoundingClientRect: () => rect(199, 284, 134, 30) } });
+    // the room ends at 524 - 8 = 516, so 284..544 does not fit; lined up with the button end: 158..418
+    assert.equal(panel.style.transform, "translateX(-126px)");
+
+    const wide = panelAt(284, 420, 170);
+    ctx.uiPickerPlace({ panel: wide, host, button: { getBoundingClientRect: () => rect(199, 284, 134, 30) } });
+    // 420 wide cannot line up with 418 (would start at -2): kept inside, 96..516
+    assert.equal(wide.style.transform, "translateX(-188px)");
 });
 
 test("it opens upward only when the room above is larger, and scrolls within it", () => {
