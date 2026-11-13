@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -160,6 +161,13 @@ def allow_validate(ip: str) -> bool:
     return allowed
 
 
+def retry_after_seconds(ip: str) -> int:
+    """Whole seconds until `ip`'s current window ends, at least 1 (for Retry-After)."""
+    n, t0 = _buckets.get(ip, (0, 0.0))
+    remaining_ms = t0 + _limits.window_ms - time.time() * 1000
+    return max(1, math.ceil(remaining_ms / 1000))
+
+
 def _record_rejection(ip: str, now: float) -> None:
     r = _rejections
     r.since_start.add(ip)
@@ -185,7 +193,7 @@ def _maybe_log_summary(now: float) -> None:
     shown = min(len(pending.by_key), SUMMARY_TOP_KEYS)
     rest = pending.total - sum(c for _k, c in pending.top(SUMMARY_TOP_KEYS))
     log.warning(
-        "Rate limit: rejected %d requests from %s to %s (limit %d per %d ms per address); "
+        "Rate limit: rejected %d requests with 429 from %s to %s (limit %d per %d ms per address); "
         "top %d addresses: %s%s",
         pending.total,
         _iso(first),

@@ -251,9 +251,11 @@ def test_lookup_rate_limit_returns_429_and_is_shared(client, monkeypatch):
     r = _grants(client, tok)
     assert r.status_code == 429
     assert r.json() == {"detail": "Too many requests"}
+    assert int(r.headers["retry-after"]) >= 1
     # The budget is shared with /validate.
     v = client.post("/validate", json={"token": tok, "area": "orders", "level": "read"})
-    assert v.json() == {"result": False}
+    assert (v.status_code, v.json()) == (429, {"detail": "Too many requests"})
+    assert int(v.headers["retry-after"]) >= 1
 
 
 def test_validate_budget_limits_lookup(client, monkeypatch):

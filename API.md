@@ -86,7 +86,7 @@ GET /validate?token=tok_abc123...&area=orders&level=read
 
 **Permission Levels:** `read`, `write`, `delete`, `all`
 
-> Rate-limited per client address, as the server sees it, and per server process. Returns `{"result": false}` when the rate limit is exceeded. These requests are not written to the access log; the Access Logs page of the dashboard shows how many there were. Addresses listed on the dashboard's Settings page are exempt and never limited. Behind a reverse proxy, see "Behind a reverse proxy" in the README.
+> Rate-limited per client address, as the server sees it, and per server process. Over the limit it answers `429` with `{"detail": "Too many requests"}` and a `Retry-After` header: the whole seconds until the caller's window ends. These requests are not written to the access log; the Access Logs page of the dashboard shows how many there were. Addresses listed on the dashboard's Settings page are exempt and never limited. Behind a reverse proxy, see "Behind a reverse proxy" in the README.
 
 ---
 
@@ -131,7 +131,7 @@ A token that is not valid UTF-8 text gets `422` with `{"detail": "Token must be 
 
 The answer is read from the database on every call, so a disabled, deleted or rotated token stops reporting grants immediately. Each call is recorded in the access log with area `*` and level `grants`. It does not update the token's last-used time.
 
-> Shares the per-IP rate limit with `/validate`: lookups and validations draw from the same budget. When the limit is exceeded, the response is `429` with `{"detail": "Too many requests"}`. The limit is kept per server process.
+> Shares the per-IP rate limit with `/validate`: lookups and validations draw from the same budget. When the limit is exceeded, the response is `429` with `{"detail": "Too many requests"}` and a `Retry-After` header. The limit is kept per server process.
 
 ---
 
@@ -364,7 +364,7 @@ All error responses follow a consistent format:
 | `403` | Forbidden (missing required scope) |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate token or zone) |
-| `429` | Too many requests from one IP address. `/validate` never returns this code: over the limit it answers `200` with `{"result": false}`. |
+| `429` | Too many requests from one client address on `/validate` or `/validate/grants`. The `Retry-After` header gives the whole seconds until the caller's window ends. |
 
 ---
 

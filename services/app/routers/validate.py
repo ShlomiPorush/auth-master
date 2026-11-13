@@ -9,11 +9,35 @@ from pydantic import BaseModel
 from app.crypto_tokens import sha256_hex
 from app.datetime_utils import fmt_datetime, is_expired
 from app.grants import grant_covers, parse_grants
-from app.rate_limit import allow_validate
+from app.rate_limit import allow_validate, retry_after_seconds
 from app.logger import log_access
 
 
 router = APIRouter(tags=["validate"])
+
+
+# Documents the 429 answer in the OpenAPI schema (FastAPI's `responses` parameter).
+_RATE_LIMITED = {
+    429: {
+        "description": "Too many requests from this client address. Retry after the seconds in Retry-After.",
+        "content": {"application/json": {"example": {"detail": "Too many requests"}}},
+        "headers": {
+            "Retry-After": {
+                "description": "Whole seconds until the caller's rate limit window ends (at least 1).",
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
+    }
+}
+
+
+def _too_many_requests(ip: str) -> HTTPException:
+    """429 for a caller over the rate limit, with the seconds until its window ends."""
+    return HTTPException(
+        status_code=429,
+        detail="Too many requests",
+        headers={"Retry-After": str(retry_after_seconds(ip))},
+    )
 
 
 class ValidateBody(BaseModel):
@@ -44,12 +68,12 @@ def _is_active(rec: Any) -> bool:
     return bool(rec["is_active"]) and not is_expired(rec["expires_at"])
 
 
-@router.post("/validate")
+@router.post("/validate", responses=_RATE_LIMITED)
 async def validate_token(request: Request, body: ValidateBody):
     return await _validate_token_values(request, body.token, body.area, body.level)
 
 
-@router.get("/validate")
+@router.get("/validate", responses=_RATE_LIMITED)
 async def validate_token_get(
     request: Request,
     token: str = Query(...),
@@ -62,7 +86,7 @@ async def validate_token_get(
 async def _validate_token_values(request: Request, token: str, area: str, level: str):
     ip = request.client.host if request.client else "unknown"
     if not allow_validate(ip):
-        return JSONResponse(content={"result": False}, media_type="application/json")
+        raise _too_many_requests(ip)
 
     if level not in ("read", "readwrite", "write", "delete", "all"):
         return JSONResponse(content={"result": False}, media_type="application/json")
@@ -106,7 +130,7 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     return JSONResponse(content={"result": ok}, media_type="application/json")
 
 
-@router.post("/validate/grants")
+@router.post("/validate/grants", responses=_RATE_LIMITED)
 async def token_grants(request: Request, body: GrantsBody):
     """Return the grants of the presented token to its holder.
 
@@ -116,7 +140,7 @@ async def token_grants(request: Request, body: GrantsBody):
     """
     ip = request.client.host if request.client else "unknown"
     if not allow_validate(ip):
-        raise HTTPException(status_code=429, detail="Too many requests")
+        raise _too_many_requests(ip)
 
     try:
         token_hash = sha256_hex(body.token)

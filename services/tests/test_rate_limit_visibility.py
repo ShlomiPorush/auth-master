@@ -4,7 +4,7 @@
   rejections at the end of a burst are reported once any later request arrives.
 - Memory for addresses stays bounded; rejections beyond it are counted, not named.
 - GET /admin/api/rate-limit reports totals to a fully signed-in admin only.
-- The answers to rejected requests are unchanged and write no access-log row.
+- Rejected requests are answered 429 with Retry-After and write no access-log row.
 
 Limits are fixed when app.rate_limit is imported, and another test module may have
 imported it first with other values, so the tests set the limits with
@@ -170,6 +170,16 @@ def test_wall_clock_change_does_not_hold_back_summaries(limiter, caplog):
     assert len(_lines(caplog)) == 2
 
 
+def test_retry_after_counts_down_to_the_window_end(limiter):
+    for i in range(500):
+        limiter.allow_validate("10.0.0.1", T0 + i)
+    limiter.allow_validate("10.0.0.1", T0 + 1_000)  # rejected; the window began at T0
+    for offset, expected in ((1_000, 59), (30_500, 30), (59_999, 1), (60_000, 1), (75_000, 1)):
+        limiter._clock.wall = T0 + offset
+        assert limiter.retry_after_seconds("10.0.0.1") == expected, offset
+    assert limiter.retry_after_seconds("10.9.9.9") == 1  # no window: never more than a second
+
+
 def test_no_line_without_rejections(limiter, caplog):
     caplog.set_level(logging.WARNING, logger=LOGGER)
     for i in range(500):
@@ -264,8 +274,8 @@ def test_endpoint_reports_rejections(client):
     _session(client, "full")
     body = {"token": "x" * 40, "area": "orders", "level": "read"}
     answers = [client.post("/validate", json=body) for _ in range(4)]
-    assert [a.json() for a in answers[2:]] == [{"result": False}] * 2
-    assert all(a.status_code == 200 for a in answers)
+    assert [a.status_code for a in answers] == [200, 200, 429, 429]
+    assert [a.json() for a in answers[2:]] == [{"detail": "Too many requests"}] * 2
     res = client.get("/admin/api/rate-limit")
     assert res.status_code == 200
     data = res.json()
@@ -278,20 +288,26 @@ def test_endpoint_reports_rejections(client):
     assert [a["rejected"] for a in data["topAddresses"]] == [2]
 
 
-def test_rejected_answers_are_unchanged_and_not_logged(client):
+def test_rejected_answers_are_429_and_not_logged(client):
     main_mod, rate_limit, _, _ = _app()
     body = {"token": "y" * 40, "area": "orders", "level": "read"}
     for _ in range(2):
         client.post("/validate", json=body)
     count = client.portal.call(main_mod.app.state.db.fetchval, "SELECT COUNT(*) FROM access_logs")
 
-    res = client.post("/validate", json=body)
-    assert (res.status_code, res.json()) == (200, {"result": False})
-    res = client.get("/validate", params=body)
-    assert (res.status_code, res.json()) == (200, {"result": False})
-    res = client.post("/validate/grants", json={"token": "y" * 40})
-    assert (res.status_code, res.json()) == (429, {"detail": "Too many requests"})
-    assert "retry-after" not in res.headers
+    for res in (
+        client.post("/validate", json=body),
+        client.get("/validate", params=body),
+        client.post("/validate/grants", json={"token": "y" * 40}),
+    ):
+        assert (res.status_code, res.json()) == (429, {"detail": "Too many requests"})
+        assert 1 <= int(res.headers["retry-after"]) <= 60
 
     assert client.portal.call(main_mod.app.state.db.fetchval, "SELECT COUNT(*) FROM access_logs") == count
     assert rate_limit.rejection_stats()["rejectedTotal"] == 3
+
+def test_openapi_documents_the_429(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    for path, method in (("/validate", "post"), ("/validate", "get"), ("/validate/grants", "post")):
+        answer = paths[path][method]["responses"]["429"]
+        assert "Retry-After" in answer["headers"], (path, method)

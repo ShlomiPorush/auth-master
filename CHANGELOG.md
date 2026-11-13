@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking for `/validate` callers:** a request over the rate limit is answered
+  `429` with `{"detail": "Too many requests"}` and a `Retry-After` header (whole
+  seconds until the caller's window ends), instead of `200` with
+  `{"result": false}`. Before, a valid token over the limit got the same answer as
+  a real denial. Callers that read only the body must now handle `429`: retry after
+  the given seconds, and do not treat it as a denied token. `/validate/grants` keeps
+  its `429` and now sends `Retry-After` too.
 - **Breaking:** `ADMIN_API_KEY`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and
   `REDIS_URL` are required, and `REDIS_URL` must contain a password.
   `docker-compose.yml` requires `REDIS_PASSWORD`, `ADMIN_API_KEY`,
@@ -91,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the limit is exceeded, and appears in the access log.
 - API key holders can read the scopes of their key with `GET /tokens/me`.
 - Requests rejected by the `/validate` rate limit are now reported. They are
-  still not written to the access log, and their answers do not change. Each
+  still not written to the access log (their new `429` answer is described under
+  Changed). Each
   server process writes a `Rate limit:` line to its log at most once per rate
   limit window, with the number of rejected requests and the addresses that
   caused most of them. The Access Logs page shows how many requests were
