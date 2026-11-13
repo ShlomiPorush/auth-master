@@ -241,6 +241,12 @@ async def legacy_admin_js(filename: str):
     return RedirectResponse(_prefixed(f"/js/{filename}"), status_code=302)
 
 
+# Stylesheets and scripts keep their names across releases, so the browser must
+# check them on every load; a cached copy from an older release would not match
+# the page's markup after an upgrade.
+_REVALIDATE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/css/{filename}")
 async def static_css(filename: str):
     if filename not in STATIC_CSS:
@@ -248,7 +254,7 @@ async def static_css(filename: str):
     return FileResponse(
         _safe_static_file(f"css/{filename}"),
         media_type="text/css",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers=_REVALIDATE,
     )
 
 
@@ -261,9 +267,9 @@ async def static_js(filename: str):
     if filename == "head.js":
         source = _safe_static_file("js/head.js").read_text(encoding="utf-8")
         script = f'window.__BASE_PATH__ = {json.dumps(ROOT_PATH)};\n{source}'
-        return Response(content=script, media_type="application/javascript")
+        return Response(content=script, media_type="application/javascript", headers=_REVALIDATE)
 
-    return FileResponse(_safe_static_file(f"js/{filename}"))
+    return FileResponse(_safe_static_file(f"js/{filename}"), headers=_REVALIDATE)
 
 
 @app.get("/fonts/{filename}")

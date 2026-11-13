@@ -137,3 +137,12 @@ def test_legacy_admin_js_redirects(client):
 def test_fonts_serve_woff2_only(client):
     assert client.get("/fonts/licence.txt").status_code == 404
     assert client.get("/fonts/missing.woff2").status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/css/ui.css", "/js/ui.js", "/js/dashboard.js", "/js/head.js"])
+def test_stylesheets_and_scripts_are_revalidated_on_every_load(client, path):
+    # Their names do not change between releases, so a cached copy must not
+    # outlive an upgrade and mix old styles or scripts with new markup.
+    r = client.get(path)
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-cache"

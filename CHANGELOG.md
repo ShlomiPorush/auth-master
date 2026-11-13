@@ -84,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inserts script into the page, and activity log details no longer insert unescaped text
   into the page.
 - After signing in, the `next` address can no longer lead to another site.
+- After an upgrade, browsers no longer keep using the previous stylesheet for up
+  to a day. Stylesheets and scripts are now checked with the server on every
+  page load.
 - The access log page no longer fails on PostgreSQL deployments. The listing
   matched each log entry to its token by comparing the entry's token ID, stored as
   text, with the token's UUID, and PostgreSQL rejects a comparison between those
