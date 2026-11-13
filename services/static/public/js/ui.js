@@ -864,7 +864,13 @@ var uiAppTitle = "Auth Service";
 function uiUnsavedRegister(count, reset) {
     uiUnsavedSources.push({ count: count, reset: reset });
 }
+// Nothing can be saved any more (the session ended): stop guarding, so leaving asks nothing
+var uiUnsavedReleased = false;
+function uiUnsavedRelease() {
+    uiUnsavedReleased = true;
+}
 function uiUnsavedCount() {
+    if (uiUnsavedReleased) return 0;
     return uiUnsavedSources.reduce(function (sum, src) {
         try { return sum + (Number(src.count()) || 0); } catch (e) { return sum; }
     }, 0) + uiDirtyDialogs().length;

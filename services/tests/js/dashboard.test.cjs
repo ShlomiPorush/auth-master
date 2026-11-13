@@ -98,28 +98,85 @@ test("R2: rows already present below the last shown row end the refresh at once"
     assert.equal(s.hasMore, true, "Load more stays");
 });
 
-test("R2: more than 20 full pages of new rows make the newest rows the list, with Load more", async () => {
+test("R13: more than 20 full pages of new rows keep the list and offer the newest, once", async () => {
     const ctx = load();
     const s = await loaded(ctx, 60);
+    const shown = s.rows.map((r) => r.id).join();
     let n = 0;
     const calls = fakeApi(ctx, (params) => {
         if (params.since) {
             const rows = Array.from({ length: 500 }, () => { n += 1; return row(900000 - n, T0 + 3600000 - n); });
             return { status: 200, data: page(rows) };
         }
+        if (params.before) return { status: 200, data: page([row(1, T0 - 3600000)]) };
         const fresh = Array.from({ length: 30 }, (_, i) => row(990000 - i, T0 + 7200000 - i * 1000));
         return { status: 200, data: page(fresh) };
     });
     await ctx.dashLogRefresh(s);
     assert.equal(calls.filter((c) => c.params.since).length, 20);
-    assert.equal(calls[calls.length - 1].params.page, "1", "then the newest page is loaded");
-    assert.equal(s.rows[0].id, "r990000");
-    assert.equal(s.hasMore, true);
-    // Load more follows the new list's end
-    const more = fakeApi(ctx, () => ({ status: 200, data: page([row(1, T0)]) }));
+    assert.equal(calls.filter((c) => c.params.page).length, 0, "no reload on its own");
+    assert.equal(s.rows.map((r) => r.id).join(), shown, "the list stays as it was");
+    assert.equal(s.capped, true, "the offer is shown");
+    // Later refreshes read nothing while the offer stands
+    calls.length = 0;
+    await ctx.dashLogRefresh(s);
+    assert.equal(calls.length, 0);
+    // Load more keeps paging the history below the shown rows
     ctx.dashLogMore(s);
-    assert.equal(more.length, 1);
-    assert.equal(more[0].params.before, "n:" + s.rows[s.rows.length - 1].id);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.before, "n:" + shown.split(",").pop());
+    await new Promise((r) => setTimeout(r, 0));
+    // Taking the offer loads the newest rows as the list
+    calls.length = 0;
+    await ctx.dashLogTakeNew(s);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.page, "1");
+    assert.equal(s.rows[0].id, "r990000");
+    assert.equal(s.capped, false);
+});
+
+test("R5: a late answer frees its own loading flag, never a newer load's, and publishes nothing", async () => {
+    const ctx = load();
+    const s = await loaded(ctx, 60);
+    const answers = [];
+    ctx.adminJson = () => new Promise((resolve) => answers.push(resolve));
+    const ok = (rows) => ({ ok: true, status: 200, data: page(rows), json: true, error: "" });
+    // A first load whose scheduler cycle timed out while it ran
+    const late = ctx.dashLogFirst(s, true, () => false);
+    answers.shift()(ok([row(777, T0 + 1000)]));
+    await late;
+    assert.equal(s.loading, false, "not stuck loading");
+    assert.notEqual(s.rows[0].id, "r000777", "nothing published");
+    // Load more works again afterwards
+    ctx.dashLogMore(s);
+    assert.equal(answers.length, 1);
+    answers.shift()(ok([]));
+    await new Promise((r) => setTimeout(r, 0));
+    // An older load answering after a newer one started leaves the newer one's flag
+    const older = ctx.dashLogFirst(s, true);
+    const newer = ctx.dashLogFirst(s, true);
+    answers.shift()(ok([row(1, T0)]));
+    await older;
+    assert.ok(s.loading, "the newer load still holds the flag");
+    answers.shift()(ok([row(2, T0 + 2000)]));
+    await newer;
+    assert.equal(s.loading, false);
+    assert.equal(s.rows[0].id, "r000002");
+});
+
+test("R12: an expired session tells the user and signs in again without asking about open edits", () => {
+    const replaced = [];
+    const ctx = load();
+    ctx.location = { pathname: "/admin/zones", search: "?q=x", origin: "http://x", replace: (u) => replaced.push(u) };
+    const field = { type: "text", value: "a" };
+    const d = { backdrop: { isConnected: true }, body: { querySelectorAll: () => [field] } };
+    ctx.uiGuardDialog(d);
+    field.value = "typed";
+    assert.equal(ctx.uiUnsavedCount(), 1);
+    ctx.dashSessionExpired();
+    assert.equal(ctx.uiUnsavedCount(), 0, "the browser asks nothing on the way out");
+    assert.deepEqual(replaced, ["/login?next=" + encodeURIComponent("/admin/zones?q=x")]);
+    assert.deepEqual(ctx.toasts.map((t) => t[0]), ["Your session expired. Sign in again."]);
 });
 
 test("R7: a failed update keeps the rows, says so, and tells once per run of failures", async () => {

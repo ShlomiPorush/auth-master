@@ -95,10 +95,13 @@ function dashLoginUrl() {
     return basePath() + "/login" + (here && here !== "/admin/tokens" ? "?next=" + encodeURIComponent(here) : "");
 }
 
+// The session ended: edits cannot be saved without one, so the page says so and
+// goes to sign in without asking about them (also from an open dialog)
 function dashSessionExpired() {
     if (dash.expired) return;
     dash.expired = true;
-    uiUnsavedSources = [];
+    uiUnsavedRelease();
+    showToast("Your session expired. Sign in again.", "error");
     window.location.replace(dashLoginUrl());
 }
 
@@ -288,7 +291,7 @@ function dashLogout() {
                 showToast("Could not sign out. Try again in a moment.", "error");
                 return;
             }
-            uiUnsavedSources = [];
+            uiUnsavedRelease();
             writeCsrf("");
             window.location.href = basePath() + "/login";
         });
@@ -1545,6 +1548,8 @@ Object.keys(dashLogs).forEach(function (k) {
     s.failed = "";
     s.rowsFor = null;
     s.refreshFailed = "";
+    s.capped = false;
+    s.loadSeq = 0;
     s.pending = [];
     s.drawn = "";
     s.bound = false;
@@ -1586,16 +1591,31 @@ function dashLogReady(s) {
     return s.rows !== null && s.rowsFor === dashLogKey(s);
 }
 
+// A load takes the loading flag with its own token; its answer gives back only
+// that token, so a late answer never leaves the list stuck nor frees a newer load
+function dashLogTake(s) {
+    s.loadSeq += 1;
+    s.loading = s.loadSeq;
+    return s.loadSeq;
+}
+function dashLogRelease(s, token) {
+    if (s.loading !== token) return false;
+    s.loading = false;
+    dashLogDim(s, false);
+    return true;
+}
+
 function dashLogFirst(s, quiet, isCurrent) {
     var gen = ++s.gen;
     var key = dashLogKey(s);
-    s.loading = true;
+    var token = dashLogTake(s);
+    // A first load starts a new list: an earlier cap offer no longer applies
+    s.capped = false;
     s.moreFailed = "";
     if (!quiet) dashLogDim(s, true);
     return api("GET", dashLogQuery(s, { limit: String(LOG_PAGE_SIZE), page: "1" })).then(function (res) {
+        dashLogRelease(s, token);
         if (gen !== s.gen || (isCurrent && !isCurrent())) return;
-        s.loading = false;
-        dashLogDim(s, false);
         if (!res.ok || !res.data) {
             var reason = apiError(res, s.failedText);
             if (s.rowsFor !== key) {
@@ -1615,6 +1635,7 @@ function dashLogFirst(s, quiet, isCurrent) {
         }
         s.failed = "";
         s.refreshFailed = "";
+        s.capped = false;
         s.heads = {};
         s.nexts = {};
         dashLogCursors(s, res.data);
@@ -1639,12 +1660,12 @@ function dashLogMore(s) {
     var cursor = dashLogTailCursor(s);
     if (!cursor) return;
     var gen = s.gen;
-    s.loading = true;
+    var token = dashLogTake(s);
     s.moreFailed = "";
     dashLogDraw(s, false);
     api("GET", dashLogQuery(s, { limit: String(LOG_PAGE_SIZE), before: cursor })).then(function (res) {
+        dashLogRelease(s, token);
         if (gen !== s.gen) return;
-        s.loading = false;
         if (!res.ok || !res.data) {
             s.moreFailed = apiError(res, s.failedText);
             dashLogDraw(s, false);
@@ -1664,7 +1685,7 @@ function dashLogMore(s) {
 // lies below belongs to Load more). More than 20 full pages of new rows: the
 // newest rows become the list, and Load more goes on from there.
 function dashLogRefresh(s, isCurrent) {
-    if (s.loading) return Promise.resolve();
+    if (s.loading || s.capped) return Promise.resolve();
     if (!dashLogReady(s) || !s.rows.length) return dashLogFirst(s, true, isCurrent);
     var since = s.heads[s.rows[0].id];
     if (!since) return dashLogFirst(s, true, isCurrent);
@@ -1699,7 +1720,12 @@ function dashLogRefresh(s, isCurrent) {
             return;
         }
         s.refreshFailed = "";
-        if (complete === false) return dashLogFirst(s, true, isCurrent);
+        if (complete === false) {
+            s.capped = true;
+            s.pending = [];
+            dashLogDraw(s, true);
+            return;
+        }
         var fresh = uiLogFresh(s.rows, collected, s.hasMore);
         Object.keys(cursors.heads).forEach(function (id) { s.heads[id] = cursors.heads[id]; });
         Object.keys(cursors.nexts).forEach(function (id) { s.nexts[id] = cursors.nexts[id]; });
@@ -1715,6 +1741,16 @@ function dashLogRefresh(s, isCurrent) {
             dashLogDraw(s, true);
         }
     });
+}
+
+// The offer at the top edge, taken: the waiting rows, or after a cap the newest rows as a new list
+function dashLogTakeNew(s) {
+    if (s.capped) {
+        s.capped = false;
+        return dashLogFirst(s, false);
+    }
+    dashLogTakeIn(s, s.pending);
+    return Promise.resolve();
 }
 
 function dashLogTakeIn(s, fresh) {
@@ -1799,8 +1835,9 @@ function dashLogDraw(s, quiet) {
     var countEl = document.getElementById(s.id + "-count");
     // The pill and the line under the list always follow; the rows only when free
     var n = s.pending.length;
-    pillEl.classList.toggle("hidden", !n);
-    pillEl.textContent = n === 1 ? "1 new entry" : uiNum(n) + " new entries";
+    pillEl.classList.toggle("hidden", !n && !s.capped);
+    pillEl.textContent = s.capped ? "More new entries than can be merged. Show newest"
+        : n === 1 ? "1 new entry" : uiNum(n) + " new entries";
     var moreHtml = "";
     if (s.moreFailed) {
         moreHtml = '<span role="alert">Could not load more entries: ' + esc(s.moreFailed) + '</span> <button type="button" class="ui-btn-link" data-log-more>Try again</button>';
@@ -1862,7 +1899,7 @@ function dashLogBind(s) {
         dashLogApply(s, true);
     });
     document.getElementById(s.id + "-new").addEventListener("click", function () {
-        dashLogTakeIn(s, s.pending);
+        dashLogTakeNew(s);
         var main = uiMainScroller();
         var panel = document.getElementById(s.id + "-panel");
         if (main && panel) main.scrollTop = Math.max(0, panel.offsetTop - 16);
@@ -1897,6 +1934,7 @@ function dashLogShow(s) {
     s.rowsFor = null;
     s.failed = "";
     s.refreshFailed = "";
+    s.capped = false;
     dashLogDraw(s, false);
     return dashLogFirst(s, false).then(function () { uiRefreshLoaded(s.id); });
 }
