@@ -242,8 +242,14 @@ function dashBindShell() {
         }
     });
     document.querySelectorAll("a[data-go]").forEach(function (a) {
-        var q = a.getAttribute("data-query");
-        a.setAttribute("href", basePath() + PAGES[a.getAttribute("data-go")].path + (q ? "?" + q : ""));
+        var page = PAGES[a.getAttribute("data-go")];
+        if (!page) return;
+        // Rebuild the query from encoded pairs so the attribute text never reaches the URL as is
+        var pairs = [];
+        new URLSearchParams(a.getAttribute("data-query") || "").forEach(function (value, key) {
+            pairs.push(encodeURIComponent(key) + "=" + encodeURIComponent(value));
+        });
+        a.setAttribute("href", basePath() + page.path + (pairs.length ? "?" + pairs.join("&") : ""));
     });
     // Navigation inside the app: one history step; a modified click opens a tab
     document.addEventListener("click", function (event) {
