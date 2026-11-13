@@ -16,6 +16,21 @@ from app.logger import log_access
 router = APIRouter(tags=["validate"])
 
 
+# Documents the 429 answer in the OpenAPI schema (FastAPI's `responses` parameter).
+_RATE_LIMITED = {
+    429: {
+        "description": "Too many requests from this client address. Retry after the seconds in Retry-After.",
+        "content": {"application/json": {"example": {"detail": "Too many requests"}}},
+        "headers": {
+            "Retry-After": {
+                "description": "Whole seconds until the caller's rate limit window ends (at least 1).",
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
+    }
+}
+
+
 def _too_many_requests(ip: str) -> HTTPException:
     """429 for a caller over the rate limit, with the seconds until its window ends."""
     return HTTPException(
@@ -53,12 +68,12 @@ def _is_active(rec: Any) -> bool:
     return bool(rec["is_active"]) and not is_expired(rec["expires_at"])
 
 
-@router.post("/validate")
+@router.post("/validate", responses=_RATE_LIMITED)
 async def validate_token(request: Request, body: ValidateBody):
     return await _validate_token_values(request, body.token, body.area, body.level)
 
 
-@router.get("/validate")
+@router.get("/validate", responses=_RATE_LIMITED)
 async def validate_token_get(
     request: Request,
     token: str = Query(...),
@@ -115,7 +130,7 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     return JSONResponse(content={"result": ok}, media_type="application/json")
 
 
-@router.post("/validate/grants")
+@router.post("/validate/grants", responses=_RATE_LIMITED)
 async def token_grants(request: Request, body: GrantsBody):
     """Return the grants of the presented token to its holder.
 

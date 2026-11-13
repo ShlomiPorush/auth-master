@@ -72,7 +72,9 @@ Trust only the proxy. Do not use a whole Docker network such as `172.18.0.0/16` 
 `*`: any other container on that network could then send a false
 `X-Forwarded-For` header to choose the address it is counted under.
 
-Requests over the limit are not written to the access log. The Access Logs page
+Requests over the limit are answered `429 Too many requests` with a `Retry-After`
+header (the whole seconds until the caller's window ends), and are not written to the
+access log. The Access Logs page
 shows how many there were and from which addresses, and each server process writes
 a `Rate limit:` line to its log at most once per window.
 

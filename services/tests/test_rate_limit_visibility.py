@@ -305,3 +305,9 @@ def test_rejected_answers_are_429_and_not_logged(client):
 
     assert client.portal.call(main_mod.app.state.db.fetchval, "SELECT COUNT(*) FROM access_logs") == count
     assert rate_limit.rejection_stats()["rejectedTotal"] == 3
+
+def test_openapi_documents_the_429(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    for path, method in (("/validate", "post"), ("/validate", "get"), ("/validate/grants", "post")):
+        answer = paths[path][method]["responses"]["429"]
+        assert "Retry-After" in answer["headers"], (path, method)

@@ -193,7 +193,7 @@ def _maybe_log_summary(now: float) -> None:
     shown = min(len(pending.by_key), SUMMARY_TOP_KEYS)
     rest = pending.total - sum(c for _k, c in pending.top(SUMMARY_TOP_KEYS))
     log.warning(
-        "Rate limit: rejected %d requests from %s to %s (limit %d per %d ms per address); "
+        "Rate limit: rejected %d requests with 429 from %s to %s (limit %d per %d ms per address); "
         "top %d addresses: %s%s",
         pending.total,
         _iso(first),
