@@ -2074,7 +2074,8 @@ function dashSetAddsOwn() {
 function dashSettingsLoad(isCurrent) {
     var seq = ++dashSet.seq;
     return api("GET", "/admin/api/settings/rate-limit").then(function (res) {
-        if (seq !== dashSet.seq || (isCurrent && !isCurrent())) return;
+        // A newer load, a save in flight, or a save that finished after this load began owns the page
+        if (seq !== dashSet.seq || dashSet.saving || (isCurrent && !isCurrent())) return;
         var d = res.data;
         if (!res.ok || !d || !d.fields) {
             var why = apiError(res, "The server did not answer.");
@@ -2206,11 +2207,13 @@ function dashSettingsDraw() {
     } else if (a.version < s.version) {
         addAlert(" is-warn", "This server process still uses version " + uiNum(a.version), "It reloads the settings every 15 seconds.");
     }
+    var applied = "This server process enforces version " + esc(uiNum(a.version || 0)) +
+        (a.lastReload ? ", checked " + uiTime(a.lastReload) : "") + ".";
     var saved = s.version
         ? "Version " + esc(uiNum(s.version)) + ", saved by " + uiUserText(s.savedBy || "?") + (s.savedFrom ? " from <code>" + esc(s.savedFrom) + "</code>" : "") +
           " " + uiTime(s.savedAt) + "."
         : "Nothing saved here yet. The values come from the defaults and the environment.";
-    addAlert("", "Saved settings", saved + " Changes apply at once in this server process and within about 15 seconds in any other.");
+    addAlert("", "Saved settings", saved + " " + applied + " Changes apply at once in this server process and within about 15 seconds in any other.");
     var html = alerts.join("");
     if (!uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = html; });
     if (!document.getElementById("settings-form")) dashSettingsDrawForm();
@@ -2243,7 +2246,8 @@ function dashSettingsSave() {
         body.windowSeconds = Number(changes.windowSeconds);
     }
     if ("exempt" in changes) body.exempt = changes.exempt;
-    if (document.getElementById("set-own").checked) body.confirmOwnAddress = true;
+    var ownBox = document.getElementById("set-own");
+    if (ownBox && ownBox.checked) body.confirmOwnAddress = true;
     dashSet.saving = true;
     dashSet.error = "";
     dashSet.errorField = "";
@@ -2252,6 +2256,7 @@ function dashSettingsSave() {
     uiMutated();
     return api("PUT", "/admin/api/settings/rate-limit", body).then(function (res) {
         dashSet.saving = false;
+        dashSet.seq += 1; // and so must a load that started while it ran
         var d = res.data || {};
         if (res.ok && d.fields) {
             dashSet.snap = d;

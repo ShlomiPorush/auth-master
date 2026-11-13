@@ -109,6 +109,8 @@ def test_window_must_be_whole_seconds_in_range(value):
     '{"format": 1, "maxReq": 5, "windowMs": 60000}',
     '{"format": 1, "maxReq": 5, "windowMs": 60000, "exempt": ["10.0.0.2", "10.0.0.1"]}',
     '{"format": 1, "maxReq": 0, "windowMs": 60000, "exempt": []}',
+    '{"format": true, "maxReq": 5, "windowMs": 60000, "exempt": []}',
+    '{"format": 1.0, "maxReq": 5, "windowMs": 60000, "exempt": []}',
 ])
 def test_stored_value_is_checked(text):
     _, _, _, rls = _mods()
@@ -482,6 +484,13 @@ def test_invalid_input_is_refused(admin):
         assert res.status_code == 422, body
         assert res.json()["field"] == field
     assert admin.put({"baseVersion": 0, "maxReq": "5"}).status_code == 422
+    # A lone surrogate (JSON "\ud800") is refused with a readable message, not a server error.
+    res = admin.client.put(
+        "/admin/api/settings/rate-limit",
+        content=b'{"baseVersion": 0, "exempt": ["\\ud800"]}',
+        headers={"Content-Type": "application/json", "X-CSRF-Token": admin.csrf, "X-Forwarded-For": "10.9.9.9"},
+    )
+    assert res.status_code == 422 and res.json()["field"] == "exempt"
     assert admin.put({"baseVersion": 0, "other": 1}).status_code == 422
     assert admin.get().json()["version"] == 0
 

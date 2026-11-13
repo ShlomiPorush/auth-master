@@ -89,6 +89,8 @@ def check_exempt(values: Any) -> tuple[str, ...]:
         key = rate_limit.address_key(entry)
         if key is None:
             shown = entry if len(entry) <= rate_limit.MAX_ADDRESS_LEN else entry[: rate_limit.MAX_ADDRESS_LEN] + "..."
+            # Text that is not valid UTF-8 (a lone surrogate from a JSON escape) is shown escaped.
+            shown = shown.encode("utf-8", "backslashreplace").decode("utf-8")
             raise InvalidSettings(
                 "exempt",
                 f'"{shown}" is not a single IPv4 or IPv6 address. Write one address per line, '
@@ -105,7 +107,12 @@ def parse_value(text: str) -> tuple[int | None, int | None, tuple[str, ...]]:
         data = json.loads(text)
     except (TypeError, ValueError) as e:
         raise InvalidSettings("value", "The stored value is not valid JSON.") from e
-    if not isinstance(data, dict) or data.get("format") != FORMAT or set(data) != {"format", "maxReq", "windowMs", "exempt"}:
+    if (
+        not isinstance(data, dict)
+        or type(data.get("format")) is not int
+        or data["format"] != FORMAT
+        or set(data) != {"format", "maxReq", "windowMs", "exempt"}
+    ):
         raise InvalidSettings("value", f"The stored value is not in format {FORMAT}.")
     max_req = None if data["maxReq"] is None else check_max_req(data["maxReq"])
     window_ms = None if data["windowMs"] is None else check_window_ms(data["windowMs"])
