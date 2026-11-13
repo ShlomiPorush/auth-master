@@ -143,6 +143,26 @@ test("F2: a menu that does not fit below opens above when there is more room the
     assert.ok(parseInt(menu.style.top, 10) + 168 <= 350, "ends above the button");
 });
 
+test("F2: with less than 80px on both sides the menu and the picker stay inside the room", () => {
+    // 390x300 with a 56px top bar and a 64px tab bar; button 34px high at 125px
+    const bars = { mtop: rect(0, 0, 390, 56), tabbar: rect(236, 0, 390, 64) };
+    const { ctx } = page(bars);
+    ctx.innerHeight = 300;
+    ctx.getComputedStyle = () => ({ direction: "ltr" });
+    const menu = { style: {}, offsetWidth: 190, offsetHeight: 168 };
+    ctx.uiMenuPlace(menu, { getBoundingClientRect: () => rect(125, 300, 34, 34) });
+    // below: 228 - 163 = 65; above: 121 - 64 = 57 -> below, cut to 65, ends at 228 above the tab bar
+    assert.equal(menu.style.top, "163px");
+    assert.equal(menu.style.maxHeight, "65px");
+
+    const p = page(bars);
+    p.ctx.innerHeight = 300;
+    const panel = panelAt(200, 260, 168);
+    p.ctx.uiPickerPlace({ panel, host: p.host, button: { getBoundingClientRect: () => rect(125, 200, 130, 34) } });
+    // below: 228 - 159 - 6 = 63
+    assert.equal(panel.style.maxHeight, "63px");
+});
+
 test("F2: with too little room on both sides it takes the larger one, cut to it", () => {
     const { ctx } = page({ mtop: null, tabbar: null });
     ctx.innerHeight = 300;

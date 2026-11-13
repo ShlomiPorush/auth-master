@@ -1349,7 +1349,8 @@ function uiPickerPlace(picker) {
     var above = rect.top - room.top - 6;
     var up = panel.offsetHeight > below && above > below;
     panel.classList.toggle("is-up", up);
-    panel.style.maxHeight = Math.max(80, up ? above : below) + "px";
+    // Never taller than the room on its side, so it cannot run under a bar
+    panel.style.maxHeight = Math.max(0, up ? above : below) + "px";
     var pr = panel.getBoundingClientRect();
     var dx = 0;
     if (pr.right > room.right) dx = room.right - pr.right;
@@ -1452,7 +1453,8 @@ function uiMenuPlace(menu, anchor) {
     var below = room.bottom - (r.bottom + 4);
     var above = (r.top - 4) - room.top;
     var up = h > below && above > below;
-    var fit = Math.max(80, up ? above : below);
+    // Never taller than the room on its side, so it cannot run under a bar
+    var fit = Math.max(0, up ? above : below);
     if (h > fit) {
         menu.style.maxHeight = fit + "px";
         h = fit;
