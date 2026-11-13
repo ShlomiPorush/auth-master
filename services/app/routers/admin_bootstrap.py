@@ -24,6 +24,11 @@ from app.sessions import (
 
 router = APIRouter(prefix="/admin/api", tags=["admin-bootstrap"])
 
+PASSWORD_TOO_LONG = (
+    "Password: use at most 72 bytes. Letters outside English, such as Hebrew, "
+    "and emoji take 2 to 4 bytes each"
+)
+
 PENDING_PREFIX = "auth:totp_pending:"
 
 
@@ -70,8 +75,16 @@ async def bootstrap_register(
         raise HTTPException(403, "Bootstrap already completed")
     if len(body.username.strip()) < 2 or len(body.password) < 8:
         raise HTTPException(400, "username (min 2) and password (min 8) required")
+    try:
+        password = body.password.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate (e.g. from a JSON "\ud800" escape) has no UTF-8 encoding.
+        raise HTTPException(400, "Password: contains text that is not valid Unicode") from None
+    if len(password) > 72:
+        # bcrypt uses only the first 72 bytes, and bcrypt 5 refuses longer input.
+        raise HTTPException(400, PASSWORD_TOO_LONG)
 
-    pw_hash = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
+    pw_hash = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12)).decode("ascii")
     secret = pyotp.random_base32()
     await db.execute("DELETE FROM admin_users WHERE totp_enabled = $1", False)
     new_id = str(uuid_mod.uuid4())

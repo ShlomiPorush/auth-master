@@ -132,7 +132,7 @@ See [API.md](API.md) for the full REST API reference.
 
 ## Security
 
-- Admin passwords are hashed with **bcrypt**
+- Admin passwords are hashed with **bcrypt**, which uses at most 72 bytes of a password, so new admin passwords are limited to 72 bytes
 - Dashboard access requires **TOTP MFA** (two-factor authentication)
 - Tokens and API keys are encrypted at rest with **AES-256-GCM**
 - Token hashes use **SHA-256** for lookups

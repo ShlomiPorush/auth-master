@@ -154,6 +154,7 @@ function authSetup() {
         pass.removeAttribute("aria-invalid");
         if (user.value.trim().length < 2) { authFieldError(user, "Username: use at least 2 characters"); return; }
         if (pass.value.length < 8) { authFieldError(pass, "Password: use at least 8 characters"); return; }
+        if (new TextEncoder().encode(pass.value).length > 72) { authFieldError(pass, "Password: use at most 72 bytes. Letters outside English, such as Hebrew, and emoji take 2 to 4 bytes each"); return; }
         var headers = {};
         if (boot.value) headers["X-Bootstrap-Token"] = boot.value;
         var button = form.querySelector("[type=submit]");
