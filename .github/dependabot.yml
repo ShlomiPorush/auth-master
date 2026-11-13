@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+  # Python dependencies (runtime and dev) for the service.
+  - package-ecosystem: "pip"
+    directory: "/services"
+    schedule:
+      interval: "weekly"
+    # Wait a week after a release before proposing it. Security updates ignore this.
+    cooldown:
+      default-days: 7
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Actions used by the workflows in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
