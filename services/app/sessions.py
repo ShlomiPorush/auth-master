@@ -21,6 +21,8 @@ PREFIX = "auth:sess:"
 PENDING_TOTP_PREFIX = "auth:totp_pending:"
 SETUP_TTL = 15 * 60
 SESSION_TTL = 12 * 60 * 60
+# Between the password and the TOTP code.
+PARTIAL_TTL = 5 * 60
 
 SessionKind = Literal["setup", "partial", "full"]
 

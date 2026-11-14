@@ -97,6 +97,18 @@ class FakeRedis:
             self.data.pop(k, None)
             self.ttl.pop(k, None)
 
+    async def set(self, k, v, nx=False, ex=None):
+        # SET NX EX, as the TOTP guard marks a used code (app/totp_guard.py).
+        if self.fail_with:
+            raise self.fail_with
+        if nx and k in self.data:
+            return None
+        self.data[k] = str(v)
+        self.ttl.pop(k, None)
+        if ex is not None:
+            self.ttl[k] = ex
+        return True
+
     async def ping(self):
         return True
 
@@ -108,9 +120,9 @@ class FakeRedis:
 
 
 class _FakeCounterPipeline:
-    """The sign-in attempt counter's transaction (SET NX, INCR, TTL). Counts stay out of
-    FakeRedis.data, which these tests read as the session store, and every attempt is
-    counted as the first of its window."""
+    """The attempt counters' transaction (SET NX, INCR, TTL), for sign-in and for TOTP
+    codes. Counts stay out of FakeRedis.data, which these tests read as the session
+    store, and every attempt is counted as the first of its window."""
 
     def __init__(self) -> None:
         self.ops: list = []

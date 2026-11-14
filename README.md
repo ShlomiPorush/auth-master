@@ -237,6 +237,7 @@ See [API.md](API.md) for the full REST API reference.
 
 - Admin passwords are hashed with **bcrypt**, which uses at most 72 bytes of a password, so new admin passwords are limited to 72 bytes
 - Dashboard access requires **TOTP MFA** (two-factor authentication)
+- Each authenticator code is accepted once, and an admin gets 5 tries in 15 minutes, shared by sign-in, token reveal and API key copy; after that the service answers `429` with `Retry-After`
 - Tokens and API keys are encrypted at rest with **AES-256-GCM**
 - Token hashes use **SHA-256** for lookups
 - The session cookie holds only a random session ID. Admin sessions and unfinished MFA setups are kept in Redis under names derived from `SESSION_SECRET`, encrypted and authenticated with a key derived from it, and expire after 12 hours (setup: 15 minutes). Another installation or another Redis client without that secret cannot create, read, change, or move them between sessions
