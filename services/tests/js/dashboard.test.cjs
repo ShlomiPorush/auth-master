@@ -364,3 +364,24 @@ test("zones page: groups of zone names that differ only in case", () => {
     assert.equal(ctx.dashZoneCaseNotice([]), "");
     assert.match(ctx.dashZoneCaseNotice([["billing", "BILLING"]]), /billing, BILLING.*Rename or delete all but one of each group\./);
 });
+
+test("zone names that are Object.prototype keys work in the dialog and the zones page", () => {
+    const ctx = load();
+    const names = ["constructor", "toString", "hasOwnProperty", "valueOf"];
+    const rows = ctx.dashGrantRows(names, [{ area: "constructor", level: "read" }, { area: "TOSTRING", level: "write" }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(rows)), {
+        constructor: { flags: ["read"], grants: [{ area: "constructor", level: "read" }] },
+        toString: { flags: ["write"], grants: [{ area: "TOSTRING", level: "write" }] },
+    });
+    ctx.dash.areas = names;
+    const fresh = ctx.dashPermRows(ctx.dashGrantRows(names, []));   // a new token: no grants
+    assert.equal((fresh.match(/class="ui-perm"/g) || []).length, 4);
+    assert.ok(!/checked/.test(fresh));
+    const edited = ctx.dashPermRows(rows);
+    assert.equal((edited.match(/ checked/g) || []).length, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.dashZoneCaseGroups(names.map((n) => ({ id: n, name: n }))))), []);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(ctx.dashZoneCaseGroups([{ id: 1, name: "constructor" }, { id: 2, name: "Constructor" }]))),
+        [["constructor", "Constructor"]],
+    );
+});

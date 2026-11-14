@@ -945,7 +945,7 @@ var DASH_PLAIN_AREA = /^[\x21-\x7e]+$/;
 // case (as /validate compares). Each row gets the flags it holds and the grants it
 // came from (more than one when the token holds the zone in several spellings).
 function dashGrantRows(areas, grants) {
-    var rows = {};
+    var rows = Object.create(null); // keyed by zone name: "constructor" is a valid one
     (grants || []).forEach(function (g) {
         if (!g || typeof g.area !== "string") return;
         var target = areas.indexOf(g.area) !== -1 ? g.area : null;
@@ -1213,7 +1213,7 @@ function dashZoneFind(id) {
 // Zones whose names differ only in case, from before names had to be unique that way
 // (zone names are ASCII, so toLowerCase() compares them as the server does)
 function dashZoneCaseGroups(zones) {
-    var groups = {};
+    var groups = Object.create(null); // keyed by zone name: "constructor" is a valid one
     var order = [];
     (zones || []).forEach(function (z) {
         var key = String(z.name).toLowerCase();
