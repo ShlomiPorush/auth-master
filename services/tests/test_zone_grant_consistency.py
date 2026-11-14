@@ -170,13 +170,18 @@ class Env:
 
 
 def _refuse_public_database_password() -> None:
-    """The tests connect to _DB_URL directly, so check it as the app checks DATABASE_URL."""
+    """The tests connect to _DB_URL directly, so validate it as the app validates DATABASE_URL
+    (the URL's password and PGPASSWORD, which asyncpg uses when the URL has none)."""
     if not _EXPECT_PG:
         return
-    from app.config import _postgres_url_problem
+    from pydantic import ValidationError
 
-    if problem := _postgres_url_problem(_DB_URL):
-        raise RuntimeError(f"TEST_DATABASE_URL: {problem}")
+    from app.config import Settings, _describe
+
+    try:
+        Settings(DATABASE_URL=_DB_URL)
+    except ValidationError as error:
+        raise RuntimeError(f"TEST_DATABASE_URL: {_describe(error)}") from None
 
 
 @contextlib.asynccontextmanager
