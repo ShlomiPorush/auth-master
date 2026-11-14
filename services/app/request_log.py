@@ -1,40 +1,49 @@
 """Keep the /validate token out of uvicorn's request log.
 
-GET /validate takes the token in the query string, and uvicorn writes every request
-to the ``uvicorn.access`` logger with the path and its query string. A filter on that
-logger replaces the query of /validate requests with ``[redacted]``; the line itself
-is kept. This is not the database access log in ``app.logger``.
+GET /validate takes the token in the query string, and uvicorn logs requests with
+the path and its query string: HTTP requests on the ``uvicorn.access`` logger, and
+WebSocket handshakes (which this app refuses with 403) on ``uvicorn.error``. A
+filter on both loggers replaces the query of /validate with ``[redacted]``; the line
+itself is kept. This is not the database access log in ``app.logger``.
 """
 import logging
 
 _REDACTED = "[redacted]"
+_LOGGERS = ("uvicorn.access", "uvicorn.error")
+
+
+def _redact(value: object) -> object:
+    if isinstance(value, str):
+        path, sep, _query = value.partition("?")
+        if sep and path.rstrip("/").endswith("/validate"):
+            return f"{path}?{_REDACTED}"
+    return value
 
 
 class RedactValidateQuery(logging.Filter):
-    """Replace the query string of /validate in uvicorn's request log lines.
+    """Replace the query string of /validate in uvicorn's log arguments.
 
-    uvicorn logs ``'%s - "%s %s HTTP/%s" %d'`` with the arguments (client address,
-    method, path with query string, HTTP version, status). Matching is on the path
-    only, for every method and status. Trailing slashes are ignored, because
-    ``/validate/`` and ``/validate//`` are redirected to ``/validate`` and logged
-    with their query too. Records of any other shape are left as they are.
+    uvicorn passes the path with its query string as one argument, for example
+    ``'%s - "%s %s HTTP/%s" %d'`` (client, method, path, version, status) and
+    ``'%s - "WebSocket %s" 403'`` (client, path). Matching is on the path only, for
+    every method and status. Trailing slashes are ignored, because ``/validate/``
+    and ``/validate//`` are redirected to ``/validate`` and logged with their query
+    too. Other arguments and records are left as they are.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        args = record.args
-        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
-            path, sep, _query = args[2].partition("?")
-            if sep and path.rstrip("/").endswith("/validate"):
-                record.args = (*args[:2], f"{path}?{_REDACTED}", *args[3:])
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact(arg) for arg in record.args)
         return True
 
 
 def install() -> None:
-    """Attach the filter to uvicorn's request logger, once.
+    """Attach the filter to uvicorn's loggers, once each.
 
-    Logging configuration (uvicorn's own, or a ``--log-config`` file) replaces the
+    Logging configuration (uvicorn's own, or a ``--log-config`` file) replaces a
     logger's handlers but keeps its filters, so the order does not matter.
     """
-    access_logger = logging.getLogger("uvicorn.access")
-    if not any(isinstance(f, RedactValidateQuery) for f in access_logger.filters):
-        access_logger.addFilter(RedactValidateQuery())
+    for name in _LOGGERS:
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, RedactValidateQuery) for f in logger.filters):
+            logger.addFilter(RedactValidateQuery())
