@@ -9,7 +9,6 @@ Requires pytest and httpx.
 """
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import sys
@@ -75,7 +74,7 @@ def client(monkeypatch):
 
     import app.main as main_mod
     from app.config import get_settings
-    from app.sessions import COOKIE_NAME, PREFIX
+    from app.sessions import COOKIE_NAME, session_record
 
     s = get_settings()
     for field in _SECRET_FIELDS:
@@ -100,7 +99,8 @@ def client(monkeypatch):
             admin_id, "tz-admin", "unused",
         )
         sid = secrets.token_hex(32)
-        fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": admin_id, "csrf": secrets.token_hex(24)})
+        key, value = session_record(sid, {"kind": "full", "adminId": admin_id, "csrf": secrets.token_hex(24)})
+        fake.data[key] = value
         c.cookies.set(COOKIE_NAME, sid)
         try:
             yield c

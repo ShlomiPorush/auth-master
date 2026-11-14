@@ -12,7 +12,6 @@ token and access log row in it. Every secret the app reads is generated per run 
 """
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import sys
@@ -120,7 +119,7 @@ def env(monkeypatch):
 
     import app.main as main_mod
     from app.config import get_settings
-    from app.sessions import COOKIE_NAME, PREFIX
+    from app.sessions import COOKIE_NAME, session_record
 
     s = get_settings()
     for field in _SECRET_FIELDS:
@@ -142,7 +141,8 @@ def env(monkeypatch):
         e.run(db.execute, "DELETE FROM access_logs")
         e.run(db.execute, "DELETE FROM tokens")
         sid = secrets.token_hex(32)
-        fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": str(uuid.uuid4()), "csrf": secrets.token_hex(24)})
+        key, value = session_record(sid, {"kind": "full", "adminId": str(uuid.uuid4()), "csrf": secrets.token_hex(24)})
+        fake.data[key] = value
         c.cookies.set(COOKIE_NAME, sid)
         try:
             yield e
@@ -161,7 +161,7 @@ def _row(body, name):
 
 
 def test_requires_a_full_admin_session(env):
-    from app.sessions import COOKIE_NAME, PREFIX
+    from app.sessions import COOKIE_NAME, session_record
 
     paths = ["/admin/api/usage/tokens", f"/admin/api/usage/tokens/{uuid.uuid4()}", "/admin/api/usage/tokens/unknown"]
     env.c.cookies.clear()
@@ -169,7 +169,8 @@ def test_requires_a_full_admin_session(env):
         assert env.get(p).status_code == 401
     # Signed in with the password, MFA not done yet.
     sid = secrets.token_hex(32)
-    env.fake.data[PREFIX + sid] = json.dumps({"kind": "partial", "adminId": str(uuid.uuid4()), "csrf": secrets.token_hex(24)})
+    key, value = session_record(sid, {"kind": "partial", "adminId": str(uuid.uuid4()), "csrf": secrets.token_hex(24)})
+    env.fake.data[key] = value
     env.c.cookies.set(COOKIE_NAME, sid)
     for p in paths:
         assert env.get(p).status_code == 401

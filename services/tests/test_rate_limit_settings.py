@@ -394,11 +394,12 @@ class Admin:
         self.csrf = ""
 
     def login(self, kind: str = "full") -> None:
-        from app.sessions import COOKIE_NAME, PREFIX
+        from app.sessions import COOKIE_NAME, session_record
 
         sid = secrets.token_hex(32)
         self.csrf = secrets.token_hex(24)
-        self.fake.data[PREFIX + sid] = json.dumps({"kind": kind, "adminId": "00000000-0000-0000-0000-000000000001", "csrf": self.csrf})
+        key, value = session_record(sid, {"kind": kind, "adminId": "00000000-0000-0000-0000-000000000001", "csrf": self.csrf})
+        self.fake.data[key] = value
         self.client.cookies.set(COOKIE_NAME, sid)
 
     def get(self, frm: str = "10.9.9.9"):
