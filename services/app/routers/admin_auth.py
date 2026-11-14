@@ -1,3 +1,4 @@
+import logging
 import uuid as uuid_mod
 
 import bcrypt
@@ -26,6 +27,7 @@ from app.logger import log_activity
 
 
 router = APIRouter(prefix="/admin/api", tags=["admin-auth"])
+log = logging.getLogger(__name__)
 
 
 class LoginBody(BaseModel):
@@ -94,12 +96,16 @@ async def login_mfa(request: Request, response: Response, body: MfaBody, x_csrf_
     check = await check_totp_code(r, sess["adminId"], secret, body.code.replace(" ", ""))
     if not check.ok:
         err = totp_error(check, at_login=True)
-        if err.status_code == 429:
-            # Out of attempts: this sign-in ends, also if the log write below fails.
-            await delete_session(r, sid)
-        await log_totp_failure(request, sess["adminId"], "login", check)
         if err.status_code != 429:
+            await log_totp_failure(request, sess["adminId"], "login", check)
             raise err
+        # Out of attempts: this sign-in ends and the answer says so, also if the
+        # activity log cannot be written.
+        await delete_session(r, sid)
+        try:
+            await log_totp_failure(request, sess["adminId"], "login", check)
+        except Exception:
+            log.exception("Could not write the MFA lockout to the activity log")
         locked = JSONResponse({"detail": err.detail}, status_code=429, headers=err.headers)
         clear_sid_cookie(locked)
         return locked

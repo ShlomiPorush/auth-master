@@ -474,8 +474,11 @@ def test_lockout_ends_the_sign_in_even_if_the_log_write_fails(ctx, monkeypatch):
         raise RuntimeError("activity log unavailable")
 
     monkeypatch.setattr(totp_guard, "log_activity", broken_log)
-    with pytest.raises(RuntimeError):
-        _mfa(ctx, sid, csrf, _wrong(admin, ctx))
+    r = _mfa(ctx, sid, csrf, _wrong(admin, ctx))
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == str(totp_guard.ATTEMPT_WINDOW)
+    cleared = [h for h in r.headers.get_list("set-cookie") if h.startswith("auth_sid=")]
+    assert cleared and ("Max-Age=0" in cleared[0] or 'auth_sid=""' in cleared[0])
     assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
 
 
