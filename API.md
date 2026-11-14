@@ -86,6 +86,8 @@ GET /validate?token=tok_abc123...&area=orders&level=read
 
 **Permission Levels:** `read`, `write`, `delete`, `all`
 
+`area` takes at most 255 characters, spaces included (characters, not bytes). A longer `area`, or one that is not valid Unicode text (such as a lone `\ud800` escape in a JSON body), gets the standard `422` validation error and is not written to the access log.
+
 > Rate-limited per client address, as the server sees it, and per server process. Over the limit it answers `429` with `{"detail": "Too many requests"}` and a `Retry-After` header: the whole seconds until the caller's window ends. These requests are not written to the access log; the Access Logs page of the dashboard shows how many there were. Addresses and networks listed on the dashboard's Settings page are exempt and never limited. Behind a reverse proxy, see "Behind a reverse proxy" in the README.
 
 ---

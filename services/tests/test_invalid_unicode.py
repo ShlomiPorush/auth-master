@@ -138,18 +138,23 @@ async def _access_log_count(db):
 # ── Bug 1: /validate with a lone surrogate (failed with 500 before the fix) ──
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param(b'{"token": "\\ud800", "area": "orders", "level": "read"}', id="token"),
-        pytest.param(b'{"token": "tok_unknown", "area": "\\ud800", "level": "read"}', id="area"),
-    ],
-)
-def test_validate_rejects_lone_surrogate(client, body):
+def test_validate_rejects_lone_surrogate_token(client):
+    body = b'{"token": "\\ud800", "area": "orders", "level": "read"}'
     r = client.post("/validate", content=body, headers=JSON)
     assert r.status_code == 200
     assert r.json() == {"result": False}
     # Rejected before lookup, like an unknown level: no cache entry, no log row.
+    assert client.fake_redis.data == {}
+    assert client.portal.call(_access_log_count, client.db) == 0
+
+
+def test_validate_rejects_lone_surrogate_area_with_422(client):
+    # The area has a max_length, and Pydantic refuses text that is not valid Unicode
+    # when it checks the length (error type string_unicode).
+    body = b'{"token": "tok_unknown", "area": "\\ud800", "level": "read"}'
+    r = client.post("/validate", content=body, headers=JSON)
+    assert r.status_code == 422
+    assert [e["type"] for e in r.json()["detail"]] == ["string_unicode"]
     assert client.fake_redis.data == {}
     assert client.portal.call(_access_log_count, client.db) == 0
 
