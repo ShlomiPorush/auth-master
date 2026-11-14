@@ -533,6 +533,8 @@ body.ui-app { overflow: hidden; }
 .ui-perm:first-child { border-top: 0; }
 .ui-perm > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ui-perm label { display: inline-flex; align-items: center; gap: var(--ui-sp-2); font-size: var(--ui-fs-ctl); cursor: pointer; }
+/* A zone the token holds in more than one spelling: on its own line under the flags */
+.ui-perm-note { grid-column: 1 / -1; margin: 0; color: var(--ui-warn); font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
 
 /* ---------- Usage: figures, the calls chart, zone bars ---------- */
 

@@ -11,7 +11,7 @@ from app.admin_deps import FullSession, csrf_check
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, generate_raw_token, sha256_hex
 from app.crypto_totp import decrypt_totp_secret
 from app.db import UniqueViolationError
-from app.grants import assert_grants_allowed, parse_grants
+from app.grants import canonical_grants, parse_grants
 from app.totp_guard import check_totp_code, log_totp_failure, totp_error
 from app.zones import allowed_area_names, grant_write_transaction
 from app.logger import log_activity, get_actor
@@ -48,7 +48,7 @@ async def _normalize_grants(db: Any, raw: list[dict[str, Any]]) -> list[dict[str
     if not allowed:
         raise HTTPException(400, "Define at least one zone (or set ALLOWED_AREAS in env when zones table is empty)")
     try:
-        assert_grants_allowed(grants, allowed)
+        grants = canonical_grants(grants, allowed)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return grants

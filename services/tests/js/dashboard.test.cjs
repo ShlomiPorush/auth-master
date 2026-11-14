@@ -314,3 +314,53 @@ test("a 413 says the item is too large; other answers keep the server's reason",
     assert.equal(ctx.apiError({ status: 400, data: { detail: "Invalid zone name" }, json: true }, "Save failed"), "Invalid zone name");
     assert.equal(ctx.apiError({ status: 500, data: null, json: false }, "Save failed"), "Save failed");
 });
+
+// Zone names are unique regardless of case; grants from before can still be spelled
+// differently from their zone.
+test("token dialog: a grant maps to its zone by exact name, else by case only for plain ASCII", () => {
+    const ctx = load();
+    const areas = ["billing", "orders", "PAY", "pay", "Key"];
+    const rows = ctx.dashGrantRows(areas, [
+        { area: "BILLING", level: "read" },
+        { area: "orders", level: "all" },
+        { area: "Pay", level: "read" },          // two zones differ only in case: exact only
+        { area: "PAY", level: "write" },
+        { area: "﻿billing", level: "delete" }, // JS trims U+FEFF, the server does not
+        { area: "\x1fbilling", level: "delete" },   // the server strips \x1f, JS does not
+        { area: " billing", level: "delete" },
+        { area: "KEY", level: "read" },           // the Kelvin sign zone is not plain ASCII
+        { area: 5, level: "read" },
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(rows)), {
+        billing: { flags: ["read"], grants: [{ area: "BILLING", level: "read" }] },
+        orders: { flags: ["read", "write", "delete"], grants: [{ area: "orders", level: "all" }] },
+        PAY: { flags: ["write"], grants: [{ area: "PAY", level: "write" }] },
+    });
+});
+
+test("token dialog: a zone held in two spellings shows every flag and a notice", () => {
+    const ctx = load();
+    const rows = ctx.dashGrantRows(["billing"], [
+        { area: "billing", level: "read" },
+        { area: "BILLING", level: "readwrite" },
+    ]);
+    assert.deepEqual([...rows.billing.flags], ["read", "write"]);
+    assert.equal(
+        ctx.dashPermNote("billing", rows.billing),
+        "This token holds billing in more than one spelling (billing: read; BILLING: readwrite). " +
+            "Saving stores one grant with the permissions checked here.",
+    );
+    assert.equal(ctx.dashPermNote("billing", ctx.dashGrantRows(["billing"], [{ area: "billing", level: "read" }]).billing), "");
+});
+
+test("zones page: groups of zone names that differ only in case", () => {
+    const ctx = load();
+    const z = (name) => ({ id: name, name });
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(ctx.dashZoneCaseGroups([z("billing"), z("orders"), z("BILLING"), z("Billing"), z("pay")]))),
+        [["billing", "BILLING", "Billing"]],
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(ctx.dashZoneCaseGroups([z("billing"), z("orders")]))), []);
+    assert.equal(ctx.dashZoneCaseNotice([]), "");
+    assert.match(ctx.dashZoneCaseNotice([["billing", "BILLING"]]), /billing, BILLING.*Rename or delete all but one of each group\./);
+});

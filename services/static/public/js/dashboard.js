@@ -926,17 +926,63 @@ function dashTokDelete(t) {
     });
 }
 
+// The flags of a stored grant level ("read,delete", or the shortcuts "all" and "readwrite")
+function dashLevelFlags(level) {
+    var v = String(level || "");
+    if (v === "all") v = "read,write,delete";
+    else if (v === "readwrite") v = "read,write";
+    return v.split(",").map(function (s) { return s.trim(); }).filter(function (fl) { return TOKEN_FLAGS.indexOf(fl) !== -1; });
+}
+
+// Printable ASCII without spaces: where JavaScript's toLowerCase() and the server's
+// lower() agree and there is nothing to trim. The server folds every area with Python's
+// strip().lower(), which differs from trim().toLowerCase() elsewhere (U+FEFF, other
+// Unicode), so other spellings are matched only exactly.
+var DASH_PLAIN_AREA = /^[\x21-\x7e]+$/;
+
+// The token's stored grants per zone row of the token dialog: a grant belongs to the
+// zone with its exact name, else to the one zone whose name differs from it only in
+// case (as /validate compares). Each row gets the flags it holds and the grants it
+// came from (more than one when the token holds the zone in several spellings).
+function dashGrantRows(areas, grants) {
+    var rows = {};
+    (grants || []).forEach(function (g) {
+        if (!g || typeof g.area !== "string") return;
+        var target = areas.indexOf(g.area) !== -1 ? g.area : null;
+        if (target === null && DASH_PLAIN_AREA.test(g.area)) {
+            var key = g.area.toLowerCase();
+            var hits = areas.filter(function (a) { return DASH_PLAIN_AREA.test(a) && a.toLowerCase() === key; });
+            if (hits.length === 1) target = hits[0];
+        }
+        if (target === null) return;
+        var row = rows[target] || (rows[target] = { flags: [], grants: [] });
+        dashLevelFlags(g.level).forEach(function (fl) { if (row.flags.indexOf(fl) === -1) row.flags.push(fl); });
+        row.grants.push({ area: g.area, level: String(g.level || "") });
+    });
+    return rows;
+}
+
+// The notice on a row that holds the zone in more than one spelling
+function dashPermNote(area, row) {
+    if (!row || row.grants.length < 2) return "";
+    return "This token holds " + area + " in more than one spelling (" +
+        row.grants.map(function (g) { return g.area + ": " + g.level; }).join("; ") +
+        "). Saving stores one grant with the permissions checked here.";
+}
+
 // The zone permission rows of the token dialog
-function dashPermRows(selected) {
+function dashPermRows(rows) {
     return dash.areas.map(function (a) {
-        var flags = selected[a] ? String(selected[a]).split(",") : [];
+        var flags = rows[a] ? rows[a].flags : [];
+        var note = dashPermNote(a, rows[a]);
         var all = TOKEN_FLAGS.every(function (x) { return flags.indexOf(x) !== -1; });
         return '<div class="ui-perm" data-area="' + esc(String(a).toLowerCase()) + '" data-area-name="' + esc(a) + '"><b><bdi dir="auto">' + esc(a) + "</bdi></b>" +
             TOKEN_FLAGS.map(function (fl) {
                 return '<label><input type="checkbox" class="ui-check" data-flag="' + fl + '"' + (flags.indexOf(fl) !== -1 ? " checked" : "") +
                     ' aria-label="' + esc(fl.charAt(0).toUpperCase() + fl.slice(1) + ": " + a) + '"> ' + fl.charAt(0).toUpperCase() + fl.slice(1) + "</label>";
             }).join("") +
-            '<label><input type="checkbox" class="ui-check" data-area-all' + (all ? " checked" : "") + ' aria-label="' + esc("All: " + a) + '"> All</label></div>';
+            '<label><input type="checkbox" class="ui-check" data-area-all' + (all ? " checked" : "") + ' aria-label="' + esc("All: " + a) + '"> All</label>' +
+            (note ? '<p class="ui-perm-note" role="note"><bdi dir="auto">' + esc(note) + "</bdi></p>" : "") + "</div>";
     }).join("");
 }
 
@@ -955,8 +1001,7 @@ function dashTokenDialog(t) {
     var d = null;
     var close = function () { if (d) d.backdrop.remove(); };
     var guardedClose = function () { uiCloseGuarded(d, close); };
-    var selected = {};
-    (editing ? t.grants || [] : []).forEach(function (g) { selected[g.area] = g.level; });
+    var selected = dashGrantRows(dash.areas, editing ? t.grants : []);
     var expiresInitial = editing && t.expiresAt ? uiToZonedInput(t.expiresAt) : "";
     var formId = "tok-form";
     var body = '<div class="ui-form">' +
@@ -1165,8 +1210,34 @@ function dashZoneFind(id) {
     return dash.zones.filter(function (z) { return z.id === id; })[0] || null;
 }
 
+// Zones whose names differ only in case, from before names had to be unique that way
+// (zone names are ASCII, so toLowerCase() compares them as the server does)
+function dashZoneCaseGroups(zones) {
+    var groups = {};
+    var order = [];
+    (zones || []).forEach(function (z) {
+        var key = String(z.name).toLowerCase();
+        if (!groups[key]) { groups[key] = []; order.push(key); }
+        groups[key].push(String(z.name));
+    });
+    return order.filter(function (k) { return groups[k].length > 1; }).map(function (k) { return groups[k]; });
+}
+
+function dashZoneCaseNotice(groups) {
+    if (!groups.length) return "";
+    return '<div class="ui-banner ui-banner-warn"><div><b>Zones whose names differ only in case</b>' +
+        groups.map(function (g) { return '<bdi dir="auto">' + esc(g.join(", ")) + "</bdi>"; }).join("; ") +
+        ". A token for one of them passes /validate for the others. Rename or delete all but one of each group.</div></div>";
+}
+
 function dashZonesDraw(quiet) {
     if (!dashZones.bound) return;
+    var dupEl = document.getElementById("zone-dupes");
+    if (dupEl) {
+        var dupHtml = dashZoneCaseNotice(dashZones.loaded ? dashZoneCaseGroups(dash.zones) : []);
+        if (dupEl.innerHTML !== dupHtml) dupEl.innerHTML = dupHtml;
+        dupEl.classList.toggle("hidden", !dupHtml);
+    }
     var rowsEl = document.getElementById("zone-rows");
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
