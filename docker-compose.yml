@@ -36,6 +36,15 @@ services:
       ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       TZ: ${TZ:-UTC}
+      # Passed through so that values set as stack variables (for example in
+      # Portainer) reach the container, not only values in .env. The defaults
+      # apply only when the variable is not set at all; an empty value is passed
+      # as it is. See "Remote access and HTTPS" in README.md.
+      # The addresses of reverse proxies whose X-Forwarded-For header uvicorn trusts.
+      # The default is uvicorn's own.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1,::1}
+      # Set to true when the service is reached over HTTPS.
+      COOKIE_SECURE: ${COOKIE_SECURE-false}
     volumes:
       - ./data:/app/data
     depends_on:

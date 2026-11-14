@@ -1,6 +1,6 @@
 # Auth Service — API Reference
 
-Base URL: `http://<host>:8080`
+Base URL: the `https://` address of the reverse proxy in front of the service. Plain `http://<host>:8080` sends API keys and tokens unencrypted: use it only on the Docker host itself or on a network you trust. See "Remote access and HTTPS" in the README.
 
 ---
 

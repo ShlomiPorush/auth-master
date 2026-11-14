@@ -49,13 +49,44 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `TOTP_ISSUER` | `AuthService` | Issuer name shown in authenticator apps |
 | `ENVIRONMENT` | `production` | Application environment (`production` or `development`) |
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
-| `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
+| `COOKIE_SECURE` | `false` | Set to `true` when the service is reached over HTTPS, so session cookies use the `Secure` flag. See [Remote access and HTTPS](#remote-access-and-https). The bundled compose file passes it to the container |
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
 | `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP. Also editable on the Settings page; when this variable is set, the page shows the field locked. See [Rate limit settings](#rate-limit-settings) |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute). Also editable on the Settings page, like `RATE_LIMIT_MAX_REQ` |
 | `ACCESS_LOG_RETENTION_DAYS` | `30` | Days the access log keeps token validation requests; also the longest period the Usage page can count |
 | `ACTIVITY_LOG_RETENTION_DAYS` | `30` | Days the activity log keeps admin actions |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Read by uvicorn, not by the app: the addresses of reverse proxies whose `X-Forwarded-For` header is trusted. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | Read by uvicorn, not by the app: the addresses of reverse proxies whose `X-Forwarded-For` header is trusted. See [Behind a reverse proxy](#behind-a-reverse-proxy). The bundled compose file passes it to the container |
+
+### Remote access and HTTPS
+
+The service speaks plain HTTP on port 8080, and the bundled compose file publishes
+that port on every interface of the host. Over plain HTTP, the admin password, the
+session cookie, the MFA setup secret, tokens and API keys cross the network
+unencrypted, and anyone on the path can read them. `COOKIE_SECURE` does not change
+that.
+
+- To reach the service from other machines, browsers and integrations such as n8n
+  alike, put an HTTPS reverse proxy such as Traefik, Caddy or nginx in front of it,
+  and use the proxy's `https://` address. Callers on the same Docker network can use
+  `http://auth-service:8080`.
+- Do not expose plain HTTP port 8080 to networks you do not trust. Allow it only from
+  the proxy, with a host firewall, or remove the published port when the proxy runs
+  on the same Docker network: in an override file, `ports: !reset []` removes it
+  (`ports: []` does not, because Compose merges port lists).
+- Behind HTTPS, set `COOKIE_SECURE=true`, so browsers send the session cookie over
+  HTTPS only, and set `FORWARDED_ALLOW_IPS` to the proxy's address or network, as
+  described below.
+
+The bundled compose file passes `COOKIE_SECURE` and `FORWARDED_ALLOW_IPS` to the
+container, so they work when set in `.env` or as stack variables in a tool such as
+Portainer. Docker Compose takes them from the shell or stack variables first, then
+from the `.env` file of the project directory, or from the files given with
+`--env-file` instead of it, and the result wins over `env_file: .env`. If you start
+the stack with `--env-file` and keep these two values only in `.env`, move them to
+your env file, or add `--env-file .env` before your other `--env-file` options: a
+later file wins, so your own file keeps its values, secrets included. When a variable is not set at all,
+the compose file passes the default: `127.0.0.1,::1` and `false`. An empty value is
+passed as it is.
 
 ### Behind a reverse proxy
 
