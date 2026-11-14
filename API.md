@@ -369,9 +369,9 @@ All error responses follow a consistent format:
 
 ### Request size
 
-The service reads at most 64 KiB (65,536 bytes) of a request body. A larger body is answered `413 Content Too Large` and the request is not carried out: as plain text `Content Too Large` when the `Content-Length` header gives the size, or as `{"detail": "Content Too Large"}` when the body is sent without one (chunked) and passes the limit while it is read.
+Request bodies are limited to 64 KiB (65,536 bytes). A larger body is not processed: the answer is `413 Content Too Large` and the request is not carried out. The answer is plain text `Content Too Large` when the `Content-Length` header gives the size, or `{"detail": "Content Too Large"}` when the body is sent without one (chunked) and passes the limit while it arrives.
 
-Send no body on requests that take none (`GET`, `DELETE`). The service does not read such a body. If its `Content-Length` is over 64 KiB, the request is still carried out, but the answer is `413` instead of its normal status: a `DELETE` answered `413` this way has deleted the item.
+Send no body on requests that take none (`GET`, `DELETE`). The service does not read such a body. If its `Content-Length` is over 64 KiB, the request is still handled, but its answer, whatever it was (success, `401`, `403`, `404`), is replaced by `413`. A `413` on such a request therefore does not tell whether it succeeded: a `DELETE` may already have deleted the item. Repeat the request without a body to learn the outcome.
 
 ---
 
