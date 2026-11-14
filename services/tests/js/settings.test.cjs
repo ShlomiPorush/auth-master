@@ -90,3 +90,53 @@ test("a conflict keeps the draft and its base until the admin chooses", async ()
     assert.equal(s.baseSnap.version, 0);
     assert.equal(s.draft.maxReq, "5");
 });
+
+// The Settings page drawn into a stand-in for its container, with the proxy setting
+// the server reported
+function drawWithProxy(value) {
+    const body = { innerHTML: "" };
+    const page = { ...PAGE, getElementById: (id) => (id === "settings-body" ? body : null) };
+    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: page });
+    const s = ctx.dashSet;
+    s.snap = s.baseSnap = snap(0, 120);
+    s.snap.proxyNetwork = { envName: "FORWARDED_ALLOW_IPS", value: value };
+    s.draft = { maxReq: "120", windowSeconds: "60", exempt: "" };
+    ctx.dashSettingsDrawForm();
+    return body.innerHTML;
+}
+
+const WARNING = 'id="set-exempt-warn"';
+
+test("a loopback-only FORWARDED_ALLOW_IPS keeps the proxy hint and the exempt warning", () => {
+    // The bundled compose file passes uvicorn's default when the variable is not set
+    for (const value of ["127.0.0.1,::1", "::1, 127.0.0.1", " 127.0.0.1", "::1", "127.0.0.1,,::1"]) {
+        const html = drawWithProxy(value);
+        assert.ok(html.includes("loopback addresses only"), value);
+        assert.ok(html.includes("set it to the proxy's address or network"), value);
+        assert.ok(html.includes(WARNING), value);
+    }
+});
+
+test("a proxy address hides the exempt warning; unset, empty and * keep their messages", () => {
+    const proxy = drawWithProxy("172.18.0.0/16");
+    assert.ok(proxy.includes("<code>172.18.0.0/16</code>"));
+    assert.ok(!proxy.includes("loopback addresses only"));
+    assert.ok(!proxy.includes(WARNING));
+
+    const mixed = drawWithProxy("127.0.0.1,172.18.0.5");
+    assert.ok(!mixed.includes("loopback addresses only"));
+    assert.ok(!mixed.includes(WARNING));
+
+    const star = drawWithProxy("*");
+    assert.ok(star.includes("<code>*</code>"));
+    assert.ok(!star.includes("loopback addresses only"));
+    assert.ok(!star.includes(WARNING));
+
+    const unset = drawWithProxy(null);
+    assert.ok(unset.includes("is not set"));
+    assert.ok(unset.includes(WARNING));
+
+    const empty = drawWithProxy("");
+    assert.ok(empty.includes("to an empty value"));
+    assert.ok(empty.includes(WARNING));
+});
