@@ -5,8 +5,27 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from app.db import UniqueViolationError
+
 if TYPE_CHECKING:
     from app.db import Database
+
+# At most one admin completes MFA enrollment: bootstrap creates the only admin, and this
+# index makes concurrent or stale enrollments fail instead of creating a second one.
+_ONE_ENABLED_ADMIN_MSG = (
+    "The admin_users table has more than one admin with MFA enabled, which this version "
+    "does not allow (index admin_users_one_enabled). Delete the admin rows that should not "
+    "exist, together with any API keys they created, then start the service again."
+)
+
+
+async def _ensure_one_enabled_admin_index(db: "Database", where: str) -> None:
+    try:
+        await db.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS admin_users_one_enabled ON admin_users (totp_enabled) WHERE {where}"
+        )
+    except UniqueViolationError as e:
+        raise RuntimeError(_ONE_ENABLED_ADMIN_MSG) from e
 
 
 async def _sqlite_add_column_if_not_exists(db: "Database", table: str, column: str, col_type: str, default: str) -> None:
@@ -37,6 +56,7 @@ async def _ensure_pg(db: "Database") -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
+    await _ensure_one_enabled_admin_index(db, "totp_enabled")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS tokens (
@@ -133,6 +153,7 @@ async def _ensure_sqlite(db: "Database") -> None:
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
+    await _ensure_one_enabled_admin_index(db, "totp_enabled = 1")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS tokens (

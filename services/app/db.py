@@ -109,6 +109,14 @@ class Database:
     async def fetch(self, sql: str, *args: Any) -> list[Row]:
         raise NotImplementedError
 
+    async def fetchval_write(self, sql: str, *args: Any) -> Any:
+        """Run one write with RETURNING as its own committed transaction.
+
+        Returns the first column of the first returned row, or None when no row matched.
+        A UNIQUE violation raises UniqueViolationError and changes nothing.
+        """
+        raise NotImplementedError
+
     async def close(self) -> None:
         raise NotImplementedError
 
@@ -144,6 +152,15 @@ class PgDatabase(Database):
         async with self._pool.acquire() as conn:
             recs = await conn.fetch(sql, *args)
         return [Row(dict(r)) for r in recs]
+
+    async def fetchval_write(self, sql: str, *args: Any) -> Any:
+        import asyncpg as _asyncpg
+        # A single statement outside a transaction is autocommit.
+        async with self._pool.acquire() as conn:
+            try:
+                return await conn.fetchval(sql, *args)
+            except _asyncpg.UniqueViolationError as e:
+                raise UniqueViolationError(str(e)) from e
 
     async def close(self) -> None:
         await self._pool.close()
@@ -219,6 +236,35 @@ class SqliteDatabase(Database):
         rows = await cursor.fetchall()
         cols = [d[0] for d in cursor.description]
         return [Row(zip(cols, r)) for r in rows]
+
+    async def fetchval_write(self, sql: str, *args: Any) -> Any:
+        """Runs on its own connection in autocommit mode, not on the shared request connection.
+
+        On the shared connection an open RETURNING statement makes any other request's
+        commit fail ("SQL statements in progress"), and a failed statement leaves other
+        requests' pending writes in an open transaction.  In autocommit mode
+        (``isolation_level=None``) the statement is its own transaction: committed when it
+        completes, or not at all.  ``timeout`` is how long it waits for another
+        connection's write lock.
+        """
+        import aiosqlite  # type: ignore[import-untyped]
+
+        sql, args = _pg_to_sqlite(sql, args)
+        conn = await aiosqlite.connect(
+            getattr(self, "path", ""), isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC
+        )
+        try:
+            try:
+                cursor = await conn.execute(sql, args)
+                row = await cursor.fetchone()
+                await cursor.close()
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE" in str(e).upper():
+                    raise UniqueViolationError(str(e)) from e
+                raise
+        finally:
+            await conn.close()
+        return None if row is None else row[0]
 
     async def close(self) -> None:
         await self._conn.close()

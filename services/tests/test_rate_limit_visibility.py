@@ -19,6 +19,7 @@ import os
 import secrets
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -250,14 +251,25 @@ def client(monkeypatch):
     rate_limit.reset_state(rate_limit.Limits(0, 2, 60_000))
     with TestClient(main_mod.app) as c:
         c.fake_redis = fake
-        yield c
+        # A full session counts only for an existing admin with MFA enabled.
+        c.admin_id = str(uuid.uuid4())
+        db = main_mod.app.state.db
+        c.portal.call(
+            db.execute,
+            "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+            c.admin_id, "rl-admin", "unused", True,
+        )
+        try:
+            yield c
+        finally:
+            c.portal.call(db.execute, "DELETE FROM admin_users WHERE id = $1", c.admin_id)
     rate_limit.reset_state()
 
 
 def _session(client, kind: str) -> None:
     _, _, COOKIE_NAME, PREFIX = _app()
     sid = secrets.token_hex(32)
-    client.fake_redis.data[PREFIX + sid] = json.dumps({"kind": kind, "user_id": "u", "csrf": secrets.token_hex(24)})
+    client.fake_redis.data[PREFIX + sid] = json.dumps({"kind": kind, "adminId": client.admin_id, "csrf": secrets.token_hex(24)})
     client.cookies.set(COOKIE_NAME, sid)
 
 

@@ -96,8 +96,8 @@ def client(monkeypatch):
         # The hash is never checked: the session below is created directly.
         c.portal.call(
             db.execute,
-            "INSERT INTO admin_users (id, username, password_hash) VALUES ($1, $2, $3)",
-            admin_id, "tz-admin", "unused",
+            "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+            admin_id, "tz-admin", "unused", True,
         )
         sid = secrets.token_hex(32)
         fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": admin_id, "csrf": secrets.token_hex(24)})
