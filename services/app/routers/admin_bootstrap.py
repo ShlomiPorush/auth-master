@@ -14,10 +14,13 @@ from app.sessions import (
     SETUP_TTL,
     SESSION_TTL,
     clear_sid_cookie,
+    delete_pending_totp,
     delete_session,
+    get_pending_totp,
     get_session,
     new_csrf,
     new_sid,
+    save_pending_totp,
     save_session,
     set_sid_cookie,
 )
@@ -28,13 +31,6 @@ PASSWORD_TOO_LONG = (
     "Password: use at most 72 bytes. Letters outside English, such as Hebrew, "
     "and emoji take 2 to 4 bytes each"
 )
-
-PENDING_PREFIX = "auth:totp_pending:"
-
-
-def pending_key(admin_id: str) -> str:
-    return PENDING_PREFIX + admin_id
-
 
 async def has_completed_admin(db) -> bool:
     v = await db.fetchval("SELECT 1 FROM admin_users WHERE totp_enabled = $1 LIMIT 1", True)
@@ -100,7 +96,7 @@ async def bootstrap_register(
             body.username.strip(), pw_hash,
         )
     aid = str(admin_id)
-    await r.setex(pending_key(aid), SETUP_TTL, secret)
+    await save_pending_totp(r, aid, secret, SETUP_TTL)
 
     sid = new_sid()
     csrf = new_csrf()
@@ -119,7 +115,7 @@ async def mfa_enroll(request: Request):
     sess = await get_session(r, sid)
     if not sess or sess.get("kind") != "setup":
         raise HTTPException(401, "Invalid session")
-    secret = await r.get(pending_key(sess["adminId"]))
+    secret = await get_pending_totp(r, sess["adminId"])
     if not secret:
         raise HTTPException(400, "Enrollment expired; restart bootstrap")
     username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
@@ -152,7 +148,7 @@ async def mfa_verify(request: Request, response: Response, body: MfaVerifyBody, 
         raise HTTPException(401, "Invalid session")
     if not x_csrf_token or x_csrf_token != sess.get("csrf"):
         raise HTTPException(403, "CSRF")
-    secret = await r.get(pending_key(sess["adminId"]))
+    secret = await get_pending_totp(r, sess["adminId"])
     if not secret:
         raise HTTPException(400, "Enrollment expired")
     totp = pyotp.TOTP(secret)
@@ -163,7 +159,7 @@ async def mfa_verify(request: Request, response: Response, body: MfaVerifyBody, 
         "UPDATE admin_users SET totp_secret_enc = $1, totp_enabled = $2 WHERE id = $3",
         enc, True, sess["adminId"],
     )
-    await r.delete(pending_key(sess["adminId"]))
+    await delete_pending_totp(r, sess["adminId"])
     await delete_session(r, sid)
     new_sid_v = new_sid()
     csrf = new_csrf()
