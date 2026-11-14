@@ -2020,7 +2020,7 @@ function dashLimitHtml() {
     if (stale) stale += " The counts below are from " + uiTime(new Date(dashLimit.at).toISOString()) + ".";
     var seconds = d.windowMs / 1000;
     var rule = "Limit: " + esc(uiCountLabel(d.limit, "request", "requests")) + " per " +
-        esc(seconds === 60 ? "minute" : uiCountLabel(seconds, "second", "seconds")) + " from one address.";
+        esc(seconds === 60 ? "minute" : uiCountLabel(seconds, "second", "seconds")) + " from one address, or from one /64 network for IPv6.";
     var since = "Counted by this server process since " + uiTime(d.since) + "; a restart resets the count.";
     var lines = stale ? [stale] : [];
     if (!d.rejectedTotal) {
@@ -2610,11 +2610,13 @@ function dashSettingsDrawForm() {
           esc(proxy.value) + "</code>. uvicorn takes the caller's address from <code>X-Forwarded-For</code> on connections from these addresses, " +
           "unless its start command sets another value.</span></p>"
         : "";
+    // Shown whether the field is locked or not.
+    var maxScope = "An IPv6 /64 network counts as one address.";
     var maxField = f.maxReq.locked
-        ? dashSetLocked(f.maxReq, uiCountLabel(f.maxReq.value, "request", "requests"))
+        ? dashSetLocked(f.maxReq, uiCountLabel(f.maxReq.value, "request", "requests")) + '<span class="ui-hint">' + maxScope + "</span>"
         : '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
           '" step="1" required value="' + esc(d.maxReq) + '" aria-describedby="set-max-hint" />' +
-          '<span class="ui-hint" id="set-max-hint">' + esc(dashSetSourceHint(f.maxReq)) + " From 1 to " + esc(uiNum(f.maxReq.max)) + ".</span>";
+          '<span class="ui-hint" id="set-max-hint">' + esc(dashSetSourceHint(f.maxReq)) + " From 1 to " + esc(uiNum(f.maxReq.max)) + ". " + maxScope + "</span>";
     var winField = f.windowMs.locked
         ? dashSetLocked(f.windowMs, uiNum(f.windowMs.value) + " ms")
         : '<input class="ui-input" id="set-window" type="number" inputmode="numeric" min="' + esc(f.windowMs.minSeconds) + '" max="' +

@@ -51,7 +51,7 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when running behind HTTPS |
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
-| `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP. Also editable on the Settings page; when this variable is set, the page shows the field locked. See [Rate limit settings](#rate-limit-settings) |
+| `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per window from one IPv4 address or one IPv6 /64 network. Also editable on the Settings page; when this variable is set, the page shows the field locked. See [Rate limit settings](#rate-limit-settings) |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute). Also editable on the Settings page, like `RATE_LIMIT_MAX_REQ` |
 | `ACCESS_LOG_RETENTION_DAYS` | `30` | Days the access log keeps token validation requests; also the longest period the Usage page can count |
 | `ACTIVITY_LOG_RETENTION_DAYS` | `30` | Days the activity log keeps admin actions |
@@ -59,7 +59,13 @@ The service refuses to start while a required secret is missing, empty, or has a
 
 ### Behind a reverse proxy
 
-The rate limit counts requests per client address, as uvicorn reports it. Behind a
+The rate limit counts requests per client address, as uvicorn reports it. An IPv6
+address counts with its whole /64 network, so all addresses in one /64 share one
+limit: a client cannot get more requests by changing addresses inside its /64, but
+a client that holds a larger block still gets one limit per /64 it uses (256 for a
+/56, 65,536 for a /48). An IPv4-mapped IPv6 address (`::ffff:192.0.2.1`) counts as
+its IPv4 address, and every client whose reported address is not an IP address
+shares one limit. Behind a
 reverse proxy such as Traefik or nginx in another container, every request arrives
 from the proxy's address, so all clients share one limit, and the access log shows
 the proxy's address for every request.

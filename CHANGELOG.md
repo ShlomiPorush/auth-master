@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Security
+
+- The `/validate` rate limit counts an IPv6 client by its /64 network, so changing
+  addresses inside one /64 no longer gets more requests. All clients in one /64
+  share one limit. A client that holds a larger block still gets one limit per /64
+  it uses: 256 for a /56, 65,536 for a /48. `::ffff:192.0.2.1` counts as
+  `192.0.2.1`, and clients whose reported address is not an IP address share one
+  limit. The Access Logs page and the `Rate limit:` log line name the /64 network.
+- The rate limit forgets an address once its window has ended, instead of keeping
+  every address it has seen until the server restarts. When the window length is
+  changed, a window that has already ended stays ended; a window in progress is
+  measured against the new length, as before.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added
