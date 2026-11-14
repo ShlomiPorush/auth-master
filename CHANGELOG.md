@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Fixed
+
+- Deleting or renaming a zone and changing a token's grants no longer undo or bypass
+  each other. On SQLite, a zone delete or rename could restore a grant that was
+  removed while it ran. On both databases, a token could keep a grant on a zone that
+  was deleted or renamed while the grant was being saved, and `/validate` kept
+  allowing it. A grant change now waits for a zone change in progress, and the other
+  way round. A grant on a zone that no longer exists is refused with
+  `Area not allowed`, or, when the last zone was deleted and `ALLOWED_AREAS` is
+  empty, with `Define at least one zone`.
+- On SQLite, a zone delete or rename that fails halfway no longer leaves the
+  tokens' grants on the old zone name. The zone and the grants change together or
+  not at all, so the change can be retried.
+- On PostgreSQL, creating a token with a value that another token already uses,
+  and renaming a zone to a name that is taken, answer 409 instead of 500.
+- Not changed: grants saved while the zones table was empty (the `ALLOWED_AREAS`
+  fallback) keep working after zones are created, and after the last zone is
+  deleted, an area named in `ALLOWED_AREAS` can be granted again. Grants that the
+  earlier behaviour left on deleted zones are not removed automatically: edit those
+  tokens on the Tokens page.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added

@@ -13,7 +13,7 @@ from app.crypto_tokens import encrypt_token_value, generate_raw_token, sha256_he
 from app.db import UniqueViolationError
 from app.deps import require_admin_api_key, require_scope
 from app.grants import assert_grants_allowed, parse_grants
-from app.zones import allowed_area_names
+from app.zones import allowed_area_names, grant_write_transaction
 from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/tokens", tags=["tokens"], dependencies=[Depends(require_admin_api_key)])
@@ -36,8 +36,7 @@ class TokenPatch(BaseModel):
     expiresAt: str | None = None
 
 
-async def _normalize_grants(request: Request, raw: list[dict[str, Any]]) -> list[dict[str, str]]:
-    db = request.app.state.db
+async def _normalize_grants(db: Any, raw: list[dict[str, Any]]) -> list[dict[str, str]]:
     allowed = await allowed_area_names(db)
     grants = parse_grants(raw)
     if not grants:
@@ -145,7 +144,7 @@ async def list_tokens(request: Request):
 @router.post("", status_code=201, dependencies=[require_scope("tokens:write")])
 async def create_token(request: Request, body: TokenCreate):
     db = request.app.state.db
-    grants = await _normalize_grants(request, body.grants)
+    grants = await _normalize_grants(db, body.grants)
     raw = body.token.strip() if body.token and body.token.strip() else generate_raw_token()
     th = sha256_hex(raw)
     exp = None
@@ -156,17 +155,19 @@ async def create_token(request: Request, body: TokenCreate):
             raise HTTPException(400, "invalid expiresAt") from e
     new_id = str(uuid_mod.uuid4())
     try:
-        if db.is_sqlite:
-            await db.execute(
-                "INSERT INTO tokens (id, name, token_hash, token_enc, grants, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
-                new_id, body.name.strip(), th, encrypt_token_value(raw), json.dumps(grants), exp,
-            )
-            rid = new_id
-        else:
-            rid = await db.fetchval(
-                "INSERT INTO tokens (name, token_hash, token_enc, grants, expires_at) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id",
-                body.name.strip(), th, encrypt_token_value(raw), json.dumps(grants), exp,
-            )
+        async with grant_write_transaction(db) as tx:
+            await _normalize_grants(tx, body.grants)  # again, now that no zone can change
+            if tx.is_sqlite:
+                await tx.execute(
+                    "INSERT INTO tokens (id, name, token_hash, token_enc, grants, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
+                    new_id, body.name.strip(), th, encrypt_token_value(raw), json.dumps(grants), exp,
+                )
+                rid = new_id
+            else:
+                rid = await tx.fetchval(
+                    "INSERT INTO tokens (name, token_hash, token_enc, grants, expires_at) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id",
+                    body.name.strip(), th, encrypt_token_value(raw), json.dumps(grants), exp,
+                )
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
 
@@ -219,7 +220,7 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
         args.append(encrypt_token_value(tv))
         n += 1
     if body.grants is not None:
-        grants_json = json.dumps(await _normalize_grants(request, body.grants))
+        grants_json = json.dumps(await _normalize_grants(db, body.grants))
         if db.is_pg:
             parts.append(f"grants = ${n}::jsonb")
         else:
@@ -246,7 +247,12 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
     args.append(token_id)
     q = f"UPDATE tokens SET {', '.join(parts)} WHERE id = ${n}"
     try:
-        await db.execute(q, *args)
+        if body.grants is None:
+            await db.execute(q, *args)
+        else:
+            async with grant_write_transaction(db) as tx:
+                await _normalize_grants(tx, body.grants)  # again, now that no zone can change
+                await tx.execute(q, *args)
     except UniqueViolationError as e:
         raise HTTPException(409, "Token already exists") from e
 
