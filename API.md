@@ -372,8 +372,15 @@ All error responses follow a consistent format:
 | `403` | Forbidden (missing required scope) |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate token or zone) |
+| `413` | The request body is larger than 64 KiB. See "Request size" below. |
 | `429` | Too many requests from one client address (one /64 network for IPv6) on `/validate` or `/validate/grants`, or more than 10 dashboard sign-in attempts (`/admin/api/login`) from one address (one /64 for IPv6) in 15 minutes. The `Retry-After` header gives the whole seconds until the caller's window ends. |
 | `503` | Dashboard sign-in or first-run registration waited more than 10 seconds for a password check. Retry after the seconds in `Retry-After`. |
+
+### Request size
+
+Request bodies are limited to 64 KiB (65,536 bytes). A larger body is not processed: the answer is `413 Content Too Large` and the request is not carried out. The answer is plain text `Content Too Large` when the `Content-Length` header gives the size, or `{"detail": "Content Too Large"}` when the body is sent without one (chunked) and passes the limit while it arrives.
+
+Send no body on requests that take none (`GET`, `DELETE`). The service does not read such a body. If its `Content-Length` is over 64 KiB, the request is still handled, but its answer, whatever it was (success, `401`, `403`, `404`), is replaced by `413`. A `413` on such a request therefore does not tell whether it succeeded: a `DELETE` may already have deleted the item. Repeat the request without a body to learn the outcome.
 
 ---
 
