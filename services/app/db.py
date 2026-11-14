@@ -11,6 +11,7 @@ When running on SQLite the driver transparently rewrites them to ``?``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -150,9 +151,14 @@ class PgDatabase(Database):
 
     @asynccontextmanager
     async def transaction(self):
-        """Provide a connection-level transaction context."""
+        """Provide a connection-level transaction context.
+
+        READ COMMITTED is stated, not left to the server's default_transaction_isolation:
+        each statement then sees the rows committed before it started, which the zone and
+        grant writes rely on (see write_transaction).
+        """
         async with self._pool.acquire() as conn:
-            async with conn.transaction():
+            async with conn.transaction(isolation="read_committed"):
                 yield _PgConn(conn)
 
 
@@ -165,18 +171,25 @@ class _PgConn:
     def __init__(self, conn: Any):
         self._conn = conn
 
+    async def _run(self, method: Any, sql: str, *args: Any) -> Any:
+        import asyncpg as _asyncpg
+        try:
+            return await method(sql, *args)
+        except _asyncpg.UniqueViolationError as e:
+            raise UniqueViolationError(str(e)) from e
+
     async def execute(self, sql: str, *args: Any) -> None:
-        await self._conn.execute(sql, *args)
+        await self._run(self._conn.execute, sql, *args)
 
     async def fetchrow(self, sql: str, *args: Any) -> Row | None:
-        rec = await self._conn.fetchrow(sql, *args)
+        rec = await self._run(self._conn.fetchrow, sql, *args)
         return Row(dict(rec)) if rec else None
 
     async def fetchval(self, sql: str, *args: Any) -> Any:
-        return await self._conn.fetchval(sql, *args)
+        return await self._run(self._conn.fetchval, sql, *args)
 
     async def fetch(self, sql: str, *args: Any) -> list[Row]:
-        recs = await self._conn.fetch(sql, *args)
+        recs = await self._run(self._conn.fetch, sql, *args)
         return [Row(dict(r)) for r in recs]
 
 
@@ -239,6 +252,9 @@ class SqliteDatabase(Database):
 class _SqliteConn:
     """Thin wrapper for SQLite inside a transaction."""
 
+    is_pg = False
+    is_sqlite = True
+
     def __init__(self, conn: Any):
         self._conn = conn
 
@@ -284,7 +300,11 @@ async def create_database(url: str) -> Database:
         # sqlite:///path or sqlite:////abs/path
         path = url.split("///", 1)[-1] if "///" in url else "auth.db"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        conn = await aiosqlite.connect(path)
+        # Autocommit mode: every statement is its own transaction.  In sqlite3's default
+        # mode a failed write (such as a UNIQUE violation) leaves an implicit transaction
+        # open, and its write lock blocks every other connection (write_transaction,
+        # settings) until some later write on this connection commits it.
+        conn = await aiosqlite.connect(path, isolation_level=None)
         conn.row_factory = None  # we handle row mapping ourselves
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
@@ -326,6 +346,52 @@ async def open_settings_database(main: Database) -> tuple[Database, bool]:
     conn = await aiosqlite.connect(path, isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC)
     conn.row_factory = None
     return SqliteDatabase(conn), True
+
+
+@asynccontextmanager
+async def write_transaction(main: Database):
+    """One write transaction that no other write can interleave with; yields its handle.
+
+    Used where a check and the writes that depend on it must be atomic, such as a zone
+    change with the rewrite of the grants that name the zone, or a grant write with the
+    check that its zones exist.  Do not call the main handle (or log_activity) inside it:
+    on SQLite that statement would wait for this transaction's lock; on PostgreSQL it
+    needs a second pool connection.
+
+    SQLite: a separate connection to the same file, opened for this transaction and closed
+    after it, in BEGIN IMMEDIATE ... COMMIT.  BEGIN IMMEDIATE takes the database's single
+    write lock before the first read, so the transaction reads the latest committed rows
+    and no other connection writes until it ends; ``timeout`` is how long it waits for
+    that lock.  It is never opened on the shared request connection, whose statements from
+    other requests would then run, and commit or roll back, inside it.  Any exception,
+    including cancellation, rolls back every statement of the transaction.
+    PostgreSQL: one pooled connection in a READ COMMITTED transaction (PgDatabase.transaction).
+    """
+    if not main.is_sqlite:
+        async with main.transaction() as conn:  # type: ignore[attr-defined]
+            yield conn
+        return
+    import aiosqlite  # type: ignore[import-untyped]
+
+    path = getattr(main, "path", "")
+    if path in ("", ":memory:") or path.startswith("file::memory:"):
+        raise RuntimeError("write_transaction needs a SQLite database file, not an in-memory database")
+    conn = await aiosqlite.connect(path, isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC)
+    conn.row_factory = None
+    try:
+        await conn.execute("PRAGMA foreign_keys=ON")
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield _SqliteConn(conn)
+        except BaseException:
+            # SQLite may already have rolled back (for example on SQLITE_FULL); closing
+            # the connection below rolls back anything still open, so keep the first error.
+            with contextlib.suppress(sqlite3.Error):
+                await conn.execute("ROLLBACK")
+            raise
+        await conn.execute("COMMIT")
+    finally:
+        await conn.close()
 
 
 @asynccontextmanager
