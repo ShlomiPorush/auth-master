@@ -59,6 +59,7 @@ import app.main as main_mod  # noqa: E402
 from app import totp_guard  # noqa: E402
 from app.crypto_tokens import encrypt_token_value, sha256_hex  # noqa: E402
 from app.crypto_totp import encrypt_totp_secret  # noqa: E402
+from app.sessions import session_record  # noqa: E402
 
 # 5 s into a 30 s step, so a request never straddles a step boundary by accident.
 T0 = 1_900_000_005.0
@@ -210,6 +211,11 @@ async def _wipe(db):
 
 def _db(c, fn, *args):
     return c.portal.call(fn, main_mod.app.state.db, *args)
+
+
+def _sess_key(sid):
+    # The Redis key name the app stores this session under.
+    return session_record(sid, {})[0]
 
 
 class Admin:
@@ -420,6 +426,7 @@ def test_lockout_after_five_wrong_codes(ctx):
     for _ in range(totp_guard.MAX_ATTEMPTS - 1):
         r = _mfa(ctx, sid, csrf, _wrong(admin, ctx))
         assert r.status_code == 400 and r.json()["detail"] == "Invalid code"
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is not None
 
     r = _mfa(ctx, sid, csrf, _wrong(admin, ctx))
     assert r.status_code == 429
@@ -427,7 +434,7 @@ def test_lockout_after_five_wrong_codes(ctx):
     assert r.json()["detail"] == "Too many incorrect codes. Sign in again in 15 minutes."
     cleared = [h for h in r.headers.get_list("set-cookie") if h.startswith("auth_sid=")]
     assert cleared and ("Max-Age=0" in cleared[0] or 'auth_sid=""' in cleared[0])
-    assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is None
 
     # The ended sign-in is gone.
     assert _mfa(ctx, sid, csrf, _code(admin, ctx)).status_code == 401
@@ -449,6 +456,7 @@ def test_code_that_is_not_valid_unicode_counts_as_wrong(ctx):
     sid, csrf, _ = _login(ctx, admin)
     for _ in range(totp_guard.MAX_ATTEMPTS - 1):
         assert _mfa(ctx, sid, csrf, _wrong(admin, ctx)).status_code == 400
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is not None
     _use(ctx, sid)
     # A lone surrogate as the fifth try still ends in the lockout.
     r = ctx.post(
@@ -457,7 +465,7 @@ def test_code_that_is_not_valid_unicode_counts_as_wrong(ctx):
         headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
     )
     assert r.status_code == 429
-    assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is None
     assert _actions(ctx, admin)[-2:] == [
         ("mfa_failed", {"where": "login", "reason": "invalid"}),
         ("mfa_locked", {"where": "login", "seconds": totp_guard.ATTEMPT_WINDOW}),
@@ -473,13 +481,14 @@ def test_lockout_ends_the_sign_in_even_if_the_log_write_fails(ctx, monkeypatch):
     async def broken_log(*_a, **_k):
         raise RuntimeError("activity log unavailable")
 
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is not None
     monkeypatch.setattr(totp_guard, "log_activity", broken_log)
     r = _mfa(ctx, sid, csrf, _wrong(admin, ctx))
     assert r.status_code == 429
     assert r.headers["Retry-After"] == str(totp_guard.ATTEMPT_WINDOW)
     cleared = [h for h in r.headers.get_list("set-cookie") if h.startswith("auth_sid=")]
     assert cleared and ("Max-Age=0" in cleared[0] or 'auth_sid=""' in cleared[0])
-    assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
+    assert ctx.fake_redis.data.get(_sess_key(sid)) is None
 
 
 @pytest.mark.parametrize("kind", ["token", "api_key"])
@@ -503,7 +512,7 @@ def test_reveal_lockout_answers_429_even_if_the_log_write_fails(ctx, monkeypatch
     assert r.status_code == 429
     assert r.headers["Retry-After"] == str(totp_guard.ATTEMPT_WINDOW)
     # The full session stays.
-    assert ctx.fake_redis.data.get("auth:sess:" + full[0]) is not None
+    assert ctx.fake_redis.data.get(_sess_key(full[0])) is not None
 
 
 def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
@@ -535,7 +544,7 @@ def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
     r = _reveal_key(ctx, full, kid, _wrong(admin, ctx))
     assert r.status_code == 429
     assert r.json()["detail"] == "Too many incorrect codes. Try again in 15 minutes."
-    assert ctx.fake_redis.data.get("auth:sess:" + full[0]) is not None
+    assert ctx.fake_redis.data.get(_sess_key(full[0])) is not None
     _use(ctx, full[0])
     assert ctx.get("/admin/api/me").json()["user"]["username"] == admin.username
     # ... and login for that admin is locked as well.
@@ -569,7 +578,7 @@ def test_partial_session_lasts_five_minutes(ctx):
     sid, _, r = _login(ctx, admin)
     cookie = [h for h in r.headers.get_list("set-cookie") if h.startswith("auth_sid=")][0]
     assert "Max-Age=300" in cookie
-    assert ctx.fake_redis.exp["auth:sess:" + sid] == ctx.clock() + 300
+    assert ctx.fake_redis.exp[_sess_key(sid)] == ctx.clock() + 300
 
 
 def test_refused_requests_do_not_use_attempts_or_codes(ctx):

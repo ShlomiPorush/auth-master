@@ -97,11 +97,78 @@ class FakeRedis:
             self.data.pop(k, None)
             self.ttl.pop(k, None)
 
+    # What the TOTP guard uses (app/totp_guard.py): SET NX EX, EXPIRE, and a
+    # MULTI pipeline of SET NX EX, INCR and TTL. Nothing expires in this fake.
+    def _set(self, k, v, nx=False, ex=None):
+        if nx and k in self.data:
+            return None
+        self.data[k] = str(v)
+        self.ttl.pop(k, None)
+        if ex is not None:
+            self.ttl[k] = ex
+        return True
+
+    def _incr(self, k):
+        n = int(self.data.get(k, 0)) + 1
+        self.data[k] = str(n)
+        return n
+
+    def _ttl(self, k):
+        if k not in self.data:
+            return -2
+        return self.ttl.get(k, -1)
+
+    async def set(self, k, v, nx=False, ex=None):
+        if self.fail_with:
+            raise self.fail_with
+        return self._set(k, v, nx=nx, ex=ex)
+
+    async def expire(self, k, seconds):
+        if k in self.data:
+            self.ttl[k] = seconds
+
+    def pipeline(self, transaction=True):
+        assert transaction
+        return FakePipeline(self)
+
     async def ping(self):
         return True
 
     async def aclose(self):
         pass
+
+
+class FakePipeline:
+    """Queues commands until execute() and runs them together, like MULTI/EXEC."""
+
+    def __init__(self, redis: FakeRedis) -> None:
+        self.redis = redis
+        self.ops: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.ops.clear()
+
+    def set(self, k, v, nx=False, ex=None):
+        self.ops.append(lambda: self.redis._set(k, v, nx=nx, ex=ex))
+        return self
+
+    def incr(self, k):
+        self.ops.append(lambda: self.redis._incr(k))
+        return self
+
+    def ttl(self, k):
+        self.ops.append(lambda: self.redis._ttl(k))
+        return self
+
+    async def execute(self):
+        if self.redis.fail_with:
+            raise self.redis.fail_with
+        out = [op() for op in self.ops]
+        self.ops.clear()
+        return out
 
 
 def _fresh_secret() -> str:
