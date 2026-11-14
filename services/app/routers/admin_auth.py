@@ -149,7 +149,9 @@ async def me(request: Request):
     sess = await get_session(r, sid)
     if not sess or sess.get("kind") != "full":
         return {"user": None}
-    username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
+    username = await db.fetchval(
+        "SELECT username FROM admin_users WHERE id = $1 AND totp_enabled = $2", sess["adminId"], True
+    )
     if not username:
         return {"user": None}
     areas = await allowed_area_names(db)

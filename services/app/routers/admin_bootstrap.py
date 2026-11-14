@@ -159,10 +159,22 @@ async def mfa_verify(request: Request, response: Response, body: MfaVerifyBody, 
     if not totp.verify(body.code.replace(" ", ""), valid_window=1):
         raise HTTPException(400, "Invalid code")
     enc = encrypt_totp_secret(secret)
-    await db.execute(
-        "UPDATE admin_users SET totp_secret_enc = $1, totp_enabled = $2 WHERE id = $3",
-        enc, True, sess["adminId"],
-    )
+    # Completes only an admin that still exists and has not enrolled yet; the
+    # admin_users_one_enabled index refuses a second enabled admin.  The UPDATE's own
+    # result decides, so a stale setup session (its row deleted by a later register) or
+    # a concurrent enrollment cannot get a full session.
+    try:
+        done = await db.fetchval_write(
+            "UPDATE admin_users SET totp_secret_enc = $1, totp_enabled = $2 "
+            "WHERE id = $3 AND totp_enabled = $4 RETURNING id",
+            enc, True, sess["adminId"], False,
+        )
+    except UniqueViolationError:
+        done = None
+    if done is None:
+        await r.delete(pending_key(sess["adminId"]))
+        await delete_session(r, sid)
+        raise HTTPException(403, "Bootstrap already completed")
     await r.delete(pending_key(sess["adminId"]))
     await delete_session(r, sid)
     new_sid_v = new_sid()

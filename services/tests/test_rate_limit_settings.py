@@ -429,6 +429,12 @@ def admin(monkeypatch, tmp_path):
     create_database = db_mod.create_database
     monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(url))
     with TestClient(ProxyHeadersMiddleware(main_mod.app, trusted_hosts="*")) as c:
+        # A full session counts only for an existing admin with MFA enabled.
+        c.portal.call(
+            main_mod.app.state.db.execute,
+            "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+            "00000000-0000-0000-0000-000000000001", "settings-admin", "unused", True,
+        )
         a = Admin(c, fake)
         a.url = url
         yield a

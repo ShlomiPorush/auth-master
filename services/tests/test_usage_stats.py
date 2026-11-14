@@ -141,14 +141,22 @@ def env(monkeypatch):
         e = Env(c, db, fake)
         e.run(db.execute, "DELETE FROM access_logs")
         e.run(db.execute, "DELETE FROM tokens")
+        # A full session counts only for an existing admin with MFA enabled.
+        admin_id = str(uuid.uuid4())
+        e.run(
+            db.execute,
+            "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+            admin_id, "usage-admin-" + secrets.token_hex(4), "unused", True,
+        )
         sid = secrets.token_hex(32)
-        fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": str(uuid.uuid4()), "csrf": secrets.token_hex(24)})
+        fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": admin_id, "csrf": secrets.token_hex(24)})
         c.cookies.set(COOKIE_NAME, sid)
         try:
             yield e
         finally:
             e.run(db.execute, "DELETE FROM access_logs")
             e.run(db.execute, "DELETE FROM tokens")
+            e.run(db.execute, "DELETE FROM admin_users WHERE id = $1", admin_id)
 
 
 def _row(body, name):
