@@ -84,11 +84,50 @@ class FakeRedis:
     async def delete(self, k):
         self.data.pop(k, None)
 
+    async def expire(self, k, _ttl):
+        return k in self.data
+
     async def ping(self):
         return True
 
     async def aclose(self):
         pass
+
+    def pipeline(self, transaction=True):
+        return _FakePipeline(self)
+
+
+class _FakePipeline:
+    """The sign-in attempt counter's transaction (SET NX, INCR, TTL); expiry is not modelled."""
+
+    def __init__(self, fake: FakeRedis) -> None:
+        self.fake = fake
+        self.ops: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def set(self, k, v, ex=None, nx=False):
+        self.ops.append(lambda: None if nx and k in self.fake.data else self.fake.data.__setitem__(k, str(v)) or True)
+        return self
+
+    def incr(self, k):
+        def op():
+            self.fake.data[k] = str(int(self.fake.data.get(k, "0")) + 1)
+            return int(self.fake.data[k])
+
+        self.ops.append(op)
+        return self
+
+    def ttl(self, _k):
+        self.ops.append(lambda: 60)
+        return self
+
+    async def execute(self, raise_on_error=True):
+        return [op() for op in self.ops]
 
 
 @pytest.fixture()
