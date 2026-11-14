@@ -11,6 +11,8 @@ COOKIE_NAME = "auth_sid"
 PREFIX = "auth:sess:"
 SETUP_TTL = 15 * 60
 SESSION_TTL = 12 * 60 * 60
+# Between the password and the TOTP code.
+PARTIAL_TTL = 5 * 60
 
 SessionKind = Literal["setup", "partial", "full"]
 

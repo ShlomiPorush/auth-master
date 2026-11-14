@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Security
+
+- Authenticator codes are limited to 5 tries per admin in 15 minutes, counted
+  together for sign-in, token reveal and API key copy. After the fifth wrong code the
+  service answers `429` with `Retry-After` until the 15 minutes from the first try
+  have passed, also for a correct code; at sign-in the started sign-in ends and the
+  password is needed again. Each wrong code is written to the activity log as
+  `mfa_failed`, and the lockout as `mfa_locked`.
+- Each authenticator code is accepted only once. A reveal or copy right after
+  signing in, or two in a row, needs the next code, which can take up to 30 seconds.
+- After the password, the authenticator code must be entered within 5 minutes
+  (was 12 hours).
+
 ## [2.0.1] - 2026-11-13
 
 ### Added

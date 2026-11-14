@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from app.config import get_settings
 from app.crypto_totp import encrypt_totp_secret
 from app.db import UniqueViolationError
+from app.totp_guard import check_totp_code, totp_error
 from app.sessions import (
     COOKIE_NAME,
     SETUP_TTL,
@@ -155,9 +156,10 @@ async def mfa_verify(request: Request, response: Response, body: MfaVerifyBody, 
     secret = await r.get(pending_key(sess["adminId"]))
     if not secret:
         raise HTTPException(400, "Enrollment expired")
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(body.code.replace(" ", ""), valid_window=1):
-        raise HTTPException(400, "Invalid code")
+    # Recorded as used, so the enrollment code cannot also sign in or reveal
+    check = await check_totp_code(r, sess["adminId"], secret, body.code.replace(" ", ""), count_attempt=False)
+    if not check.ok:
+        raise totp_error(check, at_login=False)
     enc = encrypt_totp_secret(secret)
     await db.execute(
         "UPDATE admin_users SET totp_secret_enc = $1, totp_enabled = $2 WHERE id = $3",

@@ -7,13 +7,13 @@ from app.datetime_utils import fmt_datetime, is_expired
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
-import pyotp
 
 from app.admin_deps import FullSession, csrf_check
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, generate_raw_token, sha256_hex
 from app.crypto_totp import decrypt_totp_secret
 from app.db import UniqueViolationError
 from app.grants import assert_grants_allowed, parse_grants
+from app.totp_guard import check_totp_code, log_totp_failure, totp_error
 from app.zones import allowed_area_names
 from app.logger import log_activity, get_actor
 
@@ -299,9 +299,10 @@ async def admin_reveal_token(
         secret = decrypt_totp_secret(admin_row["totp_secret_enc"])
     except Exception as e:
         raise HTTPException(500, "decrypt failed") from e
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(body.code.replace(" ", ""), valid_window=1):
-        raise HTTPException(400, "Invalid code")
+    check = await check_totp_code(request.app.state.redis, admin_id, secret, body.code.replace(" ", ""))
+    if not check.ok:
+        await log_totp_failure(request, admin_id, "token_reveal", check)
+        raise totp_error(check, at_login=False)
     try:
         token_value = decrypt_token_value(token_enc)
     except Exception as e:
