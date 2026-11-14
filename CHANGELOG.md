@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first-admin setup that is in progress during the upgrade must start again.
   From now on, changing `SESSION_SECRET` also signs every admin out. Give every
   installation its own `SESSION_SECRET`.
+- `/validate` (POST and GET) takes an `area` of at most 255 characters, counted
+  before surrounding spaces are trimmed. A longer `area` gets `422` and is not
+  written to the access log. Before, a single anonymous call could store an area
+  of any size. The access log also keeps at most 255 characters of any area.
+  Zone names are at most 63 characters, so no zone is affected. An `ALLOWED_AREAS`
+  entry longer than 255 characters can no longer be validated, and neither can the
+  grants already stored for it, even after zones were added to the table.
+- `/validate` answers an `area` that is not valid Unicode text, such as a lone
+  `\ud800` escape in a JSON body, with `422` instead of `{"result": false}`.
+- The request log in the container output no longer shows the token of a
+  `GET /validate?token=...` call: the query string of `/validate` is shown as
+  `[redacted]`. API.md now recommends `POST /validate`, which sends the token in the
+  request body. Logs written before this version can still hold tokens sent with
+  `GET`: rotate those tokens if other people can read those logs.
 
 ### Added
 
@@ -52,18 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Settings page keeps the reverse proxy hint and the warning about exempt
   addresses when `FORWARDED_ALLOW_IPS` lists only loopback addresses, as the
   compose default does, since no proxy at another address is trusted then.
-
-### Security
-
-- `/validate` (POST and GET) takes an `area` of at most 255 characters, counted
-  before surrounding spaces are trimmed. A longer `area` gets `422` and is not
-  written to the access log. Before, a single anonymous call could store an area
-  of any size. The access log also keeps at most 255 characters of any area.
-  Zone names are at most 63 characters, so no zone is affected. An `ALLOWED_AREAS`
-  entry longer than 255 characters can no longer be validated, and neither can the
-  grants already stored for it, even after zones were added to the table.
-- `/validate` answers an `area` that is not valid Unicode text, such as a lone
-  `\ud800` escape in a JSON body, with `422` instead of `{"result": false}`.
 
 ## [2.0.1] - 2026-11-13
 

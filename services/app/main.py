@@ -19,6 +19,9 @@ from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_token
 from app.schema import ensure_database_schema
 from app import rate_limit_settings
 from app.logger import purge_old_logs
+from app import request_log
+
+request_log.install()
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
 # The only stylesheets and scripts served from /css and /js.
