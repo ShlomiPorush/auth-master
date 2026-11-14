@@ -119,6 +119,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with MFA enabled, which only the flaw above could cause, the service does not
   start and says so. Delete the admin row that should not exist, and any API keys
   it created, then start the service again.
+- Zone names are now unique regardless of case. Creating or renaming a zone to a
+  name that differs from another zone's only in case (`billing` next to `BILLING`)
+  is refused with 409, on the Zones page and on `POST /tokens/zones`. Before, such
+  zones could both exist, and because `/validate` compares areas regardless of case,
+  a token for one of them passed for the other.
+- Renaming or deleting a zone now also updates the grants whose area differs from
+  the zone name only in case or surrounding spaces, the way `/validate` compares
+  them. Before, such a grant stayed behind after the zone was deleted and kept
+  passing `/validate`.
 
 ### Added
 
@@ -134,6 +143,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reach it from other machines only through an HTTPS reverse proxy, do not expose port
   8080 to networks you do not trust, and set `COOKIE_SECURE=true` behind HTTPS.
   API.md gives the proxy's `https://` address as the base URL.
+
+### Changed
+
+- Token grants accept an area in any case and store it with the zone's exact name.
+  Naming one zone twice in a request, in different cases, is refused with 400.
+- A zone rename is refused with 409 when a token holds the zone in more than one
+  spelling (possible with grants saved from an `ALLOWED_AREAS` list that names the
+  zone twice): after the rename the token would hold the new name twice, and
+  `/validate` reads only the first. The message names the tokens; edit them on the
+  Tokens page, where the zone's row shows a notice and the permissions of every
+  spelling, save, and rename again.
+- If zones that differ only in case already exist, the service still starts, logs a
+  warning and shows it on the Zones page. Until all but one of each group are renamed
+  or deleted, a token for one of them passes `/validate` for the others, and the
+  database index that keeps names unique regardless of case is created at the first
+  start after that. The protection is complete once every running instance is
+  updated.
+- On PostgreSQL, deleting a zone no longer removes entries without an area from the
+  grants of the tokens that held the zone.
 
 ### Fixed
 
@@ -164,6 +192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not at all, so the change can be retried.
 - On PostgreSQL, creating a token with a value that another token already uses,
   and renaming a zone to a name that is taken, answer 409 instead of 500.
+- On PostgreSQL, creating a zone with a name that is taken answers 409 instead of 500.
 - Not changed: grants saved while the zones table was empty (the `ALLOWED_AREAS`
   fallback) keep working after zones are created, and after the last zone is
   deleted, an area named in `ALLOWED_AREAS` can be granted again. Grants that the

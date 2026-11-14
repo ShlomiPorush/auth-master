@@ -763,7 +763,8 @@ def test_zone_change_during_grant_write_rewrites_the_new_grant(op, route, isolat
             try:
                 await asyncio.wait_for(pause.reached.wait(), 10)
                 change = asyncio.create_task(_zone_op(e, op, zone, "r"))
-                await _until_waiting_or_done(e, change, "DELETE FROM zones%" if op == "delete" else "UPDATE zones SET%")
+                # A zone change locks the zones table first (zone_change_transaction).
+                await _until_waiting_or_done(e, change, "LOCK TABLE zones IN SHARE ROW EXCLUSIVE MODE%")
                 assert not change.done(), f"the zone {op} did not wait for the open grant write: {change.result().text}"
                 pause.release.set()
                 resp = await asyncio.wait_for(write, 30)

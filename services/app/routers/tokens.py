@@ -11,8 +11,8 @@ from pydantic import BaseModel
 from app.crypto_tokens import encrypt_token_value, generate_raw_token, sha256_hex
 from app.db import UniqueViolationError
 from app.deps import require_admin_api_key, require_scope
-from app.grants import assert_grants_allowed, parse_grants
-from app.zones import allowed_area_names, grant_write_transaction
+from app.grants import canonical_grants, parse_grants
+from app.zones import ZONE_NAME_TAKEN, ZoneNameTaken, allowed_area_names, create_zone, grant_write_transaction
 from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/tokens", tags=["tokens"], dependencies=[Depends(require_admin_api_key)])
@@ -43,7 +43,7 @@ async def _normalize_grants(db: Any, raw: list[dict[str, Any]]) -> list[dict[str
     if not allowed:
         raise HTTPException(400, "Define at least one zone (or set ALLOWED_AREAS in env when zones table is empty)")
     try:
-        assert_grants_allowed(grants, allowed)
+        grants = canonical_grants(grants, allowed)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return grants
@@ -82,21 +82,11 @@ async def create_zone_api(request: Request, body: ZoneCreateApi):
     if not name or not _ZONE_NAME_RE.match(name):
         raise HTTPException(400, "Invalid zone name")
     db = request.app.state.db
-    new_id = str(uuid_mod.uuid4())
     desc = (body.description or "").strip()
     try:
-        if db.is_sqlite:
-            await db.execute(
-                "INSERT INTO zones (id, name, description) VALUES ($1, $2, $3)",
-                new_id, name, desc,
-            )
-        else:
-            new_id = await db.fetchval(
-                "INSERT INTO zones (name, description) VALUES ($1, $2) RETURNING id",
-                name, desc,
-            )
-    except UniqueViolationError as e:
-        raise HTTPException(409, "Zone already exists") from e
+        new_id = await create_zone(db, name, desc)
+    except ZoneNameTaken as e:
+        raise HTTPException(409, ZONE_NAME_TAKEN) from e
 
     actor = await get_actor(request)
     ip = request.client.host if request.client else "unknown"

@@ -46,15 +46,52 @@ def grant_covers(grants: list[dict[str, Any]], area: str, required: str) -> bool
     req_perms = expand_level(required)
     if not req_perms:
         return False
-    wanted_area = area.strip().lower()
+    wanted_area = fold_area(area)
     for g in grants:
-        grant_area = g.get("area")
+        a = g.get("area")
         lvl = g.get("level", "")
-        if isinstance(grant_area, str) and grant_area.strip().lower() == wanted_area:
+        if isinstance(a, str) and fold_area(a) == wanted_area:
             grant_perms = expand_level(lvl)
             if req_perms <= grant_perms:
                 return True
     return False
+
+
+def fold_area(area: str) -> str:
+    """The form in which /validate compares areas: no surrounding whitespace, lower case.
+
+    Zone identity uses the same fold: two zones whose names fold to the same text are
+    the same area for /validate, so they cannot both exist (app.zones).
+    """
+    return area.strip().lower()
+
+
+def grant_area(elem: Any) -> str | None:
+    """The area of one stored grant element as /validate reads it, or None.
+
+    The element comes from json.loads, so a repeated "area" key counts with its last
+    value.  Only an object with a string area can be a grant; anything else is never
+    one and is kept as it is by the zone rewrites.
+    """
+    if not isinstance(elem, dict):
+        return None
+    area = elem.get("area")
+    return area if isinstance(area, str) else None
+
+
+def area_matches_zone(area: str, zone_name: str, other_zone_names: list[str]) -> bool:
+    """True when a grant on *area* belongs to the zone *zone_name*.
+
+    The same spelling always does.  Another spelling with the same fold does when no
+    other zone has that fold; while zones that differ only in case still exist (from
+    before their names were unique regardless of case), only the same spelling counts.
+    """
+    if area.strip() == zone_name:
+        return True
+    key = fold_area(area)
+    if key != fold_area(zone_name):
+        return False
+    return all(fold_area(n) != key for n in other_zone_names)
 
 
 def parse_grants(raw: Any) -> list[dict[str, str]]:
@@ -79,9 +116,39 @@ def parse_grants(raw: Any) -> list[dict[str, str]]:
     return out
 
 
-def assert_grants_allowed(grants: list[dict[str, str]], allowed: list[str]) -> None:
+def canonical_grants(grants: list[dict[str, str]], allowed: list[str]) -> list[dict[str, str]]:
+    """Check *grants* against the allowed areas and return them as they are stored.
+
+    An area is matched to an allowed name regardless of case (fold_area) and stored
+    with that name's exact spelling.  The exact spelling wins when several allowed names
+    share the fold (zones that differ only in case, from before names had to be unique
+    regardless of case); any other spelling is then ambiguous.  Raises ValueError with
+    the message for the caller's 400.
+    """
     if not allowed:
-        return
+        return grants
+    names = list(dict.fromkeys(allowed))
+    exact = set(names)
+    by_fold: dict[str, list[str]] = {}
+    for n in names:
+        by_fold.setdefault(fold_area(n), []).append(n)
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
     for g in grants:
-        if g["area"] not in allowed:
-            raise ValueError(f"Area not allowed: {g['area']}")
+        area = g["area"]
+        if area in exact:
+            name = area
+        else:
+            matches = by_fold.get(fold_area(area), [])
+            if not matches:
+                raise ValueError(f"Area not allowed: {area}")
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Area matches more than one zone ({', '.join(sorted(matches))}). Use the exact name."
+                )
+            name = matches[0]
+        if name in seen:
+            raise ValueError(f"Area listed twice: {name}")
+        seen.add(name)
+        out.append({**g, "area": name})
+    return out

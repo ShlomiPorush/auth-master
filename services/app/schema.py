@@ -37,10 +37,13 @@ async def _sqlite_add_column_if_not_exists(db: "Database", table: str, column: s
 
 
 async def ensure_database_schema(db: "Database") -> None:
+    from app.zones import ensure_zone_name_index
+
     if db.is_pg:
         await _ensure_pg(db)
     else:
         await _ensure_sqlite(db)
+    await ensure_zone_name_index(db)
 
 
 async def _ensure_pg(db: "Database") -> None:

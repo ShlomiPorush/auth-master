@@ -55,6 +55,8 @@ The status is `200` when the database and Redis both respond. When either does n
 
 Validates whether a token has a specific permission level for a given zone. This endpoint is **public** — no API key required.
 
+`area` is compared with the token's grants regardless of case and surrounding spaces: `Orders` and ` orders ` match a grant on `orders`.
+
 Use `POST`: it sends the token in the request body.
 
 #### POST
@@ -226,7 +228,7 @@ Content-Type: application/json
 }
 ```
 
-**Zone name rules:** Alphanumeric, dots, underscores, colons, hyphens. Max 63 characters.
+**Zone name rules:** Alphanumeric, dots, underscores, colons, hyphens. Max 63 characters. Names are unique regardless of case: creating `BILLING` when `billing` exists answers `409`.
 
 ---
 
@@ -285,7 +287,7 @@ Content-Type: application/json
 | Field | Required | Description |
 |---|---|---|
 | `name` | Yes | Label for the token |
-| `grants` | Yes | Array of `{area, level}` permissions |
+| `grants` | Yes | Array of `{area, level}` permissions. An area matches its zone regardless of case and is stored with the zone's name; naming one zone twice in different cases answers `400` |
 | `expiresAt` | No | ISO 8601 expiration date (null = never expires). A value without an offset, such as `2025-12-31T23:59:59` or `2025-12-31`, is read as UTC |
 | `token` | No | Custom token value (auto-generated if omitted) |
 
