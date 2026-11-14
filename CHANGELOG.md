@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Admin sessions and unfinished MFA setups in Redis are bound to this
+  installation's `SESSION_SECRET`: each record is stored under a name derived
+  with that secret from the session ID (or, for a setup, the admin ID), and
+  encrypted and authenticated with a key derived from it. Before, the session ID
+  itself was the key and the session and the new MFA secret were stored as plain
+  text, so two installations sharing one Redis database accepted each other's
+  admin sign-ins, and any client that could write to that Redis database could
+  create an admin session or plant the MFA secret of an admin being set up.
+  README.md no longer says the session cookie is signed: it holds only a random
+  session ID.
+- **Upgrade note:** every admin signs in again once after the upgrade, and a
+  first-admin setup that is in progress during the upgrade must start again.
+  From now on, changing `SESSION_SECRET` also signs every admin out. Give every
+  installation its own `SESSION_SECRET`.
+
 ### Added
 
 - A Usage page (`/admin/usage`) shows, for each token, how many `/validate` calls it

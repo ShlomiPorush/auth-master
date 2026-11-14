@@ -13,7 +13,6 @@ run with ``secrets``; Redis is faked.  Requires pytest and httpx.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import secrets
@@ -48,9 +47,9 @@ def _app():
     app first fixes its settings, and other modules set theirs before importing."""
     import app.main as main_mod
     from app import rate_limit
-    from app.sessions import COOKIE_NAME, PREFIX
+    from app.sessions import COOKIE_NAME, session_record
 
-    return main_mod, rate_limit, COOKIE_NAME, PREFIX
+    return main_mod, rate_limit, COOKIE_NAME, session_record
 
 
 class _Clock:
@@ -255,9 +254,10 @@ def client(monkeypatch):
 
 
 def _session(client, kind: str) -> None:
-    _, _, COOKIE_NAME, PREFIX = _app()
+    _, _, COOKIE_NAME, session_record = _app()
     sid = secrets.token_hex(32)
-    client.fake_redis.data[PREFIX + sid] = json.dumps({"kind": kind, "user_id": "u", "csrf": secrets.token_hex(24)})
+    key, value = session_record(sid, {"kind": kind, "user_id": "u", "csrf": secrets.token_hex(24)})
+    client.fake_redis.data[key] = value
     client.cookies.set(COOKIE_NAME, sid)
 
 

@@ -41,7 +41,7 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `REDIS_URL` | _(required)_ | Redis connection string with a password (required for admin sessions). The bundled compose file builds it from `REDIS_PASSWORD` |
 | `REDIS_PASSWORD` | _(required with the bundled Redis)_ | Password of the bundled Redis server |
 | `ADMIN_API_KEY` | _(required)_ | Master API key with full access to all scopes |
-| `SESSION_SECRET` | _(required)_ | Together with `APP_ENCRYPTION_KEY`, derives the key that encrypts stored MFA secrets and revealable token and API key values |
+| `SESSION_SECRET` | _(required)_ | Together with `APP_ENCRYPTION_KEY`, derives the key that encrypts stored MFA secrets and revealable token and API key values. Alone, it also protects admin sessions and unfinished MFA setups in Redis. Use a different value for every installation |
 | `APP_ENCRYPTION_KEY` | _(required)_ | See `SESSION_SECRET` |
 | `PGPASSWORD` | _(empty)_ | Optional PostgreSQL password when `DATABASE_URL` has none; checked like the others |
 | `ALLOWED_AREAS` | `orders,billing,webhooks` | Fallback zone list when the zones table is empty |
@@ -150,7 +150,7 @@ Do not delete rows: a running process only moves to a higher version.
 |---|---|
 | `ADMIN_API_KEY` | Update every integration that uses the master key. Nothing stored is affected. |
 | `REDIS_PASSWORD` / Redis password | Restart Redis and the service together. Admins may have to sign in again. |
-| `SESSION_SECRET`, `APP_ENCRYPTION_KEY` | Stored MFA secrets and revealable token and API key values become unreadable: admins can no longer pass MFA, and existing tokens and API keys can no longer be revealed. Token validation and API key authentication keep working. There is no conversion tool, so change these only on a new installation. |
+| `SESSION_SECRET`, `APP_ENCRYPTION_KEY` | Stored MFA secrets and revealable token and API key values become unreadable: admins can no longer pass MFA, and existing tokens and API keys can no longer be revealed. Token validation and API key authentication keep working. There is no conversion tool, so change these only on a new installation. Changing `SESSION_SECRET` also signs every admin out and cancels an unfinished first-admin setup. |
 
 ## Architecture
 
@@ -191,7 +191,7 @@ See [API.md](API.md) for the full REST API reference.
 - Dashboard access requires **TOTP MFA** (two-factor authentication)
 - Tokens and API keys are encrypted at rest with **AES-256-GCM**
 - Token hashes use **SHA-256** for lookups
-- Session cookies are signed and stored in Redis with configurable TTL
+- The session cookie holds only a random session ID. Admin sessions and unfinished MFA setups are kept in Redis under names derived from `SESSION_SECRET`, encrypted and authenticated with a key derived from it, and expire after 12 hours (setup: 15 minutes). Another installation or another Redis client without that secret cannot create, read, change, or move them between sessions
 - CSRF protection on all state-changing admin operations
 - Rate limiting on the `/validate` endpoint
 
