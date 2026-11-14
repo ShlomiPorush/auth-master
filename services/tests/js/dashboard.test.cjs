@@ -304,3 +304,13 @@ test("R11: the toast takes no action, busy state or duration", () => {
     const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../../static/public/js/ui.js"), "utf8");
     assert.ok(!/opts\.(action|duration)|onAction|ui-toast-action/.test(src));
 });
+
+test("a 413 says the item is too large; other answers keep the server's reason", () => {
+    const ctx = load();
+    const big = "This is too large to save. Shorten the text or remove some items, then try again.";
+    // The server's 413 may be plain text (data null) or JSON
+    assert.equal(ctx.apiError({ status: 413, data: null, json: false }, "Save failed"), big);
+    assert.equal(ctx.apiError({ status: 413, data: { detail: "Content Too Large" }, json: true }, "Save failed"), big);
+    assert.equal(ctx.apiError({ status: 400, data: { detail: "Invalid zone name" }, json: true }, "Save failed"), "Invalid zone name");
+    assert.equal(ctx.apiError({ status: 500, data: null, json: false }, "Save failed"), "Save failed");
+});

@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.config import get_settings
 from app.datetime_utils import is_expired
@@ -42,6 +43,10 @@ _settings = get_settings()
 # Normalise: strip trailing slash, ensure leading slash if non-empty
 _root = _settings.root_path.strip("/")
 ROOT_PATH = f"/{_root}" if _root else ""
+
+# FastAPI reads and parses a request body before any route check runs (rate
+# limit, bootstrap token, session), so bodies are capped for every route.
+MAX_REQUEST_BODY_BYTES = 64 * 1024
 
 
 async def cleanup_expired_tokens(db) -> None:
@@ -123,6 +128,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
+# Keep this the first add_middleware call: middleware added later wraps it, so a
+# security-headers middleware added after it also covers its 413 replies.
+app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
 
 
 class _AsciiJSONResponse(JSONResponse):
