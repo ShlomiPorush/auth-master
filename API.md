@@ -280,7 +280,7 @@ Content-Type: application/json
 |---|---|---|
 | `name` | Yes | Label for the token |
 | `grants` | Yes | Array of `{area, level}` permissions |
-| `expiresAt` | No | ISO 8601 expiration date (null = never expires) |
+| `expiresAt` | No | ISO 8601 expiration date (null = never expires). A value without an offset, such as `2025-12-31T23:59:59` or `2025-12-31`, is read as UTC |
 | `token` | No | Custom token value (auto-generated if omitted) |
 
 **Response** `201`:
@@ -323,6 +323,8 @@ Content-Type: application/json
   "token": "new-custom-token-value"
 }
 ```
+
+`expiresAt` takes the same form as when creating a token.
 
 **Response:**
 ```json
