@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.config import get_settings
 from app.datetime_utils import is_expired
@@ -46,6 +47,10 @@ _settings = get_settings()
 # Normalise: strip trailing slash, ensure leading slash if non-empty
 _root = _settings.root_path.strip("/")
 ROOT_PATH = f"/{_root}" if _root else ""
+
+# FastAPI reads and parses a request body before any route check runs (rate
+# limit, bootstrap token, session), so bodies are capped for every route.
+MAX_REQUEST_BODY_BYTES = 64 * 1024
 
 
 async def cleanup_expired_tokens(db) -> None:
@@ -129,6 +134,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
+# Middleware added later wraps the earlier ones. The body limit is added first,
+# so the anti-framing headers also cover the 413 replies it sends on its own.
+app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
 # Keep this the last add_middleware call: the last one added is the outermost, so
 # responses that other middleware sends on its own carry the headers too.
 app.add_middleware(AntiFramingMiddleware)
