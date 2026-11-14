@@ -25,7 +25,6 @@ Redis errors are not hidden: sign-in then answers 500 rather than skip the limit
 """
 from __future__ import annotations
 
-import ipaddress
 import math
 import secrets
 from typing import Any, Callable, TypeVar
@@ -38,7 +37,7 @@ from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 
-from app.rate_limit import address_key
+from app.rate_limit import bucket_key
 
 MAX_ATTEMPTS = 10
 WINDOW_SECONDS = 15 * 60
@@ -73,13 +72,9 @@ async def run_bcrypt(func: Callable[..., T], *args: Any) -> T:
 
 
 def client_key(request: Request) -> str:
-    """The address an attempt counts against: IPv4, or the /64 of IPv6."""
-    key = address_key(request.client.host if request.client else None)
-    if key is None:
-        return "unknown"
-    if ":" in key:
-        return ipaddress.ip_network(f"{key}/64", strict=False).with_prefixlen
-    return key
+    """The address an attempt counts against, as the /validate limit counts it: IPv4,
+    the /64 of IPv6, or one shared key for anything that is not an IP address."""
+    return bucket_key(request.client.host if request.client else None)
 
 
 async def count_attempt(r: Redis, key: str) -> tuple[int, int]:
