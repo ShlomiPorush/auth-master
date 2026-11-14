@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `false`. Docker Compose now takes these two values from the shell or stack
   variables, then from the project's `.env` or the files given with `--env-file`, and
   they win over `env_file: .env`. If you start the stack with `--env-file` and keep
-  them only in `.env`, add `--env-file .env` or move them to your env file.
+  them only in `.env`, move them to your env file, or add `--env-file .env` before
+  your other `--env-file` options, so that your own file keeps winning.
 - The Settings page keeps the reverse proxy hint and the warning about exempt
   addresses when `FORWARDED_ALLOW_IPS` lists only loopback addresses, as the
   compose default does, since no proxy at another address is trusted then.

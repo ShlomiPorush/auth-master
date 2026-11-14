@@ -82,8 +82,9 @@ container, so they work when set in `.env` or as stack variables in a tool such 
 Portainer. Docker Compose takes them from the shell or stack variables first, then
 from the `.env` file of the project directory, or from the files given with
 `--env-file` instead of it, and the result wins over `env_file: .env`. If you start
-the stack with `--env-file` and keep these two values only in `.env`, add
-`--env-file .env` or move them to your env file. When a variable is not set at all,
+the stack with `--env-file` and keep these two values only in `.env`, move them to
+your env file, or add `--env-file .env` before your other `--env-file` options: a
+later file wins, so your own file keeps its values, secrets included. When a variable is not set at all,
 the compose file passes the default: `127.0.0.1,::1` and `false`. An empty value is
 passed as it is.
 
