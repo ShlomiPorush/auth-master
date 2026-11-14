@@ -41,7 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Removed when the test process exits.
 _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 _DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DIR.name}/zones.db"
-_EXPECT_PG = _DB_URL.startswith("postgres")
+# As create_database() decides: anything that is not a sqlite URL goes to asyncpg.
+_EXPECT_PG = not _DB_URL.startswith("sqlite")
 
 # Generated for this run, never taken from the environment the tests run in.  They take
 # effect when this module is the first to load the settings; the tests read the API key
@@ -172,8 +173,6 @@ class Env:
 def _refuse_public_database_password() -> None:
     """The tests connect to _DB_URL directly, so validate it as the app validates DATABASE_URL
     (the URL's password and PGPASSWORD, which asyncpg uses when the URL has none)."""
-    if not _EXPECT_PG:
-        return
     from pydantic import ValidationError
 
     from app.config import Settings, _describe
