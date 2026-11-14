@@ -37,6 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[redacted]`. API.md now recommends `POST /validate`, which sends the token in the
   request body. Logs written before this version can still hold tokens sent with
   `GET`: rotate those tokens if other people can read those logs.
+- Dashboard sign-in no longer holds up the rest of the service. The password check
+  (bcrypt) ran on the server's only event loop, so a few concurrent sign-in attempts,
+  which need no account, delayed every other request, `/validate` included, by close
+  to a second. It now runs in worker threads, at most two at a time. When both are
+  busy for more than 10 seconds, sign-in and first-run registration answer
+  `503` with `Retry-After`.
+- Sign-in is limited to 10 attempts per client address in 15 minutes, counted from
+  the first attempt; IPv6 addresses count per `/64` network. Further attempts answer
+  `429` with `Retry-After` and a message that says when to try again. Every attempt
+  counts, a correct password does not reset the count, and the limit never locks a
+  username: an attacker elsewhere cannot lock the admin out. Behind a reverse proxy
+  that `FORWARDED_ALLOW_IPS` does not trust, every client has the proxy's address and
+  shares one count of 10, so set it as described in README.md.
+- Sign-in with an unknown username now takes as long as a wrong password, so the
+  answer time no longer tells which usernames exist. (A password hash with a bcrypt
+  cost other than 12, which only a hand-edited database can hold, still works but
+  takes a different time.)
+- **Upgrade note:** the sign-in limit keeps its counts in Redis under `auth:login:*`.
+  The bundled Redis needs no change. An external Redis with access control lists
+  must allow the app's user `SET`, `INCRBY`, `TTL`, `EXPIRE`, `MULTI` and `EXEC` on
+  these keys, next to the `GET`, `SETEX`, `DEL` and `PING` it already needs, for
+  example `+get +setex +del +ping +set +incrby +ttl +expire +multi +exec ~auth:*`.
+  Without them, sign-in can fail with `500`; the limit is never skipped.
 
 ### Added
 
