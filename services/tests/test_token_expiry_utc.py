@@ -172,20 +172,28 @@ def env(request, monkeypatch):
         with TestClient(main_mod.app) as c:
             db = main_mod.app.state.db
             assert db.is_pg == url.startswith("postgres"), "test ran on the wrong database backend"
+            # A full session counts only for an existing admin with MFA enabled.
+            admin_id = str(uuid.uuid4())
+            c.portal.call(
+                db.execute,
+                "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+                admin_id, "expiry-admin-" + secrets.token_hex(4), "unused", True,
+            )
             sid, csrf = secrets.token_hex(32), secrets.token_hex(24)
-            key, value = session_record(sid, {"kind": "full", "adminId": str(uuid.uuid4()), "csrf": csrf})
+            key, value = session_record(sid, {"kind": "full", "adminId": admin_id, "csrf": csrf})
             fake.data[key] = value
             c.cookies.set(COOKIE_NAME, sid)
             e = Env(c, db, {"Authorization": f"Bearer {s.admin_api_key}"}, csrf)
-            e.run(db.execute, "DELETE FROM tokens")
-            e.run(db.execute, "DELETE FROM zones")
-            r = c.post("/tokens/zones", headers=e.api, json={"name": _ZONE})
-            assert r.status_code == 201, r.text
             try:
+                e.run(db.execute, "DELETE FROM tokens")
+                e.run(db.execute, "DELETE FROM zones")
+                r = c.post("/tokens/zones", headers=e.api, json={"name": _ZONE})
+                assert r.status_code == 201, r.text
                 yield e
             finally:
                 e.run(db.execute, "DELETE FROM tokens")
                 e.run(db.execute, "DELETE FROM zones")
+                e.run(db.execute, "DELETE FROM admin_users WHERE id = $1", admin_id)
     finally:
         monkeypatch.undo()
         if hasattr(time, "tzset"):

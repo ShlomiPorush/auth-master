@@ -104,6 +104,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signing in, or two in a row, needs the next code, which can take up to 30 seconds.
 - After the password, the authenticator code must be entered within 5 minutes
   (was 12 hours).
+- First-admin setup completes only once. Before, a setup session whose account a
+  later registration had replaced could still finish MFA enrollment after another
+  admin completed setup, and it got a full admin session that could, for example,
+  create API keys. Two setups confirmed at the same moment could also both
+  succeed. Now confirming MFA succeeds only for an account that still exists and
+  has not enrolled yet; any other attempt is refused with 403.
+- An admin session is accepted only while its admin account exists and has MFA
+  enabled. Other sessions are refused and deleted.
+- The service allows at most one admin with MFA enabled, and this is now enforced
+  by the database (index `admin_users_one_enabled`). Only first-admin setup creates
+  admins, so this matches how the service already works; the rule stays until the
+  service gets admin management. Upgrade: if the database already has two admins
+  with MFA enabled, which only the flaw above could cause, the service does not
+  start and says so. Delete the admin row that should not exist, and any API keys
+  it created, then start the service again.
 
 ### Added
 

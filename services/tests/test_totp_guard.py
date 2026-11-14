@@ -233,7 +233,7 @@ def _distinct_seed() -> str:
             return seed
 
 
-def _add_admin(c, seed: str | None = None) -> Admin:
+def _add_admin(c, seed: str | None = None, enabled: bool = True) -> Admin:
     seed = seed or pyotp.random_base32()
     password = secrets.token_urlsafe(16)
     username = "adm" + secrets.token_hex(4)
@@ -244,11 +244,18 @@ def _add_admin(c, seed: str | None = None) -> Admin:
             "INSERT INTO admin_users (id, username, password_hash, totp_secret_enc, totp_enabled) "
             "VALUES ($1, $2, $3, $4, $5)",
             admin_id, username, bcrypt.hashpw(password.encode(), bcrypt.gensalt(4)).decode(),
-            encrypt_totp_secret(seed), True,
+            encrypt_totp_secret(seed), enabled,
         )
 
     _db(c, _insert)
     return Admin(admin_id, username, password, pyotp.TOTP(seed))
+
+
+def _set_enabled(c, admin: Admin, enabled: bool) -> None:
+    async def _update(db):
+        await db.execute("UPDATE admin_users SET totp_enabled = $1 WHERE id = $2", enabled, admin.id)
+
+    _db(c, _update)
 
 
 def _add_token(c) -> tuple[str, str]:
@@ -518,7 +525,9 @@ def test_reveal_lockout_answers_429_even_if_the_log_write_fails(ctx, monkeypatch
 
 def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
     admin = _add_admin(ctx)
-    other = _add_admin(ctx)
+    # At most one admin has MFA enabled at a time (index admin_users_one_enabled),
+    # so the other admin is enabled only for its own sign-in below.
+    other = _add_admin(ctx, enabled=False)
     tid, _ = _add_token(ctx)
     kid, _ = _add_api_key(ctx)
     full = _full(ctx, admin)
@@ -531,8 +540,12 @@ def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
 
     # Another admin is not affected.
     assert _fail_count(ctx, other) == 0
+    _set_enabled(ctx, admin, False)
+    _set_enabled(ctx, other, True)
     other_full = _full(ctx, other)
     assert other_full[0]
+    _set_enabled(ctx, other, False)
+    _set_enabled(ctx, admin, True)
 
     # A success resets the counter.
     ctx.clock.t += 30
