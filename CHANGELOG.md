@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Usage page (`/admin/usage`) shows, for each token, how many `/validate` calls it
+  made in the last 24 hours, 7 days or 30 days, how many were denied, which zones it
+  called at which levels, and from which addresses, with a chart of allowed and
+  denied calls per hour or day in the server's time zone. Calls with a token the
+  service does not know, and calls of deleted tokens, are shown as their own rows.
+  The figures come from the access log: days older than `ACCESS_LOG_RETENTION_DAYS`
+  are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
+- Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added

@@ -159,6 +159,9 @@ class PgDatabase(Database):
 class _PgConn:
     """Thin wrapper around an asyncpg Connection inside a transaction."""
 
+    is_pg = True
+    is_sqlite = False
+
     def __init__(self, conn: Any):
         self._conn = conn
 
@@ -323,3 +326,36 @@ async def open_settings_database(main: Database) -> tuple[Database, bool]:
     conn = await aiosqlite.connect(path, isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC)
     conn.row_factory = None
     return SqliteDatabase(conn), True
+
+
+@asynccontextmanager
+async def report_database(main: Database):
+    """A handle for long read-only reports, such as usage statistics over the access log.
+
+    Every query of one report reads the same snapshot, so its figures add up even while
+    requests write rows or the purge deletes them.
+
+    SQLite: a separate connection, opened for the report and closed after it, in one read
+    transaction (BEGIN ... COMMIT; in WAL mode, set in create_database, a read transaction
+    sees the database as it was at its first read).  Statements on the shared request
+    connection run one at a time, so a report there would make every /validate request wait
+    for it; in WAL mode the two connections read side by side.
+    PostgreSQL: one pooled connection in a read-only REPEATABLE READ transaction.
+    """
+    if not main.is_sqlite:
+        async with main._pool.acquire() as conn:  # type: ignore[attr-defined]
+            async with conn.transaction(isolation="repeatable_read", readonly=True):
+                yield _PgConn(conn)
+        return
+    import aiosqlite  # type: ignore[import-untyped]
+
+    conn = await aiosqlite.connect(getattr(main, "path", ""), isolation_level=None, timeout=SETTINGS_LOCK_TIMEOUT_SEC)
+    conn.row_factory = None
+    try:
+        await conn.execute("BEGIN")
+        try:
+            yield SqliteDatabase(conn)
+        finally:
+            await conn.execute("COMMIT")
+    finally:
+        await conn.close()

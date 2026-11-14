@@ -190,6 +190,13 @@ function formatDay(value, opts) {
     return writeDate(uiZoneParts(ms, (opts && opts.zone) || uiAppZone), true, opts && opts.prefs);
 }
 
+// Day and month only, for chart axis labels
+function formatShortDay(value, opts) {
+    var ms = uiParseInstant(value);
+    if (isNaN(ms)) return value ? String(value) : "-";
+    return writeDate(uiZoneParts(ms, (opts && opts.zone) || uiAppZone), false, opts && opts.prefs);
+}
+
 function formatClock(value, opts) {
     var ms = uiParseInstant(value);
     if (isNaN(ms)) return value ? String(value) : "-";

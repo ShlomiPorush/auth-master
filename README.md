@@ -53,6 +53,8 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `TZ` | `UTC` | Timezone for dates in the UI (e.g. `Asia/Jerusalem`, `America/New_York`) |
 | `RATE_LIMIT_MAX_REQ` | `120` | Max validation requests allowed per IP. Also editable on the Settings page; when this variable is set, the page shows the field locked. See [Rate limit settings](#rate-limit-settings) |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Time window for rate limiting in milliseconds (default 1 minute). Also editable on the Settings page, like `RATE_LIMIT_MAX_REQ` |
+| `ACCESS_LOG_RETENTION_DAYS` | `30` | Days the access log keeps token validation requests; also the longest period the Usage page can count |
+| `ACTIVITY_LOG_RETENTION_DAYS` | `30` | Days the activity log keeps admin actions |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Read by uvicorn, not by the app: the addresses of reverse proxies whose `X-Forwarded-For` header is trusted. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
 ### Behind a reverse proxy
@@ -173,7 +175,8 @@ Every dashboard section is a page with its own URL, so it can be bookmarked, sha
 - **Zones** (`/admin/zones`) — Create and delete authorization zones
 - **API Keys** (`/admin/api-keys`) — Create scoped API keys for external integrations, edit permissions, copy keys (MFA-protected)
 - **Activity Log** (`/admin/logs/activity`) — Audit trail of admin actions
-- **Access Logs** (`/admin/logs/access`) — History of token validation requests, and the requests the rate limit rejected
+- **Access Logs** (`/admin/logs/access`) — History of token validation requests, and the requests the rate limit rejected. `?token=<id>` lists one token's requests
+- **Usage** (`/admin/usage`) — Calls per token over the last 24 hours, 7 days or 30 days: allowed and denied calls per hour or day, the zones each token calls with their levels, and the addresses the calls come from. Figures come from the access log, so they cover at most `ACCESS_LOG_RETENTION_DAYS` and leave out requests the log does not record (rate-limited requests and requests with an invalid level)
 - **Settings** (`/admin/settings`) — The rate limit and the addresses exempt from it
 
 Opening a page while signed out redirects to the login flow and returns to the same page after signing in.

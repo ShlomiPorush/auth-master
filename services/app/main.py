@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from app.config import get_settings
 from app.datetime_utils import is_expired
 from app.db import create_database, open_settings_database
-from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings
+from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage
 from app.schema import ensure_database_schema
 from app import rate_limit_settings
 from app.logger import purge_old_logs
@@ -181,6 +181,7 @@ app.include_router(admin_api_keys.router)
 app.include_router(admin_logs.router)
 app.include_router(admin_rate_limit.router)
 app.include_router(admin_settings.router)
+app.include_router(admin_usage.router)
 
 
 def _safe_static_file(rel: str) -> Path:
@@ -327,6 +328,7 @@ async def page_login_mfa():
 @app.get("/admin/api-keys")
 @app.get("/admin/logs/activity")
 @app.get("/admin/logs/access")
+@app.get("/admin/usage")
 @app.get("/admin/settings")
 async def page_dashboard():
     return _serve_html("index.html")
