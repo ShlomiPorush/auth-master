@@ -145,7 +145,7 @@ def env(request, monkeypatch):
     import app.main as main_mod
     from app import rate_limit
     from app.config import get_settings
-    from app.sessions import COOKIE_NAME, PREFIX
+    from app.sessions import COOKIE_NAME, session_record
 
     s = get_settings()
     for field in _SECRET_FIELDS:
@@ -173,7 +173,8 @@ def env(request, monkeypatch):
             db = main_mod.app.state.db
             assert db.is_pg == url.startswith("postgres"), "test ran on the wrong database backend"
             sid, csrf = secrets.token_hex(32), secrets.token_hex(24)
-            fake.data[PREFIX + sid] = json.dumps({"kind": "full", "adminId": str(uuid.uuid4()), "csrf": csrf})
+            key, value = session_record(sid, {"kind": "full", "adminId": str(uuid.uuid4()), "csrf": csrf})
+            fake.data[key] = value
             c.cookies.set(COOKIE_NAME, sid)
             e = Env(c, db, {"Authorization": f"Bearer {s.admin_api_key}"}, csrf)
             e.run(db.execute, "DELETE FROM tokens")
