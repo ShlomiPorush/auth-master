@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example `+get +setex +del +ping +set +incrby +ttl +expire +multi +exec ~auth:*`.
   If `REDIS_URL` selects a database other than 0, `+select` is needed too. Without
   them, sign-in can fail with `500`; the limit is never skipped.
+- Request bodies are capped at 64 KiB. Before, the service read and parsed a body of
+  any size before its own checks, so an anonymous caller could make it buffer and
+  parse large bodies on `/validate`, sign-in and setup. A larger body now gets
+  `413 Content Too Large`, and the dashboard says the item is too large to save.
+  A request that takes no body (such as `DELETE`) but declares a body over the cap
+  is still handled, and its answer is replaced by `413`, so the `413` does not tell
+  whether it succeeded; see "Request size" in API.md.
 
 ### Added
 
