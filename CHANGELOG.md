@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Security
+
+- The request log in the container output no longer shows the token of a
+  `GET /validate?token=...` call: the query string of `/validate` is shown as
+  `[redacted]`. API.md now recommends `POST /validate`, which sends the token in the
+  request body. Logs written before this version can still hold tokens sent with
+  `GET`: rotate those tokens if other people can read those logs.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added
