@@ -103,6 +103,39 @@ class FakeRedis:
     async def aclose(self):
         pass
 
+    def pipeline(self, transaction=True):
+        return _FakeCounterPipeline()
+
+
+class _FakeCounterPipeline:
+    """The sign-in attempt counter's transaction (SET NX, INCR, TTL). Counts stay out of
+    FakeRedis.data, which these tests read as the session store, and every attempt is
+    counted as the first of its window."""
+
+    def __init__(self) -> None:
+        self.ops: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def set(self, *_a, **_k):
+        self.ops.append(None)
+        return self
+
+    def incr(self, _k):
+        self.ops.append(1)
+        return self
+
+    def ttl(self, _k):
+        self.ops.append(60)
+        return self
+
+    async def execute(self, raise_on_error=True):
+        return list(self.ops)
+
 
 def _fresh_secret() -> str:
     value = secrets.token_urlsafe(48)
