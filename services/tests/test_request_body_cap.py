@@ -209,6 +209,23 @@ def test_body_at_cap_is_accepted(client):
     assert r.status_code == 413
 
 
+def _assert_anti_framing(headers):
+    assert headers["x-frame-options"] == "DENY"
+    assert headers["content-security-policy"] == "frame-ancestors 'none'"
+
+
+def test_direct_413_carries_anti_framing_headers(client):
+    # The body limit sends these 413s itself; the anti-framing middleware wraps it.
+    r = client.post("/admin/api/login", content=_login_body(OVER_CAP), headers=JSON)
+    assert r.status_code == 413
+    assert r.text == "Content Too Large"
+    _assert_anti_framing(r.headers)
+    # A route that takes no body: the reply is replaced at response start.
+    r = client.request("GET", "/login", content=b"A" * OVER_CAP)
+    assert r.status_code == 413
+    _assert_anti_framing(r.headers)
+
+
 # ── A rejected body changes nothing ──
 
 
