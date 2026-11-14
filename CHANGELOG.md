@@ -69,7 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must allow the app's user `SET`, `INCRBY`, `TTL`, `EXPIRE`, `MULTI` and `EXEC` on
   these keys, next to the `GET`, `SETEX`, `DEL` and `PING` it already needs, for
   example `+get +setex +del +ping +set +incrby +ttl +expire +multi +exec ~auth:*`.
-  Without them, sign-in can fail with `500`; the limit is never skipped.
+  If `REDIS_URL` selects a database other than 0, `+select` is needed too. Without
+  them, sign-in can fail with `500`; the limit is never skipped.
 
 ### Added
 
