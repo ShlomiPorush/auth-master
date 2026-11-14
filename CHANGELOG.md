@@ -89,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parse large bodies on `/validate`, sign-in and setup. A larger body now gets
   `413 Content Too Large`, and the dashboard says the item is too large to save.
   A request that takes no body (such as `DELETE`) but declares a body over the cap
-  is still carried out and answered `413`; see "Request size" in API.md.
+  is still handled, and its answer is replaced by `413`, so the `413` does not tell
+  whether it succeeded; see "Request size" in API.md.
 
 ### Added
 
@@ -122,7 +123,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A token that expires at the last moment of year 9999 in UTC no longer breaks
   the token lists and `/validate/grants` on a server whose time zone is east of
   UTC: its expiry is shown in UTC.
-
 
 ## [2.0.1] - 2026-11-13
 
