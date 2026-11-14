@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creating and updating tokens through `/tokens` and the admin interface. Tokens
   already stored this way on PostgreSQL, on a server whose `TZ` is not UTC, keep
   their shifted expiry: set their expiry again.
+- The service sends `X-Frame-Options: DENY` and `Content-Security-Policy:
+  frame-ancestors 'none'` itself, so browsers no longer show the dashboard, the
+  sign-in and setup pages or the API docs inside a frame on another site. Before, a
+  page on a sibling subdomain could overlay the signed-in dashboard and steer an
+  admin's clicks. The only response without the headers is the plain-text 500 for an
+  unexpected server error.
 - Dashboard sign-in no longer holds up the rest of the service. The password check
   (bcrypt) ran on the server's only event loop, so a few concurrent sign-in attempts,
   which need no account, delayed every other request, `/validate` included, by close
