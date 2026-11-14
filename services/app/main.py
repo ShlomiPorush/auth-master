@@ -19,6 +19,7 @@ from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_token
 from app.schema import ensure_database_schema
 from app import rate_limit_settings
 from app.logger import purge_old_logs
+from app.security_headers import AntiFramingMiddleware
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
 # The only stylesheets and scripts served from /css and /js.
@@ -123,6 +124,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
+# Keep this the last add_middleware call: the last one added is the outermost, so
+# responses that other middleware sends on its own carry the headers too.
+app.add_middleware(AntiFramingMiddleware)
 
 
 class _AsciiJSONResponse(JSONResponse):
