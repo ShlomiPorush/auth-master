@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/validate` answers an `area` that is not valid Unicode text, such as a lone
   `\ud800` escape in a JSON body, with `422` instead of `{"result": false}`.
 
+### Security
+
+- The request log in the container output no longer shows the token of a
+  `GET /validate?token=...` call: the query string of `/validate` is shown as
+  `[redacted]`. API.md now recommends `POST /validate`, which sends the token in the
+  request body. Logs written before this version can still hold tokens sent with
+  `GET`: rotate those tokens if other people can read those logs.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added
