@@ -55,6 +55,8 @@ The status is `200` when the database and Redis both respond. When either does n
 
 Validates whether a token has a specific permission level for a given zone. This endpoint is **public** — no API key required.
 
+Use `POST`: it sends the token in the request body.
+
 #### POST
 
 ```
@@ -71,11 +73,13 @@ Content-Type: application/json
 }
 ```
 
-#### GET
+#### GET (not recommended)
 
 ```
 GET /validate?token=tok_abc123...&area=orders&level=read
 ```
+
+The same check, with the token in the URL. Reverse proxies, load balancers and HTTP clients often record URLs in their own logs, so the token can end up there. The service hides the query string of `/validate` in its own request log (the container output) at the default log level. uvicorn's `trace` log level still prints it.
 
 **Response:**
 ```json
