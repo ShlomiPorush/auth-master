@@ -53,10 +53,15 @@ def _step(totp: pyotp.TOTP, t: float) -> int:
 
 def _matched_step(totp: pyotp.TOTP, code: str, now: float) -> int | None:
     # Same acceptance as verify(code, valid_window=1), but tells which step matched.
+    # The current step first, so it wins if a neighbour has the same digits.
     for offset in (0, -1, 1):
         t = now + offset * totp.interval
-        if totp.verify(code, for_time=int(t), valid_window=0):
-            return _step(totp, t)
+        try:
+            if totp.verify(code, for_time=int(t), valid_window=0):
+                return _step(totp, t)
+        except UnicodeEncodeError:
+            # pyotp encodes the code as UTF-8; a lone surrogate cannot match.
+            return None
     return None
 
 
