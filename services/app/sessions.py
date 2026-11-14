@@ -27,7 +27,8 @@ SessionKind = Literal["setup", "partial", "full"]
 # Records in Redis are bound to this installation's SESSION_SECRET: the key name is
 # an HMAC of the session ID (or admin ID), and the value is AES-GCM encrypted with
 # the key name as associated data. Another installation, or another Redis client
-# without the secret, can neither find, read, forge nor move a record.
+# without the secret, cannot tell which record belongs to a session ID, and cannot
+# read, forge or move a record.
 
 
 def new_sid() -> str:
