@@ -9,7 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from app.admin_deps import FullSession, csrf_check
-from app.db import UniqueViolationError
+from app.db import UniqueViolationError, write_transaction
 from app.logger import log_activity, get_actor
 
 router = APIRouter(prefix="/admin/api", tags=["admin-zones"])
@@ -172,7 +172,7 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
                 UPDATE tokens t
                 SET grants = (
                     SELECT jsonb_agg(
-                        CASE WHEN elem->>'area' = $1
+                        CASE WHEN elem->'area' = to_jsonb($1::text)
                              THEN jsonb_set(elem, '{area}', to_jsonb($2::text))
                              ELSE elem
                         END
@@ -182,7 +182,7 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
                 WHERE EXISTS (
                     SELECT 1
                     FROM jsonb_array_elements(t.grants) AS elem
-                    WHERE elem->>'area' = $1
+                    WHERE elem->'area' = to_jsonb($1::text)
                 )
                 """,
                 old_name,
@@ -190,31 +190,48 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
             )
 
 
-async def _patch_zone_sqlite(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
-    """SQLite implementation — update grants JSON in Python."""
-    row = await db.fetchrow("SELECT name FROM zones WHERE id = $1", str(uid))
-    if row is None:
-        raise HTTPException(404, "Not found")
-    old_name = row["name"]
-    args.append(str(uid))
-    q = f"UPDATE zones SET {', '.join(parts)} WHERE id = ${n}"
-    try:
-        await db.execute(q, *args)
-    except UniqueViolationError as e:
-        raise HTTPException(409, "Zone name already exists") from e
+async def _rewrite_grants_sqlite(tx: Any, area: str, new_area: str | None) -> None:
+    """Rename (``new_area``) or remove (``None``) every grant on ``area``.
 
-    if body.name is not None and body.name.strip() != old_name:
-        new_name = body.name.strip()
-        token_rows = await db.fetch("SELECT id, grants FROM tokens")
-        for tr in token_rows:
-            grants = json.loads(tr["grants"]) if isinstance(tr["grants"], str) else tr["grants"]
-            changed = False
-            for g in grants:
-                if g.get("area") == old_name:
-                    g["area"] = new_name
-                    changed = True
-            if changed:
-                await db.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(grants), tr["id"])
+    Runs on the zone change's write transaction, which holds SQLite's write lock from
+    before this read until its commit, so no grant change can land between the read and
+    the rewrite, and the zone change and the rewrite are saved together or not at all.
+    The grants are decoded as /validate decodes them (json.loads: a repeated key counts
+    with its last value; only objects are grants); other elements are kept unchanged.
+    """
+    for row in await tx.fetch("SELECT id, grants FROM tokens"):
+        grants = json.loads(row["grants"])
+        if not isinstance(grants, list):
+            continue
+        kept: list[Any] = []
+        changed = False
+        for g in grants:
+            if isinstance(g, dict) and g.get("area") == area:
+                changed = True
+                if new_area is None:
+                    continue
+                g = {**g, "area": new_area}
+            kept.append(g)
+        if changed:
+            await tx.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(kept), row["id"])
+
+
+async def _patch_zone_sqlite(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
+    """SQLite implementation: the zone update and the grant rewrite in one write transaction."""
+    async with write_transaction(db) as tx:
+        row = await tx.fetchrow("SELECT name FROM zones WHERE id = $1", str(uid))
+        if row is None:
+            raise HTTPException(404, "Not found")
+        old_name = row["name"]
+        args.append(str(uid))
+        q = f"UPDATE zones SET {', '.join(parts)} WHERE id = ${n}"
+        try:
+            await tx.execute(q, *args)
+        except UniqueViolationError as e:
+            raise HTTPException(409, "Zone name already exists") from e
+
+        if body.name is not None and body.name.strip() != old_name:
+            await _rewrite_grants_sqlite(tx, old_name, body.name.strip())
 
 
 @router.delete("/zones/{zone_id}")
@@ -283,16 +300,10 @@ async def _delete_zone_pg(db: Any, uid: uuid_mod.UUID) -> None:
 
 
 async def _delete_zone_sqlite(db: Any, uid: uuid_mod.UUID) -> None:
-    row = await db.fetchrow("SELECT id, name FROM zones WHERE id = $1", str(uid))
-    if row is None:
-        raise HTTPException(404, "Not found")
-    zone_name = row["name"]
-    await db.execute("DELETE FROM zones WHERE id = $1", str(uid))
-
-    # Remove zone from token grants in Python
-    token_rows = await db.fetch("SELECT id, grants FROM tokens")
-    for tr in token_rows:
-        grants = json.loads(tr["grants"]) if isinstance(tr["grants"], str) else tr["grants"]
-        filtered = [g for g in grants if g.get("area") != zone_name]
-        if len(filtered) != len(grants):
-            await db.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(filtered), tr["id"])
+    """SQLite implementation: the zone delete and the grant rewrite in one write transaction."""
+    async with write_transaction(db) as tx:
+        row = await tx.fetchrow("SELECT id, name FROM zones WHERE id = $1", str(uid))
+        if row is None:
+            raise HTTPException(404, "Not found")
+        await tx.execute("DELETE FROM zones WHERE id = $1", str(uid))
+        await _rewrite_grants_sqlite(tx, row["name"], None)

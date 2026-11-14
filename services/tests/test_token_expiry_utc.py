@@ -249,13 +249,29 @@ class _RecordTokenWrites:
         self._record(sql, args)
         return await self._db.fetchval(sql, *args)
 
+    def watch_transactions(self, monkeypatch) -> None:
+        """Also record writes made on a transaction handle (db.write_transaction)."""
+        from app import db as db_mod
+
+        def wrap(method):
+            async def wrapped(conn, sql, *args):
+                self._record(sql, args)
+                return await method(conn, sql, *args)
+
+            return wrapped
+
+        for cls in (db_mod._SqliteConn, db_mod._PgConn):
+            for name in ("execute", "fetchval"):
+                monkeypatch.setattr(cls, name, wrap(getattr(cls, name)))
+
 
 @pytest.mark.parametrize("path", PATHS)
-def test_every_write_path_binds_an_aware_utc_expiry(env, path):
+def test_every_write_path_binds_an_aware_utc_expiry(env, path, monkeypatch):
     """Both backends get the same instant only when the bound value carries its offset."""
     import app.main as main_mod
 
     rec = _RecordTokenWrites(main_mod.app.state.db)
+    rec.watch_transactions(monkeypatch)
     main_mod.app.state.db = rec
     try:
         env.set_expiry(path, (datetime.now(timezone.utc) + timedelta(hours=2)).replace(tzinfo=None).isoformat())
