@@ -10,7 +10,7 @@
    transactions belong to other requests.
 5. Startup stops with a clear message when the database already holds two MFA-enabled admins.
 
-The tests drive the real HTTP routes.  Redis is an in-memory fake with the get/setex/delete
+The tests drive the real HTTP routes.  Redis is an in-memory fake with the get/set/setex/delete
 commands the routes use.  Every secret the app reads is generated per run with ``secrets``.
 
 Each test DELETES EVERY ROW of admin_users in its database, before and after it runs, because
@@ -59,6 +59,13 @@ class FakeRedis:
 
     async def setex(self, k, _ttl, v):
         self.data[k] = v
+
+    async def set(self, k, v, nx=False, ex=None):
+        # SET NX, as the used-code record of mfa-verify needs; expiry is not modelled.
+        if nx and k in self.data:
+            return None
+        self.data[k] = str(v)
+        return True
 
     async def delete(self, *keys):
         for k in keys:
@@ -175,7 +182,7 @@ async def _plant_pending_admin(e: Env, username: str):
 
 def test_stale_setup_session_cannot_complete_after_bootstrap():
     async def run():
-        from app.sessions import COOKIE_NAME, get_pending_totp, get_session
+        from app.sessions import COOKIE_NAME, PREFIX, get_pending_totp, get_session
 
         async with _env() as e:
             attacker, legit = e.client(), e.client()
@@ -194,7 +201,8 @@ def test_stale_setup_session_cannot_complete_after_bootstrap():
             resp = await _verify(attacker, a_csrf, a_secret)
             assert resp.status_code == 403, f"stale setup session completed MFA: {resp.status_code} {resp.text}"
             assert attacker.cookies.get(COOKIE_NAME) == a_sid, "a new session cookie was issued"
-            assert set(e.redis.data) - keys_before == set(), "mfa-verify stored a new record (a session)"
+            new_sessions = {k for k in set(e.redis.data) - keys_before if k.startswith(PREFIX)}
+            assert new_sessions == set(), "mfa-verify stored a new session"
             assert await get_session(e.redis, a_sid) is None, "the stale setup session was kept"
             assert await get_pending_totp(e.redis, a_id) is None, "the stale pending secret was kept"
             assert len(await _enabled_ids(e.db)) == 1
