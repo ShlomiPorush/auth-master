@@ -1,8 +1,8 @@
 import uuid as uuid_mod
 
 import bcrypt
-import pyotp
 from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
@@ -10,6 +10,7 @@ from app.crypto_totp import decrypt_totp_secret
 from app.datetime_utils import get_tz_name
 from app.sessions import (
     COOKIE_NAME,
+    PARTIAL_TTL,
     SESSION_TTL,
     clear_sid_cookie,
     delete_session,
@@ -19,6 +20,7 @@ from app.sessions import (
     save_session,
     set_sid_cookie,
 )
+from app.totp_guard import check_totp_code, log_totp_failure, totp_error
 from app.zones import allowed_area_names
 from app.logger import log_activity
 
@@ -58,8 +60,8 @@ async def login(request: Request, response: Response, body: LoginBody):
         raise HTTPException(403, "MFA not configured")
     sid = new_sid()
     csrf = new_csrf()
-    await save_session(r, sid, {"kind": "partial", "adminId": str(row["id"]), "csrf": csrf}, SESSION_TTL)
-    set_sid_cookie(response, sid, SESSION_TTL)
+    await save_session(r, sid, {"kind": "partial", "adminId": str(row["id"]), "csrf": csrf}, PARTIAL_TTL)
+    set_sid_cookie(response, sid, PARTIAL_TTL)
     return {"mfaRequired": True, "csrf": csrf}
 
 
@@ -89,10 +91,19 @@ async def login_mfa(request: Request, response: Response, body: MfaBody, x_csrf_
         secret = decrypt_totp_secret(row["totp_secret_enc"])
     except Exception as e:
         raise HTTPException(500, "decrypt failed") from e
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(body.code.replace(" ", ""), valid_window=1):
-        raise HTTPException(400, "Invalid code")
-    
+    check = await check_totp_code(r, sess["adminId"], secret, body.code.replace(" ", ""))
+    if not check.ok:
+        err = totp_error(check, at_login=True)
+        if err.status_code == 429:
+            # Out of attempts: this sign-in ends; the password is needed again.
+            await delete_session(r, sid)
+        await log_totp_failure(request, sess["adminId"], "login", check)
+        if err.status_code != 429:
+            raise err
+        locked = JSONResponse({"detail": err.detail}, status_code=429, headers=err.headers)
+        clear_sid_cookie(locked)
+        return locked
+
     username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
     actor = username or f"admin:{sess['adminId']}"
     ip = request.client.host if request.client else "unknown"

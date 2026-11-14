@@ -4,7 +4,6 @@ from __future__ import annotations
 import secrets
 import uuid as uuid_mod
 
-import pyotp
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
@@ -15,6 +14,7 @@ from app.db import UniqueViolationError
 from app.deps import ALL_SCOPES
 from app.admin_deps import FullSession, csrf_check
 from app.logger import log_activity, get_actor
+from app.totp_guard import check_totp_code, log_totp_failure, totp_error
 
 router = APIRouter(prefix="/admin/api/api-keys", tags=["admin-api-keys"])
 
@@ -194,19 +194,21 @@ async def reveal_api_key(
     )
     if not admin_row or not admin_row["totp_enabled"] or not admin_row["totp_secret_enc"]:
         raise HTTPException(403, "MFA not configured")
-    try:
-        secret = decrypt_totp_secret(admin_row["totp_secret_enc"])
-    except Exception as e:
-        raise HTTPException(500, "decrypt failed") from e
-    totp = pyotp.TOTP(secret)
-    if not totp.verify(body.code.replace(" ", ""), valid_window=1):
-        raise HTTPException(400, "Invalid code")
-
+    # Before the code is checked, so a code is not used up on a key that cannot be shown
     row = await db.fetchrow("SELECT name, key_enc FROM api_keys WHERE id = $1", key_id)
     if not row:
         raise HTTPException(404, "Not found")
     if not row["key_enc"]:
         raise HTTPException(409, "Key cannot be revealed (created before encrypted storage support)")
+    try:
+        secret = decrypt_totp_secret(admin_row["totp_secret_enc"])
+    except Exception as e:
+        raise HTTPException(500, "decrypt failed") from e
+    check = await check_totp_code(request.app.state.redis, admin_id, secret, body.code.replace(" ", ""))
+    if not check.ok:
+        await log_totp_failure(request, admin_id, "api_key_reveal", check)
+        raise totp_error(check, at_login=False)
+
     try:
         raw_key = decrypt_token_value(row["key_enc"])
     except Exception as e:
