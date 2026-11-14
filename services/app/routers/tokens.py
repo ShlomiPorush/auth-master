@@ -1,10 +1,9 @@
 import json
 import re
 import uuid as uuid_mod
-from datetime import datetime
 from typing import Any
 
-from app.datetime_utils import fmt_datetime, is_expired
+from app.datetime_utils import fmt_datetime, is_expired, parse_expires_at
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -151,7 +150,7 @@ async def create_token(request: Request, body: TokenCreate):
     exp = None
     if body.expiresAt:
         try:
-            exp = datetime.fromisoformat(body.expiresAt.replace("Z", "+00:00"))
+            exp = parse_expires_at(body.expiresAt)
         except ValueError as e:
             raise HTTPException(400, "invalid expiresAt") from e
     new_id = str(uuid_mod.uuid4())
@@ -235,7 +234,7 @@ async def patch_token(request: Request, token_id: str, body: TokenPatch):
             parts.append("expires_at = NULL")
         else:
             try:
-                dt = datetime.fromisoformat(body.expiresAt.replace("Z", "+00:00"))
+                dt = parse_expires_at(body.expiresAt)
             except ValueError as e:
                 raise HTTPException(400, "invalid expiresAt") from e
             parts.append(f"expires_at = ${n}")
