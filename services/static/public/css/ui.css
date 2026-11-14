@@ -112,6 +112,10 @@
     --ui-fail: #C42B1C;
     --ui-info: #1F5FBF;
 
+    /* Charts: allowed calls in a neutral grey beside --ui-fail for denied ones; the pair
+       keeps apart for colour-blind readers (deutan ΔE 14.8), unlike green beside red */
+    --ui-chart-base: #8A938F;
+
     /* Depth */
     --ui-shadow-float: 0 12px 32px rgb(0 0 0 / .14);
     --ui-shadow-toast: 0 10px 30px rgb(0 0 0 / .16);
@@ -137,6 +141,8 @@
     --ui-warn: #F0B03F;
     --ui-fail: #FF6B61;
     --ui-info: #7DB3FF;
+
+    --ui-chart-base: #6B7570;
 }
 
 :root { color-scheme: light; }
@@ -528,6 +534,60 @@ body.ui-app { overflow: hidden; }
 .ui-perm > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ui-perm label { display: inline-flex; align-items: center; gap: var(--ui-sp-2); font-size: var(--ui-fs-ctl); cursor: pointer; }
 
+/* ---------- Usage: figures, the calls chart, zone bars ---------- */
+
+.ui-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--ui-gap); }
+.ui-kpi { display: grid; align-content: start; gap: var(--ui-sp-1); min-width: 0; padding: var(--ui-sp-6) var(--ui-pad-x); border-radius: var(--ui-radius);
+    background: var(--ui-panel); }
+.ui-kpi > small { color: var(--ui-muted); font-size: var(--ui-fs-meta); font-weight: 600; }
+.ui-kpi > b { font-size: var(--ui-fs-fig); font-weight: 750; line-height: 1.2; letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-kpi > span { color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-usage-note { color: var(--ui-muted); font-size: var(--ui-fs-sm); max-width: 90ch; }
+.ui-usage-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--ui-sp-3) var(--ui-sp-6); }
+.ui-usage-title > a:first-child { grid-column: 1 / -1; }
+.ui-usage-title h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-4); font-size: var(--ui-fs-title); font-weight: 750;
+    overflow-wrap: anywhere; }
+.ui-usage-title > a:first-child { justify-self: start; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; text-decoration: none; }
+@media (hover: hover) { .ui-usage-title > a:first-child:hover { color: var(--ui-ink); text-decoration: underline; text-underline-offset: 3px; } }
+
+.ui-chart { display: grid; gap: var(--ui-sp-5); padding: var(--ui-sp-2) var(--ui-pad-x) var(--ui-pad-x); }
+.ui-chart-read { min-height: 20px; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-variant-numeric: tabular-nums; }
+.ui-chart-read b { color: var(--ui-ink); font-weight: 650; }
+.ui-chart-plot { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 180px auto; column-gap: var(--ui-sp-4); row-gap: var(--ui-sp-3); }
+.ui-chart-y { position: relative; min-width: 24px; color: var(--ui-muted); font-size: var(--ui-fs-xs); font-variant-numeric: tabular-nums; }
+.ui-chart-y > span { position: absolute; inset-inline-end: 0; transform: translateY(-50%); white-space: nowrap; }
+.ui-chart-bars { display: grid; grid-template-columns: repeat(var(--ui-chart-n), minmax(0, 1fr)); gap: var(--ui-sp-1); border-bottom: 1px solid var(--ui-line);
+    background-image: linear-gradient(var(--ui-line), var(--ui-line)), linear-gradient(var(--ui-line), var(--ui-line));
+    background-size: 100% 1px; background-position: 0 0, 0 50%; background-repeat: no-repeat; touch-action: pan-y; }
+.ui-chart-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: var(--ui-sp-1); min-width: 0; height: 100%; padding: 0; border: 0;
+    border-radius: var(--ui-sp-2) var(--ui-sp-2) 0 0; background: none; cursor: default; }
+.ui-chart-col.is-on { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); }
+@media (hover: hover) { .ui-chart-col:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); } }
+.ui-chart-col:focus-visible { outline-offset: 0; }
+.ui-chart-col.is-none, .ui-chart-col.is-partial {
+    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-muted) 22%, transparent) 0 2px, transparent 2px 7px); }
+.ui-chart-seg { display: block; flex: none; width: min(100%, 56px); min-height: 2px; }
+.ui-chart-seg:first-child { border-radius: var(--ui-sp-2) var(--ui-sp-2) 0 0; }
+.ui-chart-seg.is-base, .ui-chart-key .is-base { background: var(--ui-chart-base); }
+.ui-chart-seg.is-fail, .ui-chart-key .is-fail { background: var(--ui-fail); }
+.ui-chart-x { grid-column: 2; display: grid; grid-template-columns: repeat(var(--ui-chart-n), minmax(0, 1fr)); gap: var(--ui-sp-1);
+    color: var(--ui-muted); font-size: var(--ui-fs-xs); font-variant-numeric: tabular-nums; }
+.ui-chart-x > span { justify-self: center; white-space: nowrap; }
+.ui-chart-key { display: flex; flex-wrap: wrap; gap: var(--ui-sp-3) var(--ui-sp-7); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-chart-key > span { display: inline-flex; align-items: center; gap: var(--ui-sp-3); }
+.ui-chart-key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.ui-chart-key i.is-none { background-image: repeating-linear-gradient(135deg, var(--ui-muted) 0 1px, transparent 1px 4px);
+    box-shadow: inset 0 0 0 1px var(--ui-line); }
+
+.ui-bar { display: flex; gap: var(--ui-sp-1); height: 8px; min-width: 0; }
+.ui-bar > i { display: block; min-width: 2px; height: 100%; border-radius: var(--ui-sp-1); }
+.ui-bar > i.is-base { background: var(--ui-chart-base); }
+.ui-bar > i.is-fail { background: var(--ui-fail); }
+#usage-table { --ui-cols: minmax(150px, 1.3fr) 90px 110px minmax(0, 1.6fr) 90px 120px; --ui-table-min: 860px; }
+#usage-areas { --ui-cols: minmax(140px, 1fr) 90px minmax(120px, 1.2fr) minmax(0, 1fr); --ui-table-min: 640px; }
+#usage-addrs { --ui-cols: minmax(140px, 1fr) 90px 90px 130px; }
+
 /* ---------- Dialogs (js/ui.js, uiDialog) ---------- */
 
 .ui-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: var(--ui-sp-7);
@@ -660,6 +720,7 @@ body.ui-app { overflow: hidden; }
     .ui-stack .ui-td-end { flex: 0 0 auto; margin-inline-start: auto; }
     .ui-stack .ui-td:empty { display: none; }
     .ui-stack .ui-unit { display: inline; color: var(--ui-muted); }
+    .ui-chart-x > .is-minor { display: none; }
     /* The zone name on its own line, the four flags in one row under it */
     .ui-perm { grid-template-columns: repeat(4, auto); justify-content: start; row-gap: var(--ui-sp-3); }
     .ui-perm > b { grid-column: 1 / -1; }

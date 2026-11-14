@@ -1,6 +1,6 @@
 /*
  * The admin dashboard: the shell (navigation, Needs attention, preferences) and
- * its pages: Tokens, Zones, API Keys, Activity Log, Access Logs and Settings.
+ * its pages: Tokens, Zones, API Keys, Activity Log, Access Logs, Usage and Settings.
  *
  * Builds on js/ui.js (builders, router, refresh scheduler, date helpers) and
  * js/common.js (requests). Everything from the server is escaped with esc() or
@@ -14,6 +14,7 @@ var PAGES = {
     apikeys: { path: "/admin/api-keys", title: "API Keys" },
     activity: { path: "/admin/logs/activity", title: "Activity Log" },
     access: { path: "/admin/logs/access", title: "Access Logs" },
+    usage: { path: "/admin/usage", title: "Usage" },
     settings: { path: "/admin/settings", title: "Settings" },
 };
 
@@ -224,7 +225,7 @@ function dashShowPage(id, info) {
     });
     var more = document.getElementById("tab-more");
     if (more) {
-        if (id === "activity" || id === "access" || id === "settings") more.setAttribute("aria-current", "page");
+        if (id === "activity" || id === "access" || id === "usage" || id === "settings") more.setAttribute("aria-current", "page");
         else more.removeAttribute("aria-current");
     }
     var title = document.getElementById("mtop-page");
@@ -323,7 +324,7 @@ function dashMoreOpen() {
     };
     d = uiDialog({
         title: "More", size: "sm", backdropClass: "ui-more-layer", close: close, backdropClose: close,
-        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("settings") +
+        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("usage") + link("settings") +
             '<button type="button" class="ui-tool" data-more-prefs><span class="ui-tool-label">Preferences</span></button>' +
             '<button type="button" class="ui-tool" data-more-theme><span class="ui-tool-label"></span></button>' +
             '<p class="ui-side-user">Signed in as&nbsp;<bdi dir="auto">' + esc(dash.user) + "</bdi></p>" +
@@ -876,6 +877,7 @@ function dashTokMenu(id, button) {
     if (!t) return;
     uiMenu(button, [
         { label: "Edit", action: "token-edit", run: function () { dashTokenDialog(t); } },
+        { label: "Usage", action: "token-usage", run: function () { uiGo("usage", "token=" + encodeURIComponent(t.id)); } },
         { label: "Copy token", action: "token-copy", disabled: !t.canReveal, reason: TOKEN_LOCKED_REASON, run: function () { dashMfaDialog("token", t); } },
         { label: t.isActive ? "Disable" : "Enable", action: "token-toggle", run: function () { dashTokToggle(t, button); } },
         { label: "Delete", action: "token-delete", danger: true, run: function () { dashTokDelete(t); } },
@@ -1532,7 +1534,7 @@ var dashLogs = {
         loadingText: "Loading activity...", emptyText: "No activity logs found.", failedText: "Failed to load activity logs",
     },
     access: {
-        id: "access", endpoint: "/admin/api/logs/access", filterParam: "result", queryKey: "result",
+        id: "access", endpoint: "/admin/api/logs/access", filterParam: "result", queryKey: "result", tokenParam: "token_id",
         loadingText: "Loading access logs...", emptyText: "No access logs found.", failedText: "Failed to load access logs",
     },
 };
@@ -1554,13 +1556,14 @@ Object.keys(dashLogs).forEach(function (k) {
     s.pending = [];
     s.drawn = "";
     s.bound = false;
-    s.applied = { search: "", filter: "" };
+    s.applied = { search: "", filter: "", token: "" };
 });
 
 function dashLogQuery(s, extra) {
     var p = new URLSearchParams();
     if (s.applied.search) p.set("search", s.applied.search);
     if (s.applied.filter) p.set(s.filterParam, s.applied.filter);
+    if (s.applied.token && s.tokenParam) p.set(s.tokenParam, s.applied.token);
     Object.keys(extra).forEach(function (k) { p.set(k, extra[k]); });
     return s.endpoint + "?" + p.toString();
 }
@@ -1583,7 +1586,7 @@ function dashLogTailCursor(s) {
 
 // The filters a list was loaded with; rows, cursors and the pill belong to them
 function dashLogKey(s) {
-    return JSON.stringify([s.applied.search, s.applied.filter]);
+    return JSON.stringify([s.applied.search, s.applied.filter, s.applied.token]);
 }
 
 // The rows shown were loaded with the filters applied now: only then may a refresh
@@ -1871,12 +1874,13 @@ function dashLogDraw(s, quiet) {
 function dashLogApply(s, fromInputs) {
     var search = document.getElementById(s.id + "-search");
     var sel = document.getElementById(s.id + "-filter");
-    if (fromInputs) s.applied = { search: search.value.trim(), filter: sel.value };
+    if (fromInputs) s.applied = { search: search.value.trim(), filter: sel.value, token: s.applied.token };
     var p = new URLSearchParams();
     if (s.applied.search) p.set("q", s.applied.search);
     if (s.applied.filter) p.set(s.queryKey, s.applied.filter);
+    if (s.applied.token) p.set("token", s.applied.token);
     uiSetPageQuery(p);
-    document.getElementById(s.id + "-reset").classList.toggle("hidden", !s.applied.search && !s.applied.filter);
+    dashLogFilterMarks(s);
     var main = uiMainScroller();
     if (main) main.scrollTop = 0;
     return dashLogFirst(s, false);
@@ -1907,8 +1911,16 @@ function dashLogBind(s) {
         search.value = "";
         sel.value = "";
         uiPickerSync(sel);
+        s.applied.token = "";
         dashLogApply(s, true);
     });
+    var tokenChip = document.getElementById(s.id + "-token");
+    if (tokenChip) {
+        tokenChip.addEventListener("click", function () {
+            s.applied.token = "";
+            dashLogApply(s, false);
+        });
+    }
     document.getElementById(s.id + "-new").addEventListener("click", function () {
         dashLogTakeNew(s);
         var main = uiMainScroller();
@@ -1923,19 +1935,38 @@ function dashLogBind(s) {
     });
 }
 
+// Reset shows while any filter is set; the token filter (from Usage) is a chip that removes it
+function dashLogFilterMarks(s) {
+    var reset = document.getElementById(s.id + "-reset");
+    if (reset) reset.classList.toggle("hidden", !s.applied.search && !s.applied.filter && !s.applied.token);
+    var chip = document.getElementById(s.id + "-token");
+    if (!chip) return;
+    var id = s.applied.token;
+    chip.classList.toggle("hidden", !id);
+    if (!id) return;
+    var draw = function () {
+        if (s.applied.token !== id) return;
+        var t = (dashTokenStore.rows || []).filter(function (r) { return r.id === id; })[0];
+        chip.innerHTML = '<span class="ui-picker-name">Token</span><span>' + (t ? uiUserText(t.name) : "Deleted token") + "</span>" +
+            '<span aria-hidden="true">&times;</span>';
+    };
+    draw();
+    dashTokensLoad().then(draw);
+}
+
 function dashLogShow(s) {
     dashLogBind(s);
     var q = uiPageQuery();
-    var applied = { search: q.get("q") || "", filter: q.get(s.queryKey) || "" };
+    var applied = { search: q.get("q") || "", filter: q.get(s.queryKey) || "", token: s.tokenParam ? q.get("token") || "" : "" };
     var sel = document.getElementById(s.id + "-filter");
     var known = Array.prototype.some.call(sel.options, function (o) { return o.value === applied.filter; });
     if (!known) applied.filter = "";
     document.getElementById(s.id + "-search").value = applied.search;
     sel.value = applied.filter;
     uiPickerSync(sel);
-    document.getElementById(s.id + "-reset").classList.toggle("hidden", !applied.search && !applied.filter);
-    var same = s.rows !== null && applied.search === s.applied.search && applied.filter === s.applied.filter;
+    var same = s.rows !== null && applied.search === s.applied.search && applied.filter === s.applied.filter && applied.token === s.applied.token;
     s.applied = applied;
+    dashLogFilterMarks(s);
     s.drawn = "";
     if (same) {
         dashLogDraw(s, false);
@@ -2025,6 +2056,462 @@ function dashLimitDraw() {
     dashLimit.drawn = html;
     box.innerHTML = html;
 }
+
+// ===========================================================================
+// Usage: calls per token from the access log, and the calls over time
+// (services/app/routers/admin_usage.py). ?range= picks the period; ?token= opens
+// one token (its id, or "unknown" for calls with a token the service did not know).
+// ===========================================================================
+
+var USAGE_RANGES = { "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days" };
+var USAGE_STATUS = {
+    active: { label: "Active", tone: "ok" },
+    disabled: { label: "Disabled", tone: "" },
+    expired: { label: "Expired", tone: "warn" },
+    deleted: { label: "Deleted", tone: "" },
+};
+var DASH_USE_COLS = [
+    { key: "name", label: "Token", kind: "text" },
+    { key: "calls", label: "Calls", kind: "number" },
+    { key: "denied", label: "Denied", kind: "number" },
+    { key: "ipCount", label: "Addresses", kind: "number" },
+    { key: "lastCallAt", label: "Last call", kind: "date" },
+];
+var USAGE_NOTE = "Counts come from the access log. Requests rejected by the rate limit and requests with an invalid level are not logged, " +
+    "so they are not counted. Grants checks (<code>/validate/grants</code>) are counted apart from calls.";
+
+// data: the last answer; shown: the answer the page now draws (a refresh skipped while the
+// user works in the page leaves the older one on screen, and the chart reads that one)
+var dashUse = { range: "7d", token: "", data: null, dataFor: "", notFound: false, failed: "", seq: 0,
+    sort: { key: "", dir: "" }, sel: -1, drawn: "", shown: null, bound: false };
+var USAGE_TOKEN_ID = /^(?:unknown|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+function dashUseKey() {
+    return dashUse.token + "|" + dashUse.range;
+}
+
+function dashUseReadQuery() {
+    var q = uiPageQuery();
+    var r = q.get("range") || "7d";
+    dashUse.range = USAGE_RANGES[r] ? r : "7d";
+    dashUse.token = q.get("token") || "";
+}
+
+function dashUseQuery(token, range) {
+    var p = new URLSearchParams();
+    if (token) p.set("token", token);
+    if (range !== "7d") p.set("range", range);
+    return p.toString();
+}
+
+function dashUseLoad(isCurrent) {
+    var key = dashUseKey();
+    var seq = ++dashUse.seq;
+    // Only a token id or "unknown" goes into the path: "." or ".." would name another address
+    if (dashUse.token && !USAGE_TOKEN_ID.test(dashUse.token)) {
+        dashUse.data = null;
+        dashUse.dataFor = key;
+        dashUse.notFound = true;
+        dashUse.failed = "";
+        dashUseDraw(false);
+        return Promise.resolve();
+    }
+    var path = "/admin/api/usage/tokens" + (dashUse.token ? "/" + encodeURIComponent(dashUse.token) : "");
+    return api("GET", path + "?range=" + encodeURIComponent(dashUse.range)).then(function (res) {
+        // A newer load, a newer refresh cycle or another period owns the page
+        if (seq !== dashUse.seq || (isCurrent && !isCurrent()) || key !== dashUseKey()) return;
+        if (res.ok && res.data && Array.isArray(res.data.series)) {
+            dashUse.data = res.data;
+            dashUse.dataFor = key;
+            dashUse.notFound = false;
+            dashUse.failed = "";
+        } else if (res.status === 404 && dashUse.token) {
+            dashUse.data = null;
+            dashUse.dataFor = key;
+            dashUse.notFound = true;
+            dashUse.failed = "";
+        } else {
+            dashUse.failed = apiError(res, "The server did not answer.");
+        }
+        dashUseDraw(!!isCurrent);
+    });
+}
+
+// A round top for the value axis: 1, 2 or 5 times a power of ten, even so its half is whole
+function dashUseNiceMax(v) {
+    if (!(v > 0)) return 2;
+    var p = Math.pow(10, Math.floor(Math.log10(v)));
+    var m = v / p;
+    var top = (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+    if (top < 2) top = 2;
+    if (top % 2) top += 1;
+    return top;
+}
+
+function dashUsePct(part, whole) {
+    if (!whole) return "0%";
+    var p = (part / whole) * 100;
+    if (p > 0 && p < 1) return "under 1%";
+    return Math.round(p) + "%";
+}
+
+function dashUseBucketName(d, b) {
+    return d.range === "24h" ? formatTime(b.start, { seconds: false }) : formatDay(b.start);
+}
+
+// One bucket in words: the chart's readout, each bar's name and the table behind the chart
+function dashUseBucketWords(d, b) {
+    if (b.coverage === "none") return "No data: access logs older than " + uiCountLabel(d.retentionDays, "day", "days") + " are deleted";
+    var text = uiCountLabel(b.allowed + b.denied, "call", "calls") + ", " + uiNum(b.allowed) + " allowed, " + uiNum(b.denied) + " denied";
+    if (b.coverage === "partial") text += " (counted from " + formatTime(d.dataFrom, { seconds: false }) + "; older logs are deleted)";
+    return text;
+}
+
+// Allowed and denied calls per hour or day: bars from the series, a readout line that
+// follows the pointer and the keyboard, and the same numbers as a table for screen readers
+function dashUseChartHtml(d) {
+    var series = d.series;
+    var n = series.length;
+    var max = 0;
+    series.forEach(function (b) { max = Math.max(max, b.allowed + b.denied); });
+    var top = dashUseNiceMax(max);
+    var hourly = d.range === "24h";
+    var every = hourly ? 3 : n > 10 ? 5 : 1;
+    var gaps = false;
+    var cols = series.map(function (b, i) {
+        var cls = b.coverage === "none" ? " is-none" : b.coverage === "partial" ? " is-partial" : "";
+        if (cls) gaps = true;
+        var seg = function (v, tone) {
+            return v ? '<span class="ui-chart-seg is-' + tone + '" style="height:' + ((v / top) * 100).toFixed(2) + '%"></span>' : "";
+        };
+        return '<button type="button" class="ui-chart-col' + cls + '" data-chart-i="' + i + '" data-action="chart-' + i + '" tabindex="-1" aria-label="' +
+            esc(dashUseBucketName(d, b) + ": " + dashUseBucketWords(d, b)) + '">' + seg(b.denied, "fail") + seg(b.allowed, "base") + "</button>";
+    }).join("");
+    var ticks = series.map(function (b, i) {
+        // Count the labels back from the newest bucket, so the last one is always named
+        var back = n - 1 - i;
+        if (back % every) return "";
+        // On a phone every other hour label goes, so the rest do not touch
+        var minor = hourly && (back / every) % 2 ? ' class="is-minor"' : "";
+        return "<span" + minor + ' style="grid-column:' + (i + 1) + '">' + esc(hourly ? formatClock(b.start) : formatShortDay(b.start)) + "</span>";
+    }).join("");
+    var rows = series.map(function (b) {
+        return "<tr><th scope=\"row\">" + esc(dashUseBucketName(d, b)) + "</th><td>" +
+            (b.coverage === "none" ? "No data" : esc(uiNum(b.allowed))) + "</td><td>" + (b.coverage === "none" ? "No data" : esc(uiNum(b.denied))) + "</td></tr>";
+    }).join("");
+    return '<div class="ui-chart">' +
+        '<p class="ui-chart-read" id="usage-read" aria-live="polite"></p>' +
+        '<div class="ui-chart-plot">' +
+        '<div class="ui-chart-y" aria-hidden="true"><span style="top:0%">' + esc(uiNum(top)) + '</span><span style="top:50%">' + esc(uiNum(top / 2)) +
+        '</span><span style="top:100%">0</span></div>' +
+        '<div class="ui-chart-bars" role="group" aria-label="' + (hourly ? "Calls per hour" : "Calls per day") + '. Arrow keys move between bars." style="--ui-chart-n:' + n + '">' + cols + "</div>" +
+        '<div class="ui-chart-x" aria-hidden="true" style="--ui-chart-n:' + n + '">' + ticks + "</div></div>" +
+        '<p class="ui-chart-key"><span><i class="is-base"></i>Allowed</span><span><i class="is-fail"></i>Denied</span>' +
+        (gaps ? '<span><i class="is-none"></i>Logs deleted</span>' : "") + "</p>" +
+        '<table class="ui-sr"><caption>' + (hourly ? "Calls per hour" : "Calls per day") + "</caption><thead><tr><th scope=\"col\">" +
+        (hourly ? "Hour" : "Day") + '</th><th scope="col">Allowed</th><th scope="col">Denied</th></tr></thead><tbody>' + rows + "</tbody></table></div>";
+}
+
+// Show one bar's numbers; the newest bar when none was picked
+function dashUseSelect(i, focus) {
+    var body = document.getElementById("usage-body");
+    var d = dashUse.shown;
+    if (!body || !d) return;
+    var cols = body.querySelectorAll("[data-chart-i]");
+    if (!cols.length) return;
+    if (i < 0 || i >= cols.length) i = cols.length - 1;
+    dashUse.sel = i;
+    Array.prototype.forEach.call(cols, function (c, k) {
+        c.classList.toggle("is-on", k === i);
+        c.setAttribute("tabindex", k === i ? "0" : "-1");
+    });
+    var b = d.series[i];
+    var read = document.getElementById("usage-read");
+    if (read && b) read.innerHTML = "<b>" + esc(dashUseBucketName(d, b)) + "</b> " + esc(dashUseBucketWords(d, b));
+    if (focus) cols[i].focus({ preventScroll: true });
+}
+
+function dashUseKpi(label, value, sub) {
+    return '<div class="ui-kpi"><small>' + esc(label) + "</small><b>" + value + "</b>" + (sub ? "<span>" + sub + "</span>" : "") + "</div>";
+}
+
+function dashUseNotices(d) {
+    var out = "";
+    if (d.partial) {
+        out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>Part of this period is no longer in the log</b>Access logs are kept for ' +
+            esc(uiCountLabel(d.retentionDays, "day", "days")) + ", so these figures start at " + uiTime(d.dataFrom, formatTime(d.dataFrom, { seconds: false })) + ".</div></div>";
+    }
+    if (d.areasIncomplete) {
+        out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>Area figures are incomplete for this period</b>' +
+            "The calls name more different zones than the page can count, so zone figures are not shown. Call counts are complete.</div></div>";
+    }
+    if (dashUse.failed) {
+        out += '<div class="ui-banner ui-banner-fail" role="alert"><div><b>Could not refresh these figures</b>' + esc(dashUse.failed) +
+            " They are tried again every minute.</div></div>";
+    }
+    return out;
+}
+
+function dashUseChartPanel(d) {
+    var t = d.totals;
+    return '<div class="ui-panel"><div class="ui-panel-head">' + (d.range === "24h" ? "Calls per hour" : "Calls per day") +
+        ' <span class="ui-count">' + esc(uiCountLabel(t.calls, "call", "calls")) + "</span></div>" + dashUseChartHtml(d) + "</div>";
+}
+
+function dashUseStatusTag(status) {
+    if (status === "unknown") return "";
+    var st = USAGE_STATUS[status] || USAGE_STATUS.active;
+    return dashTag(st.label, st.tone);
+}
+
+function dashUseAreaTags(list) {
+    if (list === null) return '<span class="ui-muted">-</span>';
+    if (!list.length) return '<span class="ui-muted">No calls</span>';
+    return '<div class="ui-tags">' + list.map(function (a) {
+        return '<span class="ui-tag ui-tag-line">' + uiUserText(a.area + (a.truncated ? "…" : "")) + " " + esc(uiNum(a.calls)) + "</span>";
+    }).join("") + "</div>";
+}
+
+function dashUseSortValue(t, key) {
+    if (key === "name") return String(t.name || "");
+    if (key === "lastCallAt") return uiParseInstant(t.lastCallAt);
+    return t[key];
+}
+
+function dashUseOverviewHtml(d) {
+    var t = d.totals;
+    var html = dashUseNotices(d) + '<div class="ui-kpis">' +
+        dashUseKpi("Calls", esc(uiNum(t.calls)), "in " + esc(USAGE_RANGES[d.range])) +
+        dashUseKpi("Denied", esc(uiNum(t.denied)), esc(dashUsePct(t.denied, t.calls)) + " of calls") +
+        dashUseKpi("Tokens with calls", esc(uiNum(t.tokensUsed)) + ' <span class="ui-muted">of ' + esc(uiNum(t.tokensTotal)) + "</span>", "tokens that called in this period") +
+        dashUseKpi("Unknown token", esc(uiNum(t.unknownCalls)), "calls with a token the service does not know") +
+        "</div>" + dashUseChartPanel(d);
+    // Busiest first; the header buttons and the Sort order re-sort from here
+    var base = d.tokens.slice().sort(function (a, b) {
+        return b.calls - a.calls || b.grantsChecks - a.grantsChecks || String(a.name).localeCompare(String(b.name), undefined, { sensitivity: "base" });
+    });
+    var rows = uiSortRows(base, dashUse.sort, dashUseSortValue);
+    var head = DASH_USE_COLS.slice(0, 3).map(function (c) { return dashSortHead(dashUse.sort, c); }).join("") +
+        '<div class="ui-td" role="columnheader">Top zones</div>' +
+        DASH_USE_COLS.slice(3).map(function (c) { return dashSortHead(dashUse.sort, c); }).join("");
+    var body = rows.length ? rows.map(function (r) {
+        var key = r.tokenId || "unknown";
+        return '<div class="ui-tr' + (r.calls ? "" : " is-off") + '" role="row" tabindex="0" data-key="' + esc(key) + '" aria-label="' + esc(r.name) + '">' +
+            '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(r.name) + "</span>" +
+            (r.status !== "active" ? " " + dashUseStatusTag(r.status) : "") +
+            (r.grantsChecks ? '<span class="ui-td-sub">' + esc(uiCountLabel(r.grantsChecks, "grants check", "grants checks")) + "</span>" : "") + "</div>" +
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Calls </span>' + esc(uiNum(r.calls)) + "</div>" +
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Denied </span><span' + (r.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(r.denied)) + "</span>" +
+            (r.calls ? '<span class="ui-td-sub">' + esc(dashUsePct(r.denied, r.calls)) + "</span>" : "") + "</div>" +
+            '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + (r.calls ? dashUseAreaTags(r.topAreas) : '<span class="ui-muted">No calls in this period</span>') + "</div>" +
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Addresses </span>' + esc(uiNum(r.ipCount)) + "</div>" +
+            '<div class="ui-td" role="cell"><span class="ui-unit">Last call </span>' + (r.lastCallAt ? uiTime(r.lastCallAt) : '<span class="ui-muted">-</span>') + "</div></div>";
+    }).join("") : dashEmpty("No tokens yet.", "Create a token on the Tokens page; its calls show here.");
+    html += '<div class="ui-panel"><div class="ui-panel-head">Tokens <span class="ui-count">' + esc(uiCountLabel(rows.length, "row", "rows")) + "</span></div>" +
+        '<div class="ui-table ui-stack" id="usage-table" role="table" aria-label="Calls per token">' +
+        '<div class="ui-tr ui-tr-head" role="row" id="usage-head">' + head + "</div>" +
+        '<div class="ui-table-body" role="rowgroup">' + body + "</div></div></div>" +
+        '<p class="ui-usage-note">' + USAGE_NOTE + (t.grantsChecks ? " This period has " + esc(uiCountLabel(t.grantsChecks, "grants check", "grants checks")) + "." : "") + "</p>";
+    return html;
+}
+
+function dashUseBackLink() {
+    var q = dashUseQuery("", dashUse.range);
+    return '<a data-go="usage" data-query="' + esc(q) + '" href="' + esc(basePath() + PAGES.usage.path + (q ? "?" + q : "")) + '">&larr; All tokens</a>';
+}
+
+function dashUseLevels(levels) {
+    return '<div class="ui-tags">' + Object.keys(levels).map(function (lv) {
+        var v = levels[lv];
+        return (v.allowed ? '<span class="ui-tag ui-tag-line">' + esc(lv + " " + uiNum(v.allowed)) + "</span>" : "") +
+            (v.denied ? '<span class="ui-tag ui-tag-fail">' + esc(lv + " " + uiNum(v.denied) + " denied") + "</span>" : "");
+    }).join("") + "</div>";
+}
+
+function dashUseTokenHtml(d) {
+    var t = d.totals;
+    var tok = d.token;
+    var logs = tok.id ? '<a class="ui-btn ui-btn-sm" data-go="access" data-query="token=' + esc(encodeURIComponent(tok.id)) + '" href="' +
+        esc(basePath() + PAGES.access.path + "?token=" + encodeURIComponent(tok.id)) + '">Open in Access Logs</a>' : "";
+    var html = '<div class="ui-usage-title">' + dashUseBackLink() + "<h2>" + uiUserText(tok.name) + " " + dashUseStatusTag(tok.status) + "</h2>" + logs + "</div>" +
+        dashUseNotices(d) + '<div class="ui-kpis">' +
+        dashUseKpi("Calls", esc(uiNum(t.calls)), "in " + esc(USAGE_RANGES[d.range])) +
+        dashUseKpi("Denied", esc(uiNum(t.denied)), esc(dashUsePct(t.denied, t.calls)) + " of calls") +
+        dashUseKpi("Zones", d.areasCount === null ? "-" : esc(uiNum(d.areasCount)), "called at least once") +
+        dashUseKpi("Addresses", esc(uiNum(t.ipCount)), "the calls came from") +
+        dashUseKpi("Last call", t.lastCallAt ? uiTime(t.lastCallAt) : '<span class="ui-muted">-</span>', t.grantsChecks ? esc(uiCountLabel(t.grantsChecks, "grants check", "grants checks")) : "") +
+        "</div>" + dashUseChartPanel(d);
+
+    var areas = d.areas;
+    var areasBody;
+    if (areas === null) areasBody = dashEmpty("Area figures are incomplete for this period.", "Call counts above are complete.");
+    else if (!areas.length) areasBody = dashEmpty("No calls in this period.", "");
+    else {
+        var most = areas[0].calls;
+        areasBody = '<div class="ui-table ui-stack" id="usage-areas" role="table" aria-label="Calls per zone">' +
+            '<div class="ui-tr ui-tr-head" role="row"><div class="ui-td" role="columnheader">Zone</div><div class="ui-td" role="columnheader">Calls</div>' +
+            '<div class="ui-td" role="columnheader">Allowed and denied</div><div class="ui-td" role="columnheader">Levels</div></div>' +
+            '<div class="ui-table-body" role="rowgroup">' + areas.map(function (a) {
+                var width = Math.max(2, (a.calls / most) * 100).toFixed(1);
+                return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(a.area + (a.truncated ? "…" : "")) + "</span></div>" +
+                    '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Calls </span>' + esc(uiNum(a.calls)) +
+                    (a.denied ? '<span class="ui-td-sub"><span class="ui-text-fail">' + esc(uiNum(a.denied) + " denied") + "</span></span>" : "") + "</div>" +
+                    '<div class="ui-td ui-td-full" role="cell"><div class="ui-bar" style="width:' + width + '%" aria-hidden="true">' +
+                    (a.allowed ? '<i class="is-base" style="flex:' + a.allowed + '"></i>' : "") + (a.denied ? '<i class="is-fail" style="flex:' + a.denied + '"></i>' : "") +
+                    '</div><span class="ui-sr">' + esc(uiNum(a.allowed) + " allowed, " + uiNum(a.denied) + " denied") + "</span></div>" +
+                    '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + dashUseLevels(a.levels) + "</div></div>";
+            }).join("") + "</div></div>";
+    }
+    var shownAreas = areas ? areas.length : 0;
+    html += '<div class="ui-panel"><div class="ui-panel-head">Zones' +
+        (d.areasCount !== null ? ' <span class="ui-count">' + esc(d.areasCount > shownAreas ? "the " + uiNum(shownAreas) + " busiest of " + uiNum(d.areasCount) : uiCountLabel(d.areasCount, "zone", "zones")) + "</span>" : "") +
+        "</div>" + areasBody + "</div>";
+
+    var addrs = d.addresses;
+    var addrBody = !addrs.length ? dashEmpty("No calls in this period.", "") :
+        '<div class="ui-table ui-stack" id="usage-addrs" role="table" aria-label="Calls per address">' +
+        '<div class="ui-tr ui-tr-head" role="row"><div class="ui-td" role="columnheader">Address</div><div class="ui-td" role="columnheader">Calls</div>' +
+        '<div class="ui-td" role="columnheader">Denied</div><div class="ui-td" role="columnheader">Last call</div></div>' +
+        '<div class="ui-table-body" role="rowgroup">' + addrs.map(function (a) {
+            return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell">' + uiCopyable(a.address + (a.truncated ? "…" : "")) + "</div>" +
+                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Calls </span>' + esc(uiNum(a.calls)) + "</div>" +
+                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">Denied </span><span' + (a.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(a.denied)) + "</span></div>" +
+                '<div class="ui-td" role="cell"><span class="ui-unit">Last call </span>' + uiTime(a.lastCallAt) + "</div></div>";
+        }).join("") + "</div></div>";
+    html += '<div class="ui-panel"><div class="ui-panel-head">Addresses <span class="ui-count">' +
+        esc(t.ipCount > addrs.length ? "the " + uiNum(addrs.length) + " busiest of " + uiNum(t.ipCount) : uiCountLabel(t.ipCount, "address", "addresses")) +
+        "</span></div>" + addrBody + "</div>";
+
+    html += '<p class="ui-usage-note">' + USAGE_NOTE + "</p>";
+    return html;
+}
+
+function dashUseNotFoundHtml() {
+    return '<div class="ui-usage-title">' + dashUseBackLink() + "</div>" +
+        '<div class="ui-panel">' + dashEmpty("No usage to show for this token.", "It is not a token any more and made no calls in this period. Pick a longer period or go back to all tokens.") + "</div>";
+}
+
+function dashUseSyncRange() {
+    document.querySelectorAll("#usage-range [data-range]").forEach(function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-range") === dashUse.range ? "true" : "false");
+    });
+    // The Sort button orders the token list, which only the overview shows
+    var sort = document.getElementById("usage-sort");
+    if (sort) sort.classList.toggle("hidden", !!dashUse.token);
+    dashSortButtonSync("usage-sort", dashUse.sort, "tokens", DASH_USE_COLS);
+}
+
+// A background refresh (quiet) leaves the page alone while the user works in it
+function dashUseDraw(quiet) {
+    var body = document.getElementById("usage-body");
+    if (!body) return;
+    dashUseSyncRange();
+    var mine = dashUse.dataFor === dashUseKey();
+    var html;
+    if (mine && dashUse.notFound) html = dashUseNotFoundHtml();
+    else if (mine && dashUse.data) html = dashUse.token ? dashUseTokenHtml(dashUse.data) : dashUseOverviewHtml(dashUse.data);
+    else html = '<div class="ui-panel">' + (dashUse.failed ? dashFailed("Could not load the usage", dashUse.failed, "data-usage-retry") : dashLoading("Loading usage...")) + "</div>";
+    if (quiet && uiAreaHeld(body)) return;
+    dashUse.shown = mine ? dashUse.data : null;
+    if (html !== dashUse.drawn) {
+        dashUse.drawn = html;
+        uiKeepFocus(body, function () { body.innerHTML = html; });
+    }
+    if (dashUse.shown) dashUseSelect(dashUse.sel, false);
+}
+
+function dashUseOpen(key) {
+    uiGo("usage", dashUseQuery(key, dashUse.range));
+}
+
+function dashUseBind() {
+    if (dashUse.bound) return;
+    dashUse.bound = true;
+    document.getElementById("usage-range").addEventListener("click", function (event) {
+        var b = event.target.closest("[data-range]");
+        if (!b || b.getAttribute("data-range") === dashUse.range) return;
+        dashUse.range = b.getAttribute("data-range");
+        dashUse.sel = -1;
+        dashUse.failed = "";
+        uiSetPageQuery(new URLSearchParams(dashUseQuery(dashUse.token, dashUse.range)));
+        dashUseDraw(false);
+        dashUseLoad().then(function () { uiRefreshLoaded("usage"); });
+    });
+    var sortBtn = document.getElementById("usage-sort");
+    sortBtn.addEventListener("click", function () {
+        uiSortMenu(sortBtn, "tokens", DASH_USE_COLS, dashUse.sort, function () { dashUseDraw(false); });
+    });
+    var body = document.getElementById("usage-body");
+    body.addEventListener("click", function (event) {
+        var t = event.target;
+        if (t.closest("[data-usage-retry]")) {
+            dashUse.failed = "";
+            dashUseDraw(false);
+            dashUseLoad();
+            return;
+        }
+        var sort = t.closest("#usage-head [data-sort]");
+        if (sort) {
+            var col = DASH_USE_COLS.filter(function (c) { return c.key === sort.getAttribute("data-sort"); })[0];
+            uiSortToggle(dashUse.sort, col);
+            dashUseDraw(false);
+            var again = body.querySelector('#usage-head [data-sort="' + col.key + '"]');
+            if (again) again.focus({ preventScroll: true });
+            return;
+        }
+        var col2 = t.closest("[data-chart-i]");
+        if (col2) {
+            dashUseSelect(Number(col2.getAttribute("data-chart-i")), false);
+            return;
+        }
+        var row = t.closest("#usage-table [data-key]");
+        if (!row || t.closest("button, a, input, select, label") || uiRowHeld(event, row)) return;
+        dashUseOpen(row.getAttribute("data-key"));
+    });
+    body.addEventListener("keydown", function (event) {
+        var t = event.target;
+        if (!(t instanceof Element)) return;
+        var c = t.closest("[data-chart-i]");
+        if (c) {
+            var i = Number(c.getAttribute("data-chart-i"));
+            var last = body.querySelectorAll("[data-chart-i]").length - 1;
+            var to = event.key === "ArrowRight" ? i + 1 : event.key === "ArrowLeft" ? i - 1 : event.key === "Home" ? 0 : event.key === "End" ? last : null;
+            if (to === null) return;
+            event.preventDefault();
+            // The bars follow the reading order of the page
+            if (document.documentElement.dir === "rtl" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) to = 2 * i - to;
+            dashUseSelect(Math.max(0, Math.min(last, to)), true);
+            return;
+        }
+        if (t.matches("#usage-table [data-key]") && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            dashUseOpen(t.getAttribute("data-key"));
+        }
+    });
+    // Pointing at a bar shows its numbers; the pick stays when the pointer leaves
+    body.addEventListener("pointerover", function (event) {
+        var c = event.target instanceof Element ? event.target.closest("[data-chart-i]") : null;
+        if (c && event.pointerType !== "touch") dashUseSelect(Number(c.getAttribute("data-chart-i")), false);
+    });
+    body.addEventListener("focusin", function (event) {
+        var c = event.target instanceof Element ? event.target.closest("[data-chart-i]") : null;
+        if (c) dashUseSelect(Number(c.getAttribute("data-chart-i")), false);
+    });
+}
+
+DASH_PAGE_IMPL.usage = function () {
+    dashUseBind();
+    var before = dashUseKey();
+    dashUseReadQuery();
+    if (dashUseKey() !== before) {
+        dashUse.sel = -1;
+        dashUse.failed = "";
+    }
+    dashUseDraw(false);
+    dashUseLoad().then(function () { uiRefreshLoaded("usage"); });
+};
+
+registerPageRefresh("usage", 60000, function (isCurrent) { return dashUseLoad(isCurrent); });
 
 // ===========================================================================
 // Settings: the rate limit and the addresses exempt from it. The form edits a
