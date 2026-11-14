@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Security
+
+- The service sends `X-Frame-Options: DENY` and `Content-Security-Policy:
+  frame-ancestors 'none'` itself, so browsers no longer show the dashboard, the
+  sign-in and setup pages or the API docs inside a frame on another site. Before, a
+  page on a sibling subdomain could overlay the signed-in dashboard and steer an
+  admin's clicks. The only response without the headers is the plain-text 500 for an
+  unexpected server error.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added
