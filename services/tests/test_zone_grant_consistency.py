@@ -169,6 +169,16 @@ class Env:
         return f"{self.prefix}-{suffix}"
 
 
+def _refuse_public_database_password() -> None:
+    """The tests connect to _DB_URL directly, so check it as the app checks DATABASE_URL."""
+    if not _EXPECT_PG:
+        return
+    from app.config import _postgres_url_problem
+
+    if problem := _postgres_url_problem(_DB_URL):
+        raise RuntimeError(f"TEST_DATABASE_URL: {problem}")
+
+
 @contextlib.asynccontextmanager
 async def _env():
     """App wired to this run's database, a fake Redis, a full admin session and the API key."""
@@ -187,6 +197,7 @@ async def _env():
         if not value.strip() or value.strip() in KNOWN_PUBLIC_VALUES:
             raise RuntimeError(f"{field} is empty or a placeholder")
     key = s.admin_api_key
+    _refuse_public_database_password()
 
     saved_state = {n: getattr(app.state, n, None) for n in ("db", "redis")}
     rate_limit._buckets.clear()
@@ -901,5 +912,44 @@ def test_zone_change_reads_stored_grants_like_validate(op):
             assert await e.validate(repeated, old["name"]) is False, "a grant on the changed zone was kept"
             if op == "rename":
                 assert await e.validate(repeated, e.area("renamed")) is True
+
+    asyncio.run(run())
+
+
+def test_zone_rename_does_not_turn_a_non_string_area_into_a_grant():
+    """A stored area that is a number or a boolean is no grant (/validate needs a string),
+    also after the zone with the same text is renamed."""
+    from app.crypto_tokens import sha256_hex
+
+    async def run():
+        async with _env() as e:
+            number = str(10**11 + secrets.randbelow(10**11))
+            cases = [(number, int(number)), ("true", True)]
+            if "true" in await e.zone_names():
+                pytest.skip("this database already has a zone named true")
+            created = []
+            try:
+                for text, stored_area in cases:
+                    resp = await e.client.post("/admin/api/zones", headers=e.admin, json={"name": text})
+                    assert resp.status_code == 201, resp.text
+                    created.append(resp.json())
+                    raw = secrets.token_hex(24)
+                    await e.db.execute(
+                        "INSERT INTO tokens (id, name, token_hash, grants) VALUES ($1::uuid, $2, $3, $4::jsonb)",
+                        str(uuid.uuid4()), f"{e.prefix}-{text}", sha256_hex(raw),
+                        json.dumps([{"area": stored_area, "level": "all"}]),
+                    )
+                    new_name = e.area(f"from-{text}")
+                    resp = await e.client.patch(
+                        f"/admin/api/zones/{created[-1]['id']}", headers=e.admin, json={"name": new_name}
+                    )
+                    assert resp.status_code == 200, resp.text
+                    assert await e.validate(raw, new_name, "delete") is False, (
+                        f"renaming zone {text!r} turned the stored area {stored_area!r} into a grant"
+                    )
+            finally:
+                for z in created:
+                    with contextlib.suppress(Exception):
+                        await e.db.execute("DELETE FROM zones WHERE id = $1", uuid.UUID(z["id"]) if _EXPECT_PG else z["id"])
 
     asyncio.run(run())

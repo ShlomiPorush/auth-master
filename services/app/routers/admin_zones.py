@@ -172,7 +172,7 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
                 UPDATE tokens t
                 SET grants = (
                     SELECT jsonb_agg(
-                        CASE WHEN elem->>'area' = $1
+                        CASE WHEN elem->'area' = to_jsonb($1::text)
                              THEN jsonb_set(elem, '{area}', to_jsonb($2::text))
                              ELSE elem
                         END
@@ -182,7 +182,7 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
                 WHERE EXISTS (
                     SELECT 1
                     FROM jsonb_array_elements(t.grants) AS elem
-                    WHERE elem->>'area' = $1
+                    WHERE elem->'area' = to_jsonb($1::text)
                 )
                 """,
                 old_name,
