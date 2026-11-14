@@ -482,6 +482,30 @@ def test_lockout_ends_the_sign_in_even_if_the_log_write_fails(ctx, monkeypatch):
     assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
 
 
+@pytest.mark.parametrize("kind", ["token", "api_key"])
+def test_reveal_lockout_answers_429_even_if_the_log_write_fails(ctx, monkeypatch, kind):
+    admin = _add_admin(ctx)
+    full = _full(ctx, admin)
+    if kind == "token":
+        item, _ = _add_token(ctx)
+        reveal = _reveal_token
+    else:
+        item, _ = _add_api_key(ctx)
+        reveal = _reveal_key
+    for _ in range(totp_guard.MAX_ATTEMPTS - 1):
+        assert reveal(ctx, full, item, _wrong(admin, ctx)).status_code == 400
+
+    async def broken_log(*_a, **_k):
+        raise RuntimeError("activity log unavailable")
+
+    monkeypatch.setattr(totp_guard, "log_activity", broken_log)
+    r = reveal(ctx, full, item, _wrong(admin, ctx))
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == str(totp_guard.ATTEMPT_WINDOW)
+    # The full session stays.
+    assert ctx.fake_redis.data.get("auth:sess:" + full[0]) is not None
+
+
 def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
     admin = _add_admin(ctx)
     other = _add_admin(ctx)

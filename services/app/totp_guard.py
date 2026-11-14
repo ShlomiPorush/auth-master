@@ -10,6 +10,7 @@ adds both, in Redis:
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -30,7 +31,9 @@ USED_STEP_TTL = 180
 FAIL_PREFIX = "auth:mfa-fail:"
 USED_PREFIX = "auth:totp-used:"
 
-REUSED_TEXT = "This code was already used. Wait for the next code in your authenticator app."
+log = logging.getLogger(__name__)
+
+REUSED_TEXT ="This code was already used. Wait for the next code in your authenticator app."
 
 # The clock; tests replace it.
 _now = time.time
@@ -135,11 +138,23 @@ def totp_error(check: TotpCheck, *, at_login: bool) -> HTTPException:
 
 
 async def log_totp_failure(request: Request, admin_id: str, where: str, check: TotpCheck) -> None:
-    """Activity rows for a failed code. Attempts refused while locked write none."""
+    """Activity rows for a failed code. Attempts refused while locked write none.
+
+    When this failure starts a lockout, a failed write is logged instead of raised,
+    so the caller still answers with the lockout.
+    """
     if check.reason == "locked":
         return
+    try:
+        await _write_failure_rows(request, str(admin_id), where, check)
+    except Exception:
+        if not check.locked_now:
+            raise
+        log.exception("Could not write the MFA lockout to the activity log")
+
+
+async def _write_failure_rows(request: Request, admin_id: str, where: str, check: TotpCheck) -> None:
     db = request.app.state.db
-    admin_id = str(admin_id)
     username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", admin_id)
     common = {
         "actor": username or f"admin:{admin_id}",
