@@ -60,6 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page on a sibling subdomain could overlay the signed-in dashboard and steer an
   admin's clicks. The only response without the headers is the plain-text 500 for an
   unexpected server error.
+- Authenticator codes are limited to 5 tries per admin in 15 minutes, counted
+  together for sign-in, token reveal and API key copy. After the fifth wrong code the
+  service answers `429` with `Retry-After` until the 15 minutes from the first try
+  have passed, also for a correct code; at sign-in the started sign-in ends and the
+  password is needed again. Each wrong code is written to the activity log as
+  `mfa_failed`, and the lockout as `mfa_locked`.
+- Each authenticator code is accepted only once. A reveal or copy right after
+  signing in, or two in a row, needs the next code, which can take up to 30 seconds.
+- After the password, the authenticator code must be entered within 5 minutes
+  (was 12 hours).
 
 ### Added
 
@@ -92,19 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A token that expires at the last moment of year 9999 in UTC no longer breaks
   the token lists and `/validate/grants` on a server whose time zone is east of
   UTC: its expiry is shown in UTC.
-
-### Security
-
-- Authenticator codes are limited to 5 tries per admin in 15 minutes, counted
-  together for sign-in, token reveal and API key copy. After the fifth wrong code the
-  service answers `429` with `Retry-After` until the 15 minutes from the first try
-  have passed, also for a correct code; at sign-in the started sign-in ends and the
-  password is needed again. Each wrong code is written to the activity log as
-  `mfa_failed`, and the lockout as `mfa_locked`.
-- Each authenticator code is accepted only once. A reveal or copy right after
-  signing in, or two in a row, needs the next code, which can take up to 30 seconds.
-- After the password, the authenticator code must be entered within 5 minutes
-  (was 12 hours).
 
 ## [2.0.1] - 2026-11-13
 
