@@ -70,6 +70,8 @@ function api(method, path, body) {
 
 // The server's reason, else the fallback the old UI showed
 function apiError(res, fallback) {
+    // The server caps request bodies; its 413 reply may be plain text
+    if (res && res.status === 413) return "This is too large to save. Shorten the text or remove some items, then try again.";
     var d = res && res.data;
     if (d && typeof d.detail === "string" && d.detail) return d.detail;
     if (d && Array.isArray(d.detail)) {

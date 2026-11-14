@@ -364,7 +364,14 @@ All error responses follow a consistent format:
 | `403` | Forbidden (missing required scope) |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate token or zone) |
+| `413` | The request body is larger than 64 KiB. See "Request size" below. |
 | `429` | Too many requests from one client address on `/validate` or `/validate/grants`. The `Retry-After` header gives the whole seconds until the caller's window ends. |
+
+### Request size
+
+The service reads at most 64 KiB (65,536 bytes) of a request body. A larger body is answered `413 Content Too Large` and the request is not carried out: as plain text `Content Too Large` when the `Content-Length` header gives the size, or as `{"detail": "Content Too Large"}` when the body is sent without one (chunked) and passes the limit while it is read.
+
+Send no body on requests that take none (`GET`, `DELETE`). The service does not read such a body. If its `Content-Length` is over 64 KiB, the request is still carried out, but the answer is `413` instead of its normal status: a `DELETE` answered `413` this way has deleted the item.
 
 ---
 
