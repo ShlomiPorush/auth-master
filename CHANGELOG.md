@@ -89,7 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service answers `429` with `Retry-After` until the 15 minutes from the first try
   have passed, also for a correct code; at sign-in the started sign-in ends and the
   password is needed again. Each wrong code is written to the activity log as
-  `mfa_failed`, and the lockout as `mfa_locked`.
+  `mfa_failed`, and the lockout as `mfa_locked`. The counts and the used codes are
+  kept in Redis under `auth:mfa-fail:*` and `auth:totp-used:*`, with the same commands
+  as the sign-in limit, so a Redis access control list set up for the sign-in limit
+  needs no change.
 - Each authenticator code is accepted only once. A reveal or copy right after
   signing in, or two in a row, needs the next code, which can take up to 30 seconds.
 - After the password, the authenticator code must be entered within 5 minutes
