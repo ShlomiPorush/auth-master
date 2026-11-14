@@ -20,6 +20,25 @@ def get_tz_name() -> str:
     return _get_tz().key
 
 
+def _in_zone(dt: datetime, tz: ZoneInfo) -> str:
+    """ISO form of an aware *dt* in *tz*; in UTC when that local time is past year 9999 or before year 1."""
+    try:
+        return dt.astimezone(tz).isoformat()
+    except OverflowError:
+        return dt.astimezone(timezone.utc).isoformat()
+
+
+def parse_expires_at(text: str) -> datetime:
+    """Parse a token expiry given in ISO 8601; a value without an offset means UTC.
+
+    The result always has an offset, so every database backend stores the same
+    instant (a naive value would be read in the process zone by the PostgreSQL
+    driver). Raises ValueError for text that is not an ISO 8601 date or date-time.
+    """
+    dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def fmt_datetime(val: Any) -> str | None:
     """Convert a DB datetime value (str or datetime) to an ISO string in the configured TZ.
 
@@ -36,7 +55,7 @@ def fmt_datetime(val: Any) -> str | None:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
             try:
                 dt = datetime.strptime(val, fmt).replace(tzinfo=timezone.utc)
-                return dt.astimezone(tz).isoformat()
+                return _in_zone(dt, tz)
             except ValueError:
                 continue
         # If it already has timezone info (e.g., from PG text representation), return as-is
@@ -45,7 +64,7 @@ def fmt_datetime(val: Any) -> str | None:
     if isinstance(val, datetime):
         if val.tzinfo is None:
             val = val.replace(tzinfo=timezone.utc)
-        return val.astimezone(tz).isoformat()
+        return _in_zone(val, tz)
 
     return str(val)
 
