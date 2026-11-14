@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every address it has seen until the server restarts. When the window length is
   changed, a window that has already ended stays ended; a window in progress is
   measured against the new length, as before.
+- A token `expiresAt` without a UTC offset, such as `2026-06-01T00:00:00`, is
+  read as UTC on every database. On PostgreSQL it was read in the server time
+  zone (`TZ`), so with a zone west of UTC a token kept passing `/validate` for
+  up to the zone offset after the time it was given to expire. This applies to
+  creating and updating tokens through `/tokens` and the admin interface. Tokens
+  already stored this way on PostgreSQL, on a server whose `TZ` is not UTC, keep
+  their shifted expiry: set their expiry again.
 - Dashboard sign-in no longer holds up the rest of the service. The password check
   (bcrypt) ran on the server's only event loop, so a few concurrent sign-in attempts,
   which need no account, delayed every other request, `/validate` included, by close
@@ -100,6 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Settings page keeps the reverse proxy hint and the warning about exempt
   addresses when `FORWARDED_ALLOW_IPS` lists only loopback addresses, as the
   compose default does, since no proxy at another address is trusted then.
+- A token that expires at the last moment of year 9999 in UTC no longer breaks
+  the token lists and `/validate/grants` on a server whose time zone is east of
+  UTC: its expiry is shown in UTC.
 
 ## [2.0.1] - 2026-11-13
 
