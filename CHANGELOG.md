@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
 
+### Security
+
+- `/validate` (POST and GET) takes an `area` of at most 255 characters, counted
+  before surrounding spaces are trimmed. A longer `area` gets `422` and is not
+  written to the access log. Before, a single anonymous call could store an area
+  of any size. The access log also keeps at most 255 characters of any area.
+  Zone names are at most 63 characters, so no zone is affected. An `ALLOWED_AREAS`
+  entry longer than 255 characters can no longer be validated, and neither can the
+  grants already stored for it, even after zones were added to the table.
+- `/validate` answers an `area` that is not valid Unicode text, such as a lone
+  `\ud800` escape in a JSON body, with `422` instead of `{"result": false}`.
+
 ## [2.0.1] - 2026-11-13
 
 ### Added

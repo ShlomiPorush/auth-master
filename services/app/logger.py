@@ -4,6 +4,10 @@ from datetime import datetime, timezone, timedelta
 from fastapi import Request
 from app.db import Database
 
+# Longest area, in characters, that /validate accepts and the access log stores.
+# Zone names are at most 63 characters; the rest leaves room for surrounding spaces.
+MAX_AREA_LEN = 255
+
 
 async def get_actor(request: Request, sess: dict | None = None) -> str:
     """Resolve the current actor's name from session or request state."""
@@ -53,9 +57,10 @@ async def log_access(
     result: bool,
     ip_address: str | None,
 ) -> None:
-    """Insert a new record into access_logs."""
+    """Insert a new record into access_logs, with at most MAX_AREA_LEN characters of area."""
     log_id = str(uuid.uuid4())
-    
+    area = area[:MAX_AREA_LEN]
+
     if db.is_sqlite:
         await db.execute(
             "INSERT INTO access_logs (id, token_id, token_name, area, level, result, ip_address) VALUES ($1, $2, $3, $4, $5, $6, $7)",

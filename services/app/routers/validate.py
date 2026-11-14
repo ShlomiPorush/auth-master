@@ -4,13 +4,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.crypto_tokens import sha256_hex
 from app.datetime_utils import fmt_datetime, is_expired
 from app.grants import grant_covers, parse_grants
 from app.rate_limit import allow_validate, retry_after_seconds
-from app.logger import log_access
+from app.logger import MAX_AREA_LEN, log_access
 
 
 router = APIRouter(tags=["validate"])
@@ -42,7 +42,7 @@ def _too_many_requests(ip: str) -> HTTPException:
 
 class ValidateBody(BaseModel):
     token: str
-    area: str
+    area: str = Field(max_length=MAX_AREA_LEN)
     level: str
 
 
@@ -77,7 +77,7 @@ async def validate_token(request: Request, body: ValidateBody):
 async def validate_token_get(
     request: Request,
     token: str = Query(...),
-    area: str = Query(...),
+    area: str = Query(..., max_length=MAX_AREA_LEN),
     level: str = Query(...),
 ):
     return await _validate_token_values(request, token, area, level)
@@ -91,11 +91,11 @@ async def _validate_token_values(request: Request, token: str, area: str, level:
     if level not in ("read", "readwrite", "write", "delete", "all"):
         return JSONResponse(content={"result": False}, media_type="application/json")
 
-    # A lone surrogate (e.g. from a JSON "\ud800" escape) is a valid Python str but
-    # not UTF-8 text: it matches no stored token and cannot be written to the access
-    # log.  Answer like any other rejected input, before database or logging.
+    # A lone surrogate (e.g. from a JSON "\ud800" escape) in the token is a valid Python
+    # str but not UTF-8 text: it matches no stored token.  Answer like any other rejected
+    # input, before database or logging.  The area's max_length check already refuses
+    # one with 422.
     try:
-        area.encode("utf-8")
         h = sha256_hex(token)
     except UnicodeEncodeError:
         return JSONResponse(content={"result": False}, media_type="application/json")
