@@ -188,7 +188,7 @@ async def _env():
     from app.db import create_database
     from app.main import app
     from app.schema import ensure_database_schema
-    from app.sessions import COOKIE_NAME, SESSION_TTL, new_csrf, new_sid, save_session
+    from app.sessions import COOKIE_NAME, new_csrf, new_sid, session_record
 
     s = get_settings()
     for field in ("admin_api_key", "session_secret", "app_encryption_key"):
@@ -202,12 +202,23 @@ async def _env():
     db = await create_database(_DB_URL)
     client = None
     e = None
+    own_admin = None
     try:
         assert db.is_pg == _EXPECT_PG, "test ran on the wrong database backend"
         await ensure_database_schema(db)
+        # A full session counts only for an existing admin with MFA enabled, and at most one
+        # such admin may exist: use the one this database has, or add one for this test.
+        admin_id = await db.fetchval("SELECT id FROM admin_users WHERE totp_enabled = $1", True)
+        if admin_id is None:
+            own_admin = admin_id = str(uuid.uuid4())
+            await db.execute(
+                "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
+                admin_id, "znc-admin-" + secrets.token_hex(4), "unused", True,
+            )
         redis = FakeRedis()
         sid, csrf = new_sid(), new_csrf()
-        await save_session(redis, sid, {"kind": "full", "adminId": str(uuid.uuid4()), "csrf": csrf}, SESSION_TTL)
+        rkey, rvalue = session_record(sid, {"kind": "full", "adminId": str(admin_id), "csrf": csrf})
+        redis.data[rkey] = rvalue
         app.state.db, app.state.redis = db, redis
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
@@ -227,6 +238,9 @@ async def _env():
                     await db.execute("DELETE FROM zones WHERE name = $1", name)
             with contextlib.suppress(Exception):
                 await ensure_database_schema(db)  # the index again, for the next test
+        if own_admin is not None:
+            with contextlib.suppress(Exception):
+                await db.execute("DELETE FROM admin_users WHERE id = $1", own_admin)
         if client is not None:
             await client.aclose()
         await db.close()
