@@ -17,6 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The figures come from the access log: days older than `ACCESS_LOG_RETENTION_DAYS`
   are marked as deleted, not as zero. The Tokens page row menu opens a token's usage.
 - Access Logs takes `?token=<id>` and shows it as a filter that can be removed.
+- README.md has a "Remote access and HTTPS" section: the service speaks plain HTTP, so
+  reach it from other machines only through an HTTPS reverse proxy, do not expose port
+  8080 to networks you do not trust, and set `COOKIE_SECURE=true` behind HTTPS.
+  API.md gives the proxy's `https://` address as the base URL.
+
+### Fixed
+
+- `FORWARDED_ALLOW_IPS` and `COOKIE_SECURE` set as stack variables, for example in
+  Portainer, now reach the container: the bundled compose file passes them. When a
+  variable is not set at all it passes `127.0.0.1,::1` (uvicorn's default) and
+  `false`. Docker Compose now takes these two values from the shell or stack
+  variables, then from the project's `.env` or the files given with `--env-file`, and
+  they win over `env_file: .env`. If you start the stack with `--env-file` and keep
+  them only in `.env`, add `--env-file .env` or move them to your env file.
+- The Settings page keeps the reverse proxy hint and the warning about exempt
+  addresses when `FORWARDED_ALLOW_IPS` lists only loopback addresses, as the
+  compose default does, since no proxy at another address is trusted then.
 
 ## [2.0.1] - 2026-11-13
 
