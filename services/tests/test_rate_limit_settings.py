@@ -174,10 +174,12 @@ def test_exempt_address_is_never_limited_or_counted():
     assert "10.0.0.1" not in rate_limit._buckets
     assert rate_limit.allow_validate("10.0.0.2")
     assert not rate_limit.allow_validate("10.0.0.2")
-    for key in ("unknown", "testclient", ""):
-        assert rate_limit.allow_validate(key)
-        assert not rate_limit.allow_validate(key)
-    assert rate_limit.rejection_stats()["rejectedTotal"] == 4
+    # Anything that is not an IP address is never exempt, and all of it shares one key.
+    assert rate_limit.allow_validate("unknown")
+    for key in ("unknown", "testclient", "", "fe80::1%eth0", "x" * 500):
+        assert not rate_limit.allow_validate(key), key
+    assert set(rate_limit._buckets) == {"10.0.0.2", "unknown"}
+    assert rate_limit.rejection_stats()["rejectedTotal"] == 6
 
 
 # ── Storage ─────────────────────────────────────────────────────
@@ -328,6 +330,42 @@ def test_reload_applies_newer_rows_and_keeps_last_good_on_bad_data(tmp_path):
             )
             await rls.reload_once(sdb)
             assert rate_limit.current().version == 3 and rate_limit.current().exempt == frozenset()
+        finally:
+            await _close(main, sdb, own)
+
+    _run(scenario())
+
+
+def test_reload_of_a_longer_window_does_not_revive_an_ended_one(tmp_path, monkeypatch):
+    """A longer window saved by another process: a key whose window ended before the
+    reload starts a new one, as it would have at any request before the reload."""
+    _, _, rate_limit, rls = _mods()
+    from types import SimpleNamespace
+
+    from app.config import Settings
+
+    monkeypatch.delenv("RATE_LIMIT_MAX_REQ", raising=False)
+    monkeypatch.delenv("RATE_LIMIT_WINDOW_MS", raising=False)
+    s = Settings(_env_file=None)
+    monkeypatch.setattr(rls, "get_settings", lambda: s)
+    clock = SimpleNamespace(now=1_800_000_000.0)
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: clock.now, monotonic=lambda: clock.now))
+
+    async def scenario():
+        main, sdb, own = await _open(_url("sqlite", tmp_path))
+        try:
+            await rls.load(sdb)
+            rate_limit.reset_state(rate_limit.Limits(rate_limit.current().version, 1, 60_000))
+            assert rate_limit.allow_validate("10.0.0.1")
+            assert not rate_limit.allow_validate("10.0.0.1")
+            clock.now += 62  # the window ended 2 s ago; no request since
+            await main.execute(
+                "INSERT INTO rate_limit_settings (version, value, actor) VALUES ($1, $2, $3)",
+                rate_limit.current().version + 1, rls.dump_value(1, 120_000, ()), "other",
+            )
+            await rls.reload_once(sdb)
+            assert rate_limit.current().window_ms == 120_000
+            assert rate_limit.allow_validate("10.0.0.1")
         finally:
             await _close(main, sdb, own)
 

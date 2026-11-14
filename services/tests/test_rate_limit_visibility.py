@@ -197,7 +197,7 @@ def test_many_addresses_stay_bounded_and_one_line_per_window(limiter, caplog, mo
     limiter.reset_state(limiter.Limits(0, 1, 60_000))
     n = limiter.MAX_TRACKED_KEYS + 500
     for k in range(n):
-        ip = f"2001:db8::{k:x}"
+        ip = f"2001:db8:{k:x}::1"  # one /64 each: an IPv6 key is its /64 network
         assert limiter.allow_validate(ip, T0 + k)
         assert not limiter.allow_validate(ip, T0 + k)
     assert len(_lines(caplog)) == 1
@@ -213,6 +213,103 @@ def test_many_addresses_stay_bounded_and_one_line_per_window(limiter, caplog, mo
     msg = _lines(caplog)[1].getMessage()
     assert f"rejected {n - 1} requests" in msg
     assert "more from other addresses" in msg
+
+
+def test_ended_windows_are_dropped_and_the_table_shrinks(limiter):
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
+    for k in range(1000):
+        assert limiter.allow_validate(f"10.0.{k // 256}.{k % 256}", T0 + k)
+    assert not limiter.allow_validate("10.0.0.0", T0 + 1_000)
+    full_size = sys.getsizeof(limiter._buckets)
+    assert limiter.allow_validate("10.9.9.1", T0 + 59_000)  # within the window: no sweep
+    assert len(limiter._buckets) == 1001
+    # The window of every one of them has ended; the next request drops them.
+    assert limiter.allow_validate("10.9.9.2", T0 + 61_000)
+    assert set(limiter._buckets) == {"10.9.9.1", "10.9.9.2"}
+    assert sys.getsizeof(limiter._buckets) < full_size / 10
+    assert limiter.rejection_stats()["rejectedTotal"] == 1  # a sweep forgets no rejection
+
+
+def test_a_window_is_kept_until_it_has_ended(limiter):
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
+    assert limiter.allow_validate("10.0.0.1", T0)
+    assert limiter.allow_validate("10.0.0.2", T0 + 60_000)  # sweeps; 10.0.0.1 ends after 60 000 ms, not at
+    assert "10.0.0.1" in limiter._buckets
+    assert not limiter.allow_validate("10.0.0.1", T0 + 60_000)
+    assert limiter.allow_validate("10.0.0.1", T0 + 60_001)
+
+
+def test_exempt_traffic_alone_drops_ended_windows(limiter):
+    limiter.reset_state(limiter.Limits(0, 1, 60_000, frozenset({"10.0.0.1"})))
+    assert limiter.allow_validate("10.0.0.2", T0)
+    assert limiter.allow_validate("10.0.0.1", T0 + 61_000)
+    assert limiter._buckets == {}
+
+
+def test_backward_clock_change_keeps_dropping_later_windows(limiter):
+    """A window that started before the wall clock went back is kept and still limits,
+    as before; windows started after the change are dropped once they end."""
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
+    assert limiter.allow_validate("10.0.0.1", T0)
+    limiter.wall_shift = -3_600_000.0
+    assert limiter.allow_validate("10.0.0.2", T0 + 1_000)
+    assert limiter.allow_validate("10.0.0.3", T0 + 62_000)  # sweeps
+    assert set(limiter._buckets) == {"10.0.0.1", "10.0.0.3"}
+    assert not limiter.allow_validate("10.0.0.1", T0 + 62_500)
+
+
+# ── Keys: one per IPv4 address, one per IPv6 /64 ───────────────
+
+def test_ipv6_addresses_in_one_64_share_one_limit(limiter, caplog):
+    caplog.set_level(logging.WARNING, logger=LOGGER)
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
+    assert limiter.allow_validate("2001:db8:1:2::1", T0)
+    assert not limiter.allow_validate("2001:db8:1:2:ffff:ffff:ffff:fffe", T0 + 1)
+    assert limiter.allow_validate("2001:db8:1:3::1", T0 + 2)  # another /64
+    assert limiter.rejection_stats()["topAddresses"] == [{"address": "2001:db8:1:2::/64", "rejected": 1}]
+    assert "2001:db8:1:2::/64=1" in _lines(caplog)[0].getMessage()
+    limiter._clock.wall = T0 + 30_000
+    assert limiter.retry_after_seconds("2001:db8:1:2::abcd") == 30
+
+
+def test_ipv4_mapped_and_plain_address_share_one_limit(limiter):
+    limiter.reset_state(limiter.Limits(0, 1, 60_000))
+    assert limiter.allow_validate("::ffff:192.0.2.1", T0)
+    assert not limiter.allow_validate("192.0.2.1", T0 + 1)
+    limiter._clock.wall = T0 + 1_000
+    assert limiter.retry_after_seconds("::ffff:192.0.2.1") == 59
+    assert limiter.retry_after_seconds("192.0.2.1") == 59
+
+
+def test_exempt_ipv6_address_does_not_exempt_its_64(limiter):
+    limiter.reset_state(limiter.Limits(0, 1, 60_000, frozenset({"2001:db8:1:2::1"})))
+    assert all(limiter.allow_validate("2001:db8:1:2::1", T0 + i) for i in range(3))
+    assert limiter.allow_validate("2001:db8:1:2::2", T0 + 3)
+    assert not limiter.allow_validate("2001:db8:1:2::3", T0 + 4)
+
+
+# ── Window length changes ───────────────────────────────────────
+
+def _set_clock(limiter, t: float) -> None:
+    limiter._clock.wall = t
+    limiter._clock.mono = 5_000.0 + (t - T0)
+
+
+def test_a_window_that_ended_stays_ended_when_the_window_is_lengthened(limiter):
+    limiter.reset_state(limiter.Limits(1, 1, 60_000))
+    assert limiter.allow_validate("10.0.0.1", T0)
+    _set_clock(limiter, T0 + 62_000)  # its window ended at T0 + 60 000; no request since
+    assert limiter.apply(limiter.Limits(2, 1, 120_000))
+    assert limiter.allow_validate("10.0.0.1", T0 + 63_000)
+
+
+def test_a_window_in_progress_takes_the_new_length(limiter):
+    limiter.reset_state(limiter.Limits(1, 1, 60_000))
+    assert limiter.allow_validate("10.0.0.1", T0)
+    _set_clock(limiter, T0 + 30_000)
+    assert limiter.apply(limiter.Limits(2, 1, 120_000))
+    assert not limiter.allow_validate("10.0.0.1", T0 + 90_000)
+    assert limiter.allow_validate("10.0.0.1", T0 + 120_001)
 
 
 # ── HTTP: admin endpoint and unchanged answers ──────────────────
