@@ -189,7 +189,7 @@ See [API.md](API.md) for the full REST API reference.
 
 - Admin passwords are hashed with **bcrypt**, which uses at most 72 bytes of a password, so new admin passwords are limited to 72 bytes
 - Dashboard access requires **TOTP MFA** (two-factor authentication)
-- Each authenticator code is accepted once, and an admin gets 5 tries in 15 minutes, shared by sign-in, token reveal and API key copy
+- Each authenticator code is accepted once, and an admin gets 5 tries in 15 minutes, shared by sign-in, token reveal and API key copy; after that the service answers `429` with `Retry-After`
 - Tokens and API keys are encrypted at rest with **AES-256-GCM**
 - Token hashes use **SHA-256** for lookups
 - Session cookies are signed and stored in Redis with configurable TTL

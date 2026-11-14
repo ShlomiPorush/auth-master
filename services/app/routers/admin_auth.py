@@ -93,12 +93,13 @@ async def login_mfa(request: Request, response: Response, body: MfaBody, x_csrf_
         raise HTTPException(500, "decrypt failed") from e
     check = await check_totp_code(r, sess["adminId"], secret, body.code.replace(" ", ""))
     if not check.ok:
-        await log_totp_failure(request, sess["adminId"], "login", check)
         err = totp_error(check, at_login=True)
+        if err.status_code == 429:
+            # Out of attempts: this sign-in ends, also if the log write below fails.
+            await delete_session(r, sid)
+        await log_totp_failure(request, sess["adminId"], "login", check)
         if err.status_code != 429:
             raise err
-        # Out of attempts: this sign-in ends; the password is needed again.
-        await delete_session(r, sid)
         locked = JSONResponse({"detail": err.detail}, status_code=429, headers=err.headers)
         clear_sid_cookie(locked)
         return locked

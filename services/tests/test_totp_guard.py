@@ -217,8 +217,17 @@ class Admin:
         self.id, self.username, self.password, self.totp = admin_id, username, password, totp
 
 
-def _add_admin(c) -> Admin:
-    seed = pyotp.random_base32()
+def _distinct_seed() -> str:
+    # Six digits can repeat between steps; some tests need different codes around T0.
+    while True:
+        seed = pyotp.random_base32()
+        totp = pyotp.TOTP(seed)
+        if len({totp.at(int(T0) + d) for d in (-30, 0, 30, 60)}) == 4:
+            return seed
+
+
+def _add_admin(c, seed: str | None = None) -> Admin:
+    seed = seed or pyotp.random_base32()
     password = secrets.token_urlsafe(16)
     username = "adm" + secrets.token_hex(4)
     admin_id = str(uuid.uuid4())
@@ -372,7 +381,7 @@ def test_login_code_and_reveal_codes_are_single_use(ctx):
 
 
 def test_code_from_the_window_edge_is_refused_on_reuse_in_the_next_step(ctx):
-    admin = _add_admin(ctx)
+    admin = _add_admin(ctx, _distinct_seed())
     a = _login(ctx, admin)[:2]
     b = _login(ctx, admin)[:2]
     # The next step's code is accepted early (valid_window=1) ...
@@ -433,6 +442,41 @@ def test_lockout_after_five_wrong_codes(ctx):
     ctx.clock.t += totp_guard.ATTEMPT_WINDOW - 60
     sid3, csrf3, _ = _login(ctx, admin)
     assert _mfa(ctx, sid3, csrf3, _code(admin, ctx)).status_code == 200
+
+
+def test_code_that_is_not_valid_unicode_counts_as_wrong(ctx):
+    admin = _add_admin(ctx)
+    sid, csrf, _ = _login(ctx, admin)
+    for _ in range(totp_guard.MAX_ATTEMPTS - 1):
+        assert _mfa(ctx, sid, csrf, _wrong(admin, ctx)).status_code == 400
+    _use(ctx, sid)
+    # A lone surrogate as the fifth try still ends in the lockout.
+    r = ctx.post(
+        "/admin/api/login/mfa",
+        content=b'{"code": "\\ud800"}',
+        headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
+    )
+    assert r.status_code == 429
+    assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
+    assert _actions(ctx, admin)[-2:] == [
+        ("mfa_failed", {"where": "login", "reason": "invalid"}),
+        ("mfa_locked", {"where": "login", "seconds": totp_guard.ATTEMPT_WINDOW}),
+    ]
+
+
+def test_lockout_ends_the_sign_in_even_if_the_log_write_fails(ctx, monkeypatch):
+    admin = _add_admin(ctx)
+    sid, csrf, _ = _login(ctx, admin)
+    for _ in range(totp_guard.MAX_ATTEMPTS - 1):
+        assert _mfa(ctx, sid, csrf, _wrong(admin, ctx)).status_code == 400
+
+    async def broken_log(*_a, **_k):
+        raise RuntimeError("activity log unavailable")
+
+    monkeypatch.setattr(totp_guard, "log_activity", broken_log)
+    with pytest.raises(RuntimeError):
+        _mfa(ctx, sid, csrf, _wrong(admin, ctx))
+    assert ctx.fake_redis.data.get("auth:sess:" + sid) is None
 
 
 def test_counter_is_shared_by_login_and_reveals_per_admin(ctx):
