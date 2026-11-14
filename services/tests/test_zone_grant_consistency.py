@@ -511,12 +511,13 @@ async def _uncommitted(statements: list[tuple[str, tuple]]):
             await conn.close()
 
 
-async def _until_waiting_or_done(e: Env, task: asyncio.Task) -> None:
-    """Return when ``task`` finished or (PostgreSQL) a session of this database waits for a lock.
+async def _until_waiting_or_done(e: Env, task: asyncio.Task, query: str) -> None:
+    """Return when ``task`` finished or (PostgreSQL) its statement ``query`` waits for a lock.
 
-    SQLite shows no lock wait, so there it waits 1 s, well inside the 5 s busy timeout; a
-    request that has not reached the database by then makes the test pass without
-    exercising the wait, never fail wrongly.
+    ``query`` is a LIKE pattern for the statement the request under test runs; the test's
+    own sessions never run it.  SQLite shows no lock wait, so there it waits 1 s, well
+    inside the 5 s busy timeout; a request that has not reached the database by then
+    makes the test pass without exercising the wait, never fail wrongly.
     """
     if not _EXPECT_PG:
         await asyncio.wait({task}, timeout=1.0)
@@ -525,7 +526,9 @@ async def _until_waiting_or_done(e: Env, task: asyncio.Task) -> None:
         if task.done():
             return
         waiting = await e.db.fetchval(
-            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+            "AND wait_event_type = 'Lock' AND query LIKE $1 AND pid <> pg_backend_pid()",
+            query,
         )
         if waiting:
             return
@@ -541,7 +544,7 @@ async def _grant_write_across_commit(e: Env, statements, request, before_commit=
     async with _uncommitted(statements):
         task = asyncio.create_task(request())
         try:
-            await _until_waiting_or_done(e, task)
+            await _until_waiting_or_done(e, task, "LOCK TABLE zones IN SHARE MODE%")
             seen = await before_commit() if before_commit else None
         except BaseException:
             task.cancel()
@@ -731,7 +734,7 @@ def test_zone_change_during_grant_write_rewrites_the_new_grant(op, route, isolat
             try:
                 await asyncio.wait_for(pause.reached.wait(), 10)
                 change = asyncio.create_task(_zone_op(e, op, zone, "r"))
-                await _until_waiting_or_done(e, change)
+                await _until_waiting_or_done(e, change, "DELETE FROM zones%" if op == "delete" else "UPDATE zones SET%")
                 assert not change.done(), f"the zone {op} did not wait for the open grant write: {change.result().text}"
                 pause.release.set()
                 resp = await asyncio.wait_for(write, 30)
@@ -854,5 +857,49 @@ def test_write_after_a_409_on_the_shared_connection_does_not_wait():
             assert resp.status_code == 409, resp.text
             resp = await asyncio.wait_for(e.client.delete(f"/admin/api/zones/{a['id']}", headers=e.admin), 3)
             assert resp.status_code == 200, resp.text
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# 10. A zone change reads stored grants the way /validate reads them
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("op", ZONE_OPS)
+def test_zone_change_reads_stored_grants_like_validate(op):
+    """Rows not written by the current API: a string element and a repeated "area" key."""
+    from app.crypto_tokens import sha256_hex
+
+    async def run():
+        async with _env() as e:
+            old = await e.zone("old")
+            keep = await e.zone("keep")
+            ghost = e.area("ghost")  # not a zone
+
+            async def raw_token(suffix: str, grants_text: str) -> str:
+                raw = secrets.token_hex(24)
+                await e.db.execute(
+                    "INSERT INTO tokens (id, name, token_hash, grants) VALUES ($1::uuid, $2, $3, $4::jsonb)",
+                    str(uuid.uuid4()), f"{e.prefix}-{suffix}", sha256_hex(raw), grants_text,
+                )
+                return raw
+
+            # A string whose text is a grant object: /validate ignores it, it is no grant.
+            nested = json.dumps({"area": ghost, "level": "all"})
+            string_elem = await raw_token("str", json.dumps([{"area": old["name"], "level": "read"}, nested]))
+            # A repeated key: /validate (json.loads) reads the last value, here the zone being changed.
+            repeated = await raw_token(
+                "dup", '[{"area": "%s", "area": "%s", "level": "read"}]' % (keep["name"], old["name"])
+            )
+            assert await e.validate(string_elem, ghost, "delete") is False, "precondition"
+            assert await e.validate(repeated, old["name"]) is True, "precondition"
+
+            resp = await _zone_op(e, op, old, "renamed")
+            assert resp.status_code == 200, resp.text
+
+            assert await e.validate(string_elem, ghost, "delete") is False, "a string element became a grant"
+            assert await e.validate(repeated, old["name"]) is False, "a grant on the changed zone was kept"
+            if op == "rename":
+                assert await e.validate(repeated, e.area("renamed")) is True
 
     asyncio.run(run())

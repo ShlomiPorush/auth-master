@@ -1,3 +1,4 @@
+import json
 import re
 import uuid as uuid_mod
 from typing import Any
@@ -189,29 +190,30 @@ async def _patch_zone_pg(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: li
             )
 
 
-# SQLite (JSON1): each statement derives a token's new grants from its current row, inside
-# the zone change's write transaction, so a grant change committed before it is kept and the
-# zone change and the rewrite are saved together or not at all.
-_SQLITE_RENAME_GRANTS = """
-    UPDATE tokens SET grants = (
-        SELECT json_group_array(
-            CASE WHEN json_extract(value, '$.area') = $1
-                 THEN json_set(value, '$.area', $2)
-                 ELSE json(value)
-            END
-        )
-        FROM json_each(tokens.grants)
-    )
-    WHERE EXISTS (SELECT 1 FROM json_each(tokens.grants) WHERE json_extract(value, '$.area') = $1)
-"""
-_SQLITE_REMOVE_GRANTS = """
-    UPDATE tokens SET grants = (
-        SELECT json_group_array(json(value))
-        FROM json_each(tokens.grants)
-        WHERE json_extract(value, '$.area') <> $1
-    )
-    WHERE EXISTS (SELECT 1 FROM json_each(tokens.grants) WHERE json_extract(value, '$.area') = $1)
-"""
+async def _rewrite_grants_sqlite(tx: Any, area: str, new_area: str | None) -> None:
+    """Rename (``new_area``) or remove (``None``) every grant on ``area``.
+
+    Runs on the zone change's write transaction, which holds SQLite's write lock from
+    before this read until its commit, so no grant change can land between the read and
+    the rewrite, and the zone change and the rewrite are saved together or not at all.
+    The grants are decoded as /validate decodes them (json.loads: a repeated key counts
+    with its last value; only objects are grants); other elements are kept unchanged.
+    """
+    for row in await tx.fetch("SELECT id, grants FROM tokens"):
+        grants = json.loads(row["grants"])
+        if not isinstance(grants, list):
+            continue
+        kept: list[Any] = []
+        changed = False
+        for g in grants:
+            if isinstance(g, dict) and g.get("area") == area:
+                changed = True
+                if new_area is None:
+                    continue
+                g = {**g, "area": new_area}
+            kept.append(g)
+        if changed:
+            await tx.execute("UPDATE tokens SET grants = $1 WHERE id = $2", json.dumps(kept), row["id"])
 
 
 async def _patch_zone_sqlite(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts: list[str], args: list[Any], n: int) -> None:
@@ -229,7 +231,7 @@ async def _patch_zone_sqlite(db: Any, uid: uuid_mod.UUID, body: ZonePatch, parts
             raise HTTPException(409, "Zone name already exists") from e
 
         if body.name is not None and body.name.strip() != old_name:
-            await tx.execute(_SQLITE_RENAME_GRANTS, old_name, body.name.strip())
+            await _rewrite_grants_sqlite(tx, old_name, body.name.strip())
 
 
 @router.delete("/zones/{zone_id}")
@@ -304,4 +306,4 @@ async def _delete_zone_sqlite(db: Any, uid: uuid_mod.UUID) -> None:
         if row is None:
             raise HTTPException(404, "Not found")
         await tx.execute("DELETE FROM zones WHERE id = $1", str(uid))
-        await tx.execute(_SQLITE_REMOVE_GRANTS, row["name"])
+        await _rewrite_grants_sqlite(tx, row["name"], None)
