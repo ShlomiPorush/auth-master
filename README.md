@@ -182,7 +182,7 @@ Do not delete rows: a running process only moves to a higher version.
   ```
   If the external Redis uses access control lists, the app's user needs these
   commands on keys starting with `auth:`: `+get +setex +del +ping +set +incrby +ttl +expire +multi +exec ~auth:*`.
-  Without them, sign-in answers `500`.
+  Without them, sign-in can fail with `500`; the limit is never skipped.
 - The service does not read PostgreSQL password files (`.pgpass`, `PGPASSFILE` or a `passfile` URL parameter), so a published password stored in one is not detected.
 
 ### Changing secrets

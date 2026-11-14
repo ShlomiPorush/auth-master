@@ -537,7 +537,7 @@ def test_the_app_gives_the_counter_a_client_without_retries(login_limit, app_ctx
 
 
 def test_a_lost_reply_does_not_send_the_transaction_twice(login_limit):
-    """A Redis that runs the transaction and drops the connection before replying."""
+    """A Redis that drops the connection when the transaction arrives, before any reply."""
     import redis.asyncio as redis
     from redis.exceptions import ConnectionError as RedisConnectionError
 

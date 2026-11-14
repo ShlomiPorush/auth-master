@@ -62,15 +62,14 @@ async def run_bcrypt(func: Callable[..., T], *args: Any) -> T:
 
     A started call always runs to its end; only the wait for a slot is cut short.
     """
-    with anyio.move_on_after(SLOT_WAIT_SECONDS) as scope:
+    with anyio.move_on_after(SLOT_WAIT_SECONDS):
         return await anyio.to_thread.run_sync(func, *args, limiter=_bcrypt_slots)
-    if scope.cancelled_caught:
-        raise HTTPException(
-            503,
-            "The server is busy checking passwords. Try again in a few seconds.",
-            headers={"Retry-After": str(SLOT_WAIT_SECONDS)},
-        )
-    raise RuntimeError("bcrypt call ended without a result")  # not reached
+    # Reached only when the deadline cut the wait for a slot short.
+    raise HTTPException(
+        503,
+        "The server is busy checking passwords. Try again in a few seconds.",
+        headers={"Retry-After": str(SLOT_WAIT_SECONDS)},
+    )
 
 
 def client_key(request: Request) -> str:
