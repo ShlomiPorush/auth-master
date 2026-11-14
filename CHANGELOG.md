@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[redacted]`. API.md now recommends `POST /validate`, which sends the token in the
   request body. Logs written before this version can still hold tokens sent with
   `GET`: rotate those tokens if other people can read those logs.
+- A token `expiresAt` without a UTC offset, such as `2026-06-01T00:00:00`, is
+  read as UTC on every database. On PostgreSQL it was read in the server time
+  zone (`TZ`), so with a zone west of UTC a token kept passing `/validate` for
+  up to the zone offset after the time it was given to expire. This applies to
+  creating and updating tokens through `/tokens` and the admin interface. Tokens
+  already stored this way on PostgreSQL, on a server whose `TZ` is not UTC, keep
+  their shifted expiry: set their expiry again.
 
 ### Added
 
@@ -66,19 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Settings page keeps the reverse proxy hint and the warning about exempt
   addresses when `FORWARDED_ALLOW_IPS` lists only loopback addresses, as the
   compose default does, since no proxy at another address is trusted then.
-
-### Security
-
-- A token `expiresAt` without a UTC offset, such as `2026-06-01T00:00:00`, is
-  read as UTC on every database. On PostgreSQL it was read in the server time
-  zone (`TZ`), so with a zone west of UTC a token kept passing `/validate` for
-  up to the zone offset after the time it was given to expire. This applies to
-  creating and updating tokens through `/tokens` and the admin interface. Tokens
-  already stored this way on PostgreSQL, on a server whose `TZ` is not UTC, keep
-  their shifted expiry: set their expiry again.
-
-### Fixed
-
 - A token that expires at the last moment of year 9999 in UTC no longer breaks
   the token lists and `/validate/grants` on a server whose time zone is east of
   UTC: its expiry is shown in UTC.
