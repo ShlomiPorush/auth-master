@@ -1,9 +1,12 @@
 """Per-address request limit shared by /validate and /validate/grants.
 
-A fixed window per key (the client address uvicorn reports), kept in memory in each
-server process: a key may make `max_req` requests per `window_ms`, counted from its first
-request after the previous window ended.  Restarting the process resets every count.
-Exempt addresses are never limited or counted.
+A fixed window per key, kept in memory in each server process: a key may make `max_req`
+requests per `window_ms`, counted from its first request after the previous window
+ended.  The key is the client address uvicorn reports (bucket_key()): IPv4 as is, IPv6
+as its /64 network, and one shared key for anything that is not an IP address.  Keys
+whose window ended are dropped at most once per window, so memory follows the clients
+of about the last two windows.  Restarting the process resets every count.  Exempt
+addresses are never limited or counted.
 
 The limits come from the environment at import, then from app.rate_limit_settings, which
 loads the values saved on the admin Settings page and calls apply().
@@ -25,7 +28,6 @@ import ipaddress
 import logging
 import math
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -83,6 +85,9 @@ def apply(limits: Limits) -> bool:
     global _limits
     if limits.version <= _limits.version:
         return False
+    # A window that ended under the limits in force stays ended, whatever the new
+    # window length; windows in progress are measured against the new length.
+    _drop_ended(time.time() * 1000, _limits.window_ms)
     _limits = limits
     return True
 
@@ -103,6 +108,24 @@ def address_key(text: str | None) -> str | None:
         addr = addr.ipv4_mapped
     return str(addr)
 
+
+# IPv6 clients are counted per network of this size: one subnet, inside which privacy
+# and SLAAC addresses rotate, so rotating them does not escape the limit.
+IPV6_PREFIX_LEN = 64
+# The one key for every client whose reported address is not a plain IP address.
+NON_ADDRESS_KEY = "unknown"
+
+
+def bucket_key(text: str | None) -> str:
+    """The key a request is counted under: address_key()'s form of an IPv4 address,
+    the /64 network of an IPv6 address, or NON_ADDRESS_KEY."""
+    key = address_key(text)
+    if key is None:
+        return NON_ADDRESS_KEY
+    if ":" in key:
+        return str(ipaddress.IPv6Network((key, IPV6_PREFIX_LEN), strict=False))
+    return key
+
 # Addresses counted by name, separately for the totals and for the pending summary.
 # Rejections from further addresses are counted without a name, so memory stays
 # bounded whatever number of addresses a client uses.
@@ -110,7 +133,10 @@ MAX_TRACKED_KEYS = 1000
 SUMMARY_TOP_KEYS = 10
 STATS_TOP_KEYS = 20
 
-_buckets: dict[str, tuple[int, float]] = defaultdict(lambda: (0, 0.0))
+# bucket_key() -> (requests in the window, window start in wall-clock ms).
+_buckets: dict[str, tuple[int, float]] = {}
+# Monotonic ms of the last sweep of ended windows; None: sweep at the next request.
+_last_sweep_mono_ms: float | None = None
 
 
 class _Tally:
@@ -151,27 +177,47 @@ _rejections = _Rejections()
 
 def reset_state(limits: Limits | None = None) -> None:
     """Forget all counts and rejections, and set the limits (tests)."""
-    global _rejections, _limits
+    global _rejections, _limits, _last_sweep_mono_ms
     _buckets.clear()
+    _last_sweep_mono_ms = None
     _rejections = _Rejections()
     _limits = limits if limits is not None else limits_from_environment()
+
+
+def _drop_ended(now: float, window_ms: int) -> None:
+    """Forget the keys whose window has ended: their next request starts a new one
+    anyway.  A new dict, so its table shrinks after a burst of many keys."""
+    global _buckets
+    _buckets = {k: v for k, v in _buckets.items() if now - v[1] <= window_ms}
+
+
+def _maybe_sweep(now: float, window_ms: int) -> None:
+    """_drop_ended() at most once per window, timed by the monotonic clock."""
+    global _last_sweep_mono_ms
+    mono = time.monotonic() * 1000
+    if _last_sweep_mono_ms is not None and mono - _last_sweep_mono_ms < window_ms:
+        return
+    _last_sweep_mono_ms = mono
+    _drop_ended(now, window_ms)
 
 
 def allow_validate(ip: str) -> bool:
     now = time.time() * 1000
     lim = _limits
+    _maybe_sweep(now, lim.window_ms)
     if lim.exempt and lim.is_exempt(address_key(ip)):
         _maybe_log_summary(now)
         return True
-    n, t0 = _buckets[ip]
+    key = bucket_key(ip)
+    n, t0 = _buckets.get(key, (0, 0.0))
     if now - t0 > lim.window_ms:
-        _buckets[ip] = (1, now)
+        _buckets[key] = (1, now)
         allowed = True
     elif n >= lim.max_req:
-        _record_rejection(ip, now)
+        _record_rejection(key, now)
         allowed = False
     else:
-        _buckets[ip] = (n + 1, t0)
+        _buckets[key] = (n + 1, t0)
         allowed = True
     # Checked on every call, admitted or not, so the rejections at the end of a burst
     # are reported within about one window once any traffic arrives.
@@ -180,19 +226,19 @@ def allow_validate(ip: str) -> bool:
 
 
 def retry_after_seconds(ip: str) -> int:
-    """Whole seconds until `ip`'s current window ends, at least 1 (for Retry-After)."""
-    n, t0 = _buckets.get(ip, (0, 0.0))
+    """Whole seconds until the current window of `ip`'s key ends, at least 1 (for Retry-After)."""
+    n, t0 = _buckets.get(bucket_key(ip), (0, 0.0))
     remaining_ms = t0 + _limits.window_ms - time.time() * 1000
     return max(1, math.ceil(remaining_ms / 1000))
 
 
-def _record_rejection(ip: str, now: float) -> None:
+def _record_rejection(key: str, now: float) -> None:
     r = _rejections
-    r.since_start.add(ip)
+    r.since_start.add(key)
     r.last_ms = now
     if r.pending_first_ms is None:
         r.pending_first_ms = now
-    r.pending.add(ip)
+    r.pending.add(key)
 
 
 def _maybe_log_summary(now: float) -> None:
@@ -211,13 +257,14 @@ def _maybe_log_summary(now: float) -> None:
     shown = min(len(pending.by_key), SUMMARY_TOP_KEYS)
     rest = pending.total - sum(c for _k, c in pending.top(SUMMARY_TOP_KEYS))
     log.warning(
-        "Rate limit: rejected %d requests with 429 from %s to %s (limit %d per %d ms per address); "
-        "top %d addresses: %s%s",
+        "Rate limit: rejected %d requests with 429 from %s to %s (limit %d per %d ms per address, "
+        "IPv6 per /%d network); top %d addresses: %s%s",
         pending.total,
         _iso(first),
         _iso(now),
         lim.max_req,
         lim.window_ms,
+        IPV6_PREFIX_LEN,
         shown,
         tops or "none",
         f"; {rest} more from other addresses" if rest else "",
