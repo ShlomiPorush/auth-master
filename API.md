@@ -372,7 +372,8 @@ All error responses follow a consistent format:
 | `403` | Forbidden (missing required scope) |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate token or zone) |
-| `429` | Too many requests from one client address (one /64 network for IPv6) on `/validate` or `/validate/grants`. The `Retry-After` header gives the whole seconds until the caller's window ends. |
+| `429` | Too many requests from one client address (one /64 network for IPv6) on `/validate` or `/validate/grants`, or more than 10 dashboard sign-in attempts (`/admin/api/login`) from one address (one /64 for IPv6) in 15 minutes. The `Retry-After` header gives the whole seconds until the caller's window ends. |
+| `503` | Dashboard sign-in or first-run registration waited more than 10 seconds for a password check. Retry after the seconds in `Retry-After`. |
 
 ---
 

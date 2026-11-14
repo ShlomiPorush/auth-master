@@ -118,6 +118,13 @@ access log. The Access Logs page
 shows how many there were and from which addresses, and each server process writes
 a `Rate limit:` line to its log at most once per window.
 
+Dashboard sign-in has its own limit, also per client address: 10 attempts in 15
+minutes (IPv6 per `/64` network), then `429` with `Retry-After` until the window ends.
+It has no exempt list and cannot be changed. The same address rules apply: behind a
+proxy that `FORWARDED_ALLOW_IPS` does not trust, all clients share one count of 10,
+so 10 wrong passwords from anyone block sign-in for everyone for 15 minutes; and a
+trusted network lets its containers choose the address they are counted under.
+
 ### Rate limit settings
 
 The Settings page (`/admin/settings`) sets the rate limit and the addresses it never
@@ -179,6 +186,10 @@ Do not delete rows: a running process only moves to a higher version.
         REDIS_URL: ${EXTERNAL_REDIS_URL:?EXTERNAL_REDIS_URL is not set}
       depends_on: !reset {}
   ```
+  If the external Redis uses access control lists, the app's user needs these
+  commands on keys starting with `auth:`: `+get +setex +del +ping +set +incrby +ttl +expire +multi +exec ~auth:*`.
+  If `REDIS_URL` selects a database other than 0, also allow `+select`. Without them,
+  sign-in can fail with `500`; the limit is never skipped.
 - The service does not read PostgreSQL password files (`.pgpass`, `PGPASSFILE` or a `passfile` URL parameter), so a published password stored in one is not detected.
 
 ### Changing secrets
@@ -232,6 +243,9 @@ See [API.md](API.md) for the full REST API reference.
 - The session cookie holds only a random session ID. Admin sessions and unfinished MFA setups are kept in Redis under names derived from `SESSION_SECRET`, encrypted and authenticated with a key derived from it, and expire after 12 hours (setup: 15 minutes). Another installation or another Redis client without that secret cannot create, read, change, or move them between sessions
 - CSRF protection on all state-changing admin operations
 - Rate limiting on the `/validate` endpoint
+- Dashboard sign-in is limited to 10 attempts per client address in 15 minutes, and
+  runs its password checks off the request loop, so sign-in attempts cannot slow
+  down `/validate`
 
 ## License
 

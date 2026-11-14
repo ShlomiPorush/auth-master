@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
+from app import login_limit
 from app.config import get_settings
 from app.crypto_totp import encrypt_totp_secret
 from app.db import UniqueViolationError
@@ -81,7 +82,8 @@ async def bootstrap_register(
         # bcrypt uses only the first 72 bytes, and bcrypt 5 refuses longer input.
         raise HTTPException(400, PASSWORD_TOO_LONG)
 
-    pw_hash = bcrypt.hashpw(password, bcrypt.gensalt(rounds=12)).decode("ascii")
+    salt = bcrypt.gensalt(rounds=login_limit.BCRYPT_COST)
+    pw_hash = (await login_limit.run_bcrypt(bcrypt.hashpw, password, salt)).decode("ascii")
     secret = pyotp.random_base32()
     await db.execute("DELETE FROM admin_users WHERE totp_enabled = $1", False)
     new_id = str(uuid_mod.uuid4())

@@ -173,7 +173,8 @@ class FakePipeline:
         self.ops.append(lambda: self.redis._ttl(k))
         return self
 
-    async def execute(self):
+    async def execute(self, raise_on_error=True):
+        # The commands here do not fail, so raise_on_error changes nothing.
         await asyncio.sleep(0)
         out = [op() for op in self.ops]
         self.ops.clear()

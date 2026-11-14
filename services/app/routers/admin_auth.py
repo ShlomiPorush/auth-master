@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
+from app import login_limit
 from app.crypto_totp import decrypt_totp_secret
 from app.datetime_utils import get_tz_name
 from app.sessions import (
@@ -37,24 +38,27 @@ class LoginBody(BaseModel):
 async def login(request: Request, response: Response, body: LoginBody):
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    row = await db.fetchrow(
-        "SELECT id, password_hash, totp_enabled, totp_secret_enc FROM admin_users WHERE username = $1",
-        body.username.strip(),
-    )
-    if not row:
-        raise HTTPException(401, "Invalid credentials")
-    stored = row["password_hash"]
-    if isinstance(stored, str):
-        stored = stored.encode("utf-8")
+    await login_limit.check_attempt(request)
     try:
         password = body.password.encode("utf-8")
     except UnicodeEncodeError:
         # A lone surrogate (e.g. from a JSON "\ud800" escape) has no UTF-8 encoding,
-        # so no stored password contains one.
+        # so no stored password contains one.  Refused before the lookup, alike for
+        # every username.
         raise HTTPException(401, "Invalid credentials") from None
+    row = await db.fetchrow(
+        "SELECT id, password_hash, totp_enabled, totp_secret_enc FROM admin_users WHERE username = $1",
+        body.username.strip(),
+    )
+    # An unknown username is checked against a dummy hash, so it takes as long as a
+    # wrong password and the answer time does not reveal which usernames exist.
+    stored = row["password_hash"] if row else login_limit.DUMMY_HASH
+    if isinstance(stored, str):
+        stored = stored.encode("utf-8")
     # bcrypt uses only the first 72 bytes. bcrypt 5 refuses longer input and says to
     # truncate it; hashes made by bcrypt 4 came from the same first 72 bytes.
-    if not bcrypt.checkpw(password[:72], stored):
+    matched = await login_limit.run_bcrypt(bcrypt.checkpw, password[:72], stored)
+    if not row or not matched:
         raise HTTPException(401, "Invalid credentials")
     if not row["totp_enabled"] or not row["totp_secret_enc"]:
         raise HTTPException(403, "MFA not configured")

@@ -17,7 +17,7 @@ from app.datetime_utils import is_expired
 from app.db import create_database, open_settings_database
 from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage
 from app.schema import ensure_database_schema
-from app import rate_limit_settings
+from app import login_limit, rate_limit_settings
 from app.logger import purge_old_logs
 from app.security_headers import AntiFramingMiddleware
 from app import request_log
@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI):
             # Before serving: invalid stored settings stop the start (the limits are unknown).
             await rate_limit_settings.load(settings_db)
             app.state.redis = redis.from_url(s.redis_url, decode_responses=True)
+            app.state.login_redis = redis.from_url(s.redis_url, decode_responses=True, **login_limit.COUNTER_CLIENT_OPTIONS)
 
             # Start cleanup background task
             cleanup_task = asyncio.create_task(
@@ -118,6 +119,7 @@ async def lifespan(app: FastAPI):
 
             await _stop(settings_reload_task)
             await _stop(cleanup_task)
+            await app.state.login_redis.aclose()
             await app.state.redis.aclose()
         finally:
             if close_settings_db:
