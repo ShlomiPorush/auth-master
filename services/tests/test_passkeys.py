@@ -634,6 +634,30 @@ def test_reveal_with_a_passkey_and_with_a_code():
     run(scenario())
 
 
+def test_api_key_copy_with_a_passkey_and_with_a_code():
+    async def scenario():
+        async with _env() as e:
+            auth, c = await setup_passkey(e)
+            res = await c.post("/admin/api/api-keys", json={"name": "ci", "scopes": ["tokens:read"]})
+            assert res.status_code == 201, res.text
+            key_id, raw = res.json()["id"], res.json()["key"]
+            res = await c.post(f"/admin/api/api-keys/{key_id}/reveal", json=await stepup(c, auth))
+            assert res.status_code == 200, res.text
+            assert res.json()["key"] == raw
+            # A step-up ceremony is used once.
+            body = await stepup(c, auth)
+            assert (await c.post(f"/admin/api/api-keys/{key_id}/reveal", json=body)).status_code == 200
+            assert (await c.post(f"/admin/api/api-keys/{key_id}/reveal", json=body)).status_code == 400
+            # The code path: a code of the next time step (the one before was used to add the passkey).
+            later = pyotp.TOTP(e.totp).at(int(__import__("time").time()) + 30)
+            res = await c.post(f"/admin/api/api-keys/{key_id}/reveal", json={"code": later})
+            assert res.status_code == 200, res.text
+            assert res.json()["key"] == raw
+            got = [d for a, d in await actions(e.db) if a == "api_key_reveal"]
+            assert sorted(d["method"] for d in got) == ["code", "passkey", "passkey"]
+    run(scenario())
+
+
 def test_step_up_refuses_a_wrong_user_handle_and_another_admins_passkey():
     async def scenario():
         async with _env() as e:
