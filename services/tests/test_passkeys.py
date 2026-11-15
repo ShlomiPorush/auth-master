@@ -219,6 +219,9 @@ class Env:
 
 
 async def _wipe(db):
+    # Rows these tests add to tables other tests share are named pk-test-*.
+    for table in ("tokens", "api_keys", "zones"):
+        await db.execute(f"DELETE FROM {table} WHERE name LIKE 'pk-test-%'")
     for table in ("passkeys", "passkey_settings", "activity_logs", "admin_users"):
         await db.execute(f"DELETE FROM {table}")
 
@@ -608,7 +611,10 @@ def test_ceremonies_do_not_cross_purposes_or_sessions():
 
 async def _token(e: Env) -> str:
     c = await e.signed_in()
-    res = await c.post("/admin/api/tokens", json={"name": "t", "grants": [{"area": "orders", "level": "read"}]})
+    zone = "pk-test-" + secrets.token_hex(4)
+    res = await c.post("/admin/api/zones", json={"name": zone})
+    assert res.status_code == 201, res.text
+    res = await c.post("/admin/api/tokens", json={"name": "pk-test-t", "grants": [{"area": zone, "level": "read"}]})
     assert res.status_code in (200, 201), res.text
     data = res.json()
     return data.get("id") or data["token"]["id"]
@@ -638,7 +644,7 @@ def test_api_key_copy_with_a_passkey_and_with_a_code():
     async def scenario():
         async with _env() as e:
             auth, c = await setup_passkey(e)
-            res = await c.post("/admin/api/api-keys", json={"name": "ci", "scopes": ["tokens:read"]})
+            res = await c.post("/admin/api/api-keys", json={"name": "pk-test-ci", "scopes": ["tokens:read"]})
             assert res.status_code == 201, res.text
             key_id, raw = res.json()["id"], res.json()["key"]
             res = await c.post(f"/admin/api/api-keys/{key_id}/reveal", json=await stepup(c, auth))

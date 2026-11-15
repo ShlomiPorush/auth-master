@@ -325,6 +325,9 @@ async def _probe(url: str) -> None:
                 await client.delete(key)
         if not await client.set(_probe_marker_key(), 1, nx=True, ex=PROBE_TTL_SEC):
             raise _Mismatch()
+        # The used-ceremony marker of app.passkeys: SET NX EX only, left to expire.
+        if not await client.set(sessions.webauthn_used_key(secrets.token_urlsafe(32)), 1, nx=True, ex=PROBE_TTL_SEC):
+            raise _Mismatch()
     finally:
         await client.aclose()
 
