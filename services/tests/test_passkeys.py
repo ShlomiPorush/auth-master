@@ -1016,3 +1016,27 @@ def test_rename_and_delete_are_never_saved_without_their_audit_entry(monkeypatch
                     await c.delete(f"/admin/api/passkeys/{pk['id']}")
             assert await e.db.fetchval("SELECT name FROM passkeys") == "Laptop"
     run(scenario())
+
+
+def test_postgres_rename_of_a_passkey_deleted_meanwhile_is_404():
+    """A deletion that commits after the rename read the row: the rename answers 404 and
+    writes no audit entry."""
+    if not _DB_URL.startswith("postgres"):
+        pytest.skip("PostgreSQL only: SQLite runs one writer at a time")
+
+    async def scenario():
+        async with _env() as e:
+            _, c = await setup_passkey(e)
+            [pk] = (await c.get("/admin/api/passkeys")).json()["passkeys"]
+            async with e.db._pool.acquire() as holder:
+                deleting = holder.transaction()
+                await deleting.start()
+                await holder.execute("DELETE FROM passkeys WHERE id = $1", pk["id"])
+                rename = asyncio.create_task(c.patch(f"/admin/api/passkeys/{pk['id']}", json={"name": "Other"}))
+                await asyncio.sleep(0.5)
+                assert not rename.done()
+                await deleting.commit()
+            res = await asyncio.wait_for(rename, 10)
+            assert res.status_code == 404
+            assert "passkey_renamed" not in [a for a, _ in await actions(e.db)]
+    run(scenario())

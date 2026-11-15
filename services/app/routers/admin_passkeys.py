@@ -331,7 +331,11 @@ async def rename_passkey(
         old = await tx.fetchval("SELECT name FROM passkeys WHERE id = $1 AND admin_id = $2", pid, _admin_id(sess))
         if old is None:
             raise HTTPException(404, "Not found")
-        await tx.execute("UPDATE passkeys SET name = $1 WHERE id = $2", name, pid)
+        # The row may have been deleted after the read: only a row that is still there counts.
+        if await tx.fetchval(
+            "UPDATE passkeys SET name = $1 WHERE id = $2 AND admin_id = $3 RETURNING id", name, pid, _admin_id(sess)
+        ) is None:
+            raise HTTPException(404, "Not found")
         await log_activity(
             tx, actor=actor, action="passkey_renamed", entity_type="passkey", entity_id=pid,
             entity_name=name, details={"from": old}, ip_address=_ip(request),
