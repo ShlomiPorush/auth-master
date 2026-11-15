@@ -238,13 +238,15 @@ def status_view() -> dict[str, Any]:
     }
 
 
-async def load(db: Database) -> None:
-    """At startup.  Invalid stored settings stop the service: the intended limits are unknown."""
+async def load(db: Database, force: bool = False) -> None:
+    """At startup, and with `force` after a switch to another database (app.db_runtime),
+    whose settings then replace the ones in use whatever their version.  Invalid stored
+    settings stop the service: the intended limits are unknown."""
     try:
         stored = await read_current(db)
     except InvalidSettings as e:
         raise RuntimeError(e.message) from e
-    rate_limit.apply(effective(stored))
+    rate_limit.apply(effective(stored), force=force)
     status.last_ok_ms = time.time() * 1000
     status.last_error = None
 

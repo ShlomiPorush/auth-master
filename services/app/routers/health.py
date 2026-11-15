@@ -2,7 +2,8 @@ import asyncio
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from redis.asyncio import Redis
+
+from app import db_runtime
 
 router = APIRouter(tags=["health"])
 
@@ -21,14 +22,37 @@ async def _check(name: str, probe) -> bool:
         return False
 
 
+async def _false() -> bool:
+    return False
+
+
 @router.get("/health")
 async def health(request: Request):
+    runtime = getattr(request.app.state, "runtime", None)
     db = request.app.state.db
-    r: Redis = request.app.state.redis
+    r = request.app.state.redis
     db_ok, redis_ok = await asyncio.gather(
-        _check("database", lambda: db.fetchval("SELECT 1")),
-        _check("redis", r.ping),
+        _check("database", lambda: db.fetchval("SELECT 1")) if db is not None else _false(),
+        _check("redis", r.ping) if r is not None else _false(),
     )
+    mode = runtime.mode if runtime is not None else db_runtime.READY
+    if mode == db_runtime.SETUP:
+        # Waiting for first-time setup is a healthy state: the container stays up.
+        return JSONResponse(
+            status_code=200 if redis_ok else 503,
+            content={"ok": False, "status": "setup_required", "db": False, "redis": redis_ok},
+        )
+    if mode == db_runtime.RECOVERY:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "status": "database_unavailable",
+                "code": runtime.failure_code,
+                "db": False,
+                "redis": redis_ok,
+            },
+        )
     ok = db_ok and redis_ok
     # 503 on an outage, so the Docker HEALTHCHECK (urllib raises on it) fails.
     return JSONResponse(

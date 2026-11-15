@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- First-time setup starts with the database: the SQLite file `data/auth.db`, or a
+  PostgreSQL server (host, port, database, user, password, TLS mode). **Check connection**
+  shows what the database holds before anything changes. A PostgreSQL database that already
+  holds an installation of this service is used as it is and leads to sign-in; a database
+  with other tables is refused. The choice is saved in `data/database.json` (mode 0600, the
+  password encrypted). The service now starts without a database and waits for setup.
+- The Settings page has a **Database** panel. It shows the connection, and for a PostgreSQL
+  database chosen in setup it changes the host, port, database name, user, password or TLS
+  mode of the same installation. The server checks the new connection first (primary server,
+  write access, table privileges and ownership, no row-level security, CREATE on the schema,
+  and that it reaches the same live database), then switches while the service runs:
+  requests wait a few seconds and continue. Saving needs the authenticator code or a
+  passkey. A restored copy of the database can be chosen after a confirmation. Each change is
+  an entry in the Activity Log, without the password.
+- Recovery mode: when the saved database cannot be used at start, the service does not start
+  setup again. `/health` and the API answer 503 with a code, and the dashboard opens the
+  recovery page `/recovery`, which needs the master key (`ADMIN_API_KEY`) and takes a
+  corrected connection. An unreachable server is tried again every 10 seconds.
+- TLS for PostgreSQL connections saved in the UI: `prefer` (the default), `disable`,
+  `require`, or `verify-full` with an optional CA certificate.
+- A database holding this service's tables from an older version or a backup can be adopted
+  in setup and on the recovery page after a confirmation.
+
+### Changed
+
+- `DATABASE_URL` is optional and has no default. When set, it overrides the database chosen
+  in setup, as before, and the Settings page shows the connection locked.
+- An existing `data/auth.db` is used as before: the first start marks it with an
+  installation id and writes `data/database.json`.
+- Every database gets the table `installation`, which holds the installation id. At each
+  start the id must match `data/database.json`, so a replaced or emptied database is never
+  used by mistake.
+- `/health` adds a `status` field while setup waits for a database (`setup_required`, status
+  200) and in recovery mode (`database_unavailable`, status 503).
+
+### Upgrade notes
+
+- Rolling back to 2.2.x after PostgreSQL was chosen in setup needs `DATABASE_URL` in `.env`:
+  2.2.x ignores `data/database.json` and would otherwise create a new, empty `data/auth.db`.
+  See "Roll back to 2.2.x" in README.md.
+- Changing the database connection needs a single service process for the data directory.
+- The data directory (`data/`) must be writable, also with `DATABASE_URL`: every process
+  registers itself there at start, and one that cannot does not start.
+
 ## [2.2.0] - 2026-11-15
 
 ### Added

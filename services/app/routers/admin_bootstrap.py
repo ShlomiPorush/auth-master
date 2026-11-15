@@ -50,6 +50,9 @@ async def has_completed_admin(db) -> bool:
 @router.get("/setup/status")
 async def setup_status(request: Request):
     db = request.app.state.db
+    if db is None:
+        # No database configured yet: setup starts with choosing one (app.db_runtime).
+        return {"needsSetup": True, "needsDatabase": True}
     needs = not await has_completed_admin(db)
     return {"needsSetup": needs}
 
