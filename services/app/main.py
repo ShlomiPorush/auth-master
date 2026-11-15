@@ -20,6 +20,7 @@ from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_token
 from app.schema import ensure_database_schema
 from app import login_limit, rate_limit_settings
 from app.logger import purge_old_logs
+from app import usage_rollup
 from app.security_headers import AntiFramingMiddleware
 from app import request_log
 
@@ -76,6 +77,12 @@ async def cleanup_expired_tokens(db) -> None:
     except Exception as e:
         print(f"Error in purge_old_logs: {e}")
 
+    try:
+        # After the purge, which drops the summaries of the slots it deletes from.
+        await usage_rollup.roll_up(db, get_settings().access_log_retention_days)
+    except Exception as e:
+        print(f"Error in usage_rollup.roll_up: {e}")
+
 
 async def expired_tokens_cleanup_loop(db) -> None:
     while True:
@@ -115,14 +122,16 @@ async def lifespan(app: FastAPI):
                 expired_tokens_cleanup_loop(app.state.db)
             )
             app.state.cleanup_task = cleanup_task
-            # Trigger one cleanup immediately in the background
-            asyncio.create_task(cleanup_expired_tokens(app.state.db))
+            # Trigger one cleanup immediately in the background. Its first summary of the
+            # access log can take minutes, so it is stopped before the database closes.
+            first_cleanup_task = asyncio.create_task(cleanup_expired_tokens(app.state.db))
             # Settings saved by another process (or by a request that was cut off) arrive here.
             settings_reload_task = asyncio.create_task(rate_limit_settings.reload_loop(settings_db))
 
             yield
 
             await _stop(settings_reload_task)
+            await _stop(first_cleanup_task)
             await _stop(cleanup_task)
             await app.state.login_redis.aclose()
             await app.state.redis.aclose()

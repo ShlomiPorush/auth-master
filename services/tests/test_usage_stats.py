@@ -98,15 +98,15 @@ class Env:
         )
         return tid
 
-    def log(self, token_id, token_name, area, level, result, *, ago=timedelta(seconds=5), ip="10.0.0.1", n=1):
-        at = datetime.now(timezone.utc) - ago
+    def log(self, token_id, token_name, area, level, result, *, ago=timedelta(seconds=5), ip="10.0.0.1", n=1, at=None, rid=None):
+        at = at or datetime.now(timezone.utc) - ago
         stored: object = at.strftime("%Y-%m-%d %H:%M:%S") if self.db.is_sqlite else at
         for _ in range(n):
             self.run(
                 self.db.execute,
                 "INSERT INTO access_logs (id, token_id, token_name, area, level, result, ip_address, created_at) "
                 "VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::timestamptz)",
-                str(uuid.uuid4()), token_id, token_name, area, level, result, ip, stored,
+                rid or str(uuid.uuid4()), token_id, token_name, area, level, result, ip, stored,
             )
 
     def get(self, path: str, **params):
@@ -139,6 +139,8 @@ def env(monkeypatch):
         db = main_mod.app.state.db
         e = Env(c, db, fake)
         e.run(db.execute, "DELETE FROM access_logs")
+        e.run(db.execute, "DELETE FROM access_log_rollup")
+        e.run(db.execute, "UPDATE access_log_rollup_state SET valid_from = NULL")
         e.run(db.execute, "DELETE FROM tokens")
         # A full session counts only for an existing admin with MFA enabled.
         admin_id = str(uuid.uuid4())
@@ -155,6 +157,8 @@ def env(monkeypatch):
             yield e
         finally:
             e.run(db.execute, "DELETE FROM access_logs")
+            e.run(db.execute, "DELETE FROM access_log_rollup")
+            e.run(db.execute, "UPDATE access_log_rollup_state SET valid_from = NULL")
             e.run(db.execute, "DELETE FROM tokens")
             e.run(db.execute, "DELETE FROM admin_users WHERE id = $1", admin_id)
 
@@ -466,3 +470,430 @@ def test_coverage_marks_the_retention_edge():
     cover = [p.coverage(s, e) for s, e in p.buckets]
     assert cover == ["none"] * 5 + ["partial", "full"]
     assert p.start == now - timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# Summary of the access log (app.usage_rollup)
+# ---------------------------------------------------------------------------
+
+
+def _report(env, now, tz):
+    """Every figure of both endpoints at one moment: the overview and each listed token's page, per range."""
+    from app.db import report_database
+    from app.routers import admin_usage as u
+
+    async def run():
+        out = {}
+        async with report_database(env.db) as db:
+            for rng in ("24h", "7d", "30d"):
+                p = u._Period(rng, now=now, tz=tz)
+                overview = await u._overview(db, p)
+                out[(rng, "overview")] = overview
+                for t in overview["tokens"]:
+                    if t["calls"] or t["grantsChecks"]:
+                        out[(rng, t["tokenId"])] = await u._token_usage(db, p, t["tokenId"])
+        return out
+
+    return env.run(run)
+
+
+def _raw_report(env, now, tz):
+    """_report with nothing summarised: every row is read from access_logs."""
+    env.run(env.db.execute, "DELETE FROM access_log_rollup")
+    env.run(env.db.execute, "UPDATE access_logs SET rolled = $1", False)
+    return _report(env, now, tz)
+
+
+def _roll(env, now, **kw):
+    from app import usage_rollup
+    from app.config import get_settings
+
+    async def run():
+        return await usage_rollup.roll_up(env.db, get_settings().access_log_retention_days, now, pause=0, **kw)
+
+    return env.run(run)
+
+
+def _scalar(env, sql):
+    return env.run(env.db.fetchval, sql)
+
+
+def _consistent(env):
+    """From the summary's valid_from on, every marked row is counted by exactly one summary call."""
+    from app import usage_rollup
+
+    since = env.run(usage_rollup.summary_valid_from, env.db) or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    at = usage_rollup.bind_time(env.db, since)
+    marked = env.run(
+        env.db.fetchval,
+        f"SELECT COUNT(*) FROM access_logs WHERE NOT ({usage_rollup.unrolled(env.db)}) AND created_at >= $1::timestamptz",
+        at,
+    )
+    counted = env.run(env.db.fetchval, "SELECT COALESCE(SUM(calls), 0) FROM access_log_rollup WHERE slot >= $1::timestamptz", at)
+    assert int(counted) == int(marked)
+
+
+_LOW_ID = "00000000-0000-4000-8000-000000000001"
+_HIGH_ID = "ffffffff-ffff-4fff-bfff-ffffffffffff"
+
+
+def _fill(env, now):
+    """Rows of every kind across 40 days before now, a few after now, with repeated groups."""
+    a = env.token("alpha")
+    b = env.token("beta")
+    gone = str(uuid.uuid4())
+    start = now - timedelta(days=40)
+    areas = ["orders", "Orders", " billing\t", "Billing", "x" * 300, "*"]
+    levels = ["read", "write", "delete", "all"]
+    t = start
+    i = 0
+    while t < now:
+        tok, name = (a, "alpha") if i % 3 else (b, "beta")
+        level = "grants" if i % 11 == 0 else levels[i % 4]
+        area = "*" if level == "grants" else areas[i % 5]
+        ip = None if i % 13 == 0 else f"10.0.0.{i % 3}"
+        env.log(tok, name, area, level, i % 4 != 1, ip=ip, at=t, n=1 + i % 3)
+        if i % 7 == 0:
+            env.log(None, None, "orders", "read", False, ip="192.0.2.9", at=t)
+        t += timedelta(hours=5, minutes=17, seconds=31)
+        i += 1
+    cutoff = now - timedelta(days=30)
+    # Around the retention cutoff and the ends of the period.
+    for at in (cutoff - timedelta(minutes=1), cutoff + timedelta(minutes=1), cutoff + timedelta(minutes=16)):
+        env.log(a, "alpha", "edge", "read", True, at=at)
+    last_slot = datetime.fromtimestamp(now.timestamp() // 900 * 900, timezone.utc)
+    for at in (last_slot - timedelta(seconds=1), last_slot, now - timedelta(seconds=1), now, now + timedelta(minutes=5)):
+        env.log(a, "alpha", "edge", "write", True, at=at)
+    # A deleted token: two names at the same moment in different groups (the greater id wins),
+    # then a later row without a name in the first one's group, which does not count for the name.
+    same = (now - timedelta(days=2)).replace(microsecond=0)
+    assert (same.minute % 15) < 10
+    env.log(gone, "low-id-name", "orders", "read", True, at=same, rid=_LOW_ID)
+    env.log(gone, "high-id-name", "billing", "write", False, at=same, rid=_HIGH_ID)
+    env.log(gone, None, "orders", "read", True, at=same + timedelta(minutes=5))
+    env.log(gone, "older-name", "orders", "read", True, at=same - timedelta(hours=3), n=4)
+    return a, gone
+
+
+_NOW = datetime(2026, 10, 27, 9, 7, 13, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("tz_name", ["Asia/Jerusalem", "Asia/Kathmandu"])
+@pytest.mark.parametrize("chunk_rows", [5000, 7])
+def test_summary_gives_the_same_figures(env, tz_name, chunk_rows):
+    # Jerusalem moved its clocks back on 25 October 2026; Kathmandu is UTC+05:45.
+    tz = ZoneInfo(tz_name)
+    _a, gone = _fill(env, _NOW)
+    before = _report(env, _NOW, tz)
+    assert _report(env, _NOW, tz) == before
+
+    _roll(env, _NOW, chunk_rows=chunk_rows)
+    _consistent(env)
+    assert int(_scalar(env, "SELECT MAX(calls) FROM access_log_rollup")) > 1
+    assert _report(env, _NOW, tz) == before
+    assert before[("30d", gone)]["token"]["name"] == "high-id-name"
+
+    # Summarised by a clock two hours ahead: rows after now are marked, still not counted,
+    # and the rows of the last partial slot are read from access_logs.
+    _roll(env, _NOW + timedelta(hours=2), chunk_rows=chunk_rows)
+    _consistent(env)
+    assert _report(env, _NOW, tz) == before
+    assert _raw_report(env, _NOW, tz) == before
+
+
+def test_summary_keeps_the_area_group_limit(env, monkeypatch):
+    import app.routers.admin_usage as usage
+
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    at = _NOW - timedelta(days=1)
+    for area in ("a1", "a2", "a3"):
+        env.log(a, "alpha", area, "read", True, at=at, n=2)
+    env.log(a, "alpha", "a1", "write", False, at=at)
+    _roll(env, _NOW)
+    for cap in (2, 3, 4):
+        monkeypatch.setattr(usage, "MAX_AREA_GROUPS", cap)
+        summarised = _report(env, _NOW, tz)
+        raw = _raw_report(env, _NOW, tz)
+        _roll(env, _NOW)
+        assert summarised == raw
+    # Three (token, area) groups, four (area, level) groups.
+    monkeypatch.setattr(usage, "MAX_AREA_GROUPS", 3)
+    r = _report(env, _NOW, tz)
+    assert r[("7d", "overview")]["areasIncomplete"] is False
+    assert r[("7d", a)]["areasIncomplete"] is True
+
+
+def test_rows_written_after_their_slot_was_summarised(env):
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    at = _NOW - timedelta(hours=3)
+    env.log(a, "alpha", "orders", "read", True, at=at, n=3)
+    _roll(env, _NOW)
+    # Late rows in a summarised slot, and one older than every summarised row.
+    env.log(a, "alpha", "orders", "read", False, at=at, n=2)
+    env.log(a, "alpha", "orders", "read", True, at=_NOW - timedelta(days=3))
+    mixed = _report(env, _NOW, tz)
+    assert mixed[("24h", "overview")]["totals"]["calls"] == 5
+    assert mixed[("7d", "overview")]["totals"]["calls"] == 6
+    _roll(env, _NOW)
+    _consistent(env)
+    assert _report(env, _NOW, tz) == mixed
+    assert _raw_report(env, _NOW, tz) == mixed
+
+
+def test_concurrent_and_cancelled_summaries(env):
+    import asyncio
+
+    from app import usage_rollup
+    from app.config import get_settings
+
+    tz = ZoneInfo("UTC")
+    _fill(env, _NOW)
+    before = _report(env, _NOW, tz)
+    days = get_settings().access_log_retention_days
+
+    async def cancelled():
+        task = asyncio.create_task(usage_rollup.roll_up(env.db, days, _NOW, chunk_rows=3, pause=0.01))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    env.run(cancelled)
+    _consistent(env)
+    assert _report(env, _NOW, tz) == before
+
+    async def twice():
+        return await asyncio.gather(
+            usage_rollup.roll_up(env.db, days, _NOW, chunk_rows=5, pause=0),
+            usage_rollup.roll_up(env.db, days, _NOW, chunk_rows=5, pause=0),
+        )
+
+    env.run(twice)
+    _consistent(env)
+    left = env.run(
+        env.db.fetchval,
+        f"SELECT COUNT(*) FROM access_logs WHERE {usage_rollup.unrolled(env.db)} "
+        "AND created_at >= $1::timestamptz AND created_at < $2::timestamptz",
+        usage_rollup.bind_time(env.db, _NOW - timedelta(days=29)),
+        usage_rollup.bind_time(env.db, _NOW - timedelta(hours=1)),
+    )
+    assert left == 0
+    assert _report(env, _NOW, tz) == before
+
+
+def test_purge_drops_the_summary_of_deleted_rows(env, monkeypatch):
+    from app.config import get_settings
+    from app.logger import purge_old_logs
+    from app.usage_rollup import floor_slot
+
+    import app.logger as logger_mod
+    from app import usage_rollup
+    from app.usage_rollup import bind_time
+
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    # The purge's clock, 7 minutes into a slot: the cutoff splits a slot that has rows on both sides.
+    now = floor_slot(datetime.now(timezone.utc)) - timedelta(minutes=8)
+    cutoff = now - timedelta(days=2)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(logger_mod, "datetime", Clock)
+    t = now - timedelta(days=4)
+    while t < now:
+        env.log(a, "alpha", "orders", "read", True, at=t, n=2)
+        t += timedelta(minutes=7)
+    t = floor_slot(cutoff)
+    while t < floor_slot(cutoff) + timedelta(minutes=15):
+        env.log(a, "alpha", "billing", "write", False, at=t)
+        t += timedelta(seconds=40)
+    _roll(env, now)
+    _consistent(env)
+
+    monkeypatch.setattr(get_settings(), "access_log_retention_days", 2)
+    env.run(purge_old_logs, env.db, 30, 2)
+    _consistent(env)
+    kept = _scalar(env, "SELECT MIN(slot) FROM access_log_rollup")
+    kept_at = kept if isinstance(kept, datetime) else datetime.strptime(kept, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    assert kept_at == floor_slot(cutoff) + timedelta(minutes=15)
+    # The summary of the cutoff's slot is no longer read; its rows after the cutoff are kept.
+    assert env.run(usage_rollup.summary_valid_from, env.db) == floor_slot(cutoff) + timedelta(minutes=15)
+    left = env.run(
+        env.db.fetchval,
+        "SELECT COUNT(*) FROM access_logs WHERE "
+        "created_at >= $1::timestamptz AND created_at < $2::timestamptz",
+        bind_time(env.db, cutoff), bind_time(env.db, floor_slot(cutoff) + timedelta(minutes=15)),
+    )
+    assert left >= 10
+    # A purge with a longer retention (or an earlier clock) never moves valid_from back.
+    env.run(purge_old_logs, env.db, 30, 5)
+    assert env.run(usage_rollup.summary_valid_from, env.db) == floor_slot(cutoff) + timedelta(minutes=15)
+    # Nor does deleting a row written late with an old time (a clock that was behind).
+    env.log(a, "alpha", "orders", "read", True, at=cutoff - timedelta(hours=5))
+    env.run(purge_old_logs, env.db, 30, 2)
+    assert env.run(usage_rollup.summary_valid_from, env.db) == floor_slot(cutoff) + timedelta(minutes=15)
+    monkeypatch.setattr(get_settings(), "access_log_retention_days", 5)
+    assert _report(env, now, tz) == _raw_report(env, now, tz)
+    _roll(env, now)
+
+    # A longer retention after the purge shows exactly the rows that are left.
+    for days in (2, 5):
+        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        later = datetime.now(timezone.utc)
+        summarised = _report(env, later, tz)
+        assert summarised == _raw_report(env, later, tz)
+        _roll(env, later)
+        _consistent(env)
+
+
+@pytest.mark.parametrize("stop_after", [1, 2, None])
+def test_purge_in_chunks_with_a_stale_summary_run(env, monkeypatch, stop_after):
+    """Between the purge's transactions a summary run with an older clock (a run that started
+    before the cutoff moved) summarises rows the purge is about to delete; the purge may also
+    stop after any transaction. Every committed state keeps the summary and the rows in step."""
+    import asyncio
+
+    from app import usage_rollup
+    from app.config import get_settings
+
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    now = usage_rollup.floor_slot(datetime.now(timezone.utc)) - timedelta(minutes=8)
+    t = now - timedelta(days=3)
+    while t < now:
+        env.log(a, "alpha", "orders", "read", True, at=t, n=2)
+        t += timedelta(minutes=9)
+    # A busy cutoff slot: more rows on each side of the cutoff than one purge transaction takes.
+    t = usage_rollup.floor_slot(now - timedelta(days=2))
+    while t < usage_rollup.floor_slot(now - timedelta(days=2)) + timedelta(minutes=15):
+        env.log(a, "alpha", "busy", "read", True, at=t)
+        t += timedelta(seconds=6)
+    _roll(env, now - timedelta(days=1))
+    calls = {"sleeps": 0}
+
+    async def between(_s):
+        calls["sleeps"] += 1
+        await usage_rollup.roll_up(env.db, 2, now - timedelta(minutes=40), pause=0)
+        if stop_after is not None and calls["sleeps"] >= stop_after:
+            raise asyncio.CancelledError
+
+    pause = usage_rollup._pause
+    monkeypatch.setattr(usage_rollup, "_pause", between)
+
+    async def purge():
+        try:
+            await usage_rollup.purge_access_logs(env.db, now - timedelta(days=2), chunk_rows=40)
+        except asyncio.CancelledError:
+            pass
+
+    env.run(purge)
+    monkeypatch.setattr(usage_rollup, "_pause", pause)
+    assert calls["sleeps"] >= (stop_after or 2)
+    _consistent(env)
+    for days in (2, 5):
+        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        assert _report(env, now, tz) == _raw_report(env, now, tz)
+        _roll(env, now - timedelta(days=1))
+        _consistent(env)
+
+
+def test_a_stopped_purge_keeps_the_summary_in_use(env, monkeypatch):
+    """A purge to a shorter retention that stops early, followed by a longer retention again,
+    leaves the summary in use for every slot whose rows were not deleted."""
+    import asyncio
+
+    from app import usage_rollup
+    from app.config import get_settings
+
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    now = usage_rollup.floor_slot(datetime.now(timezone.utc)) - timedelta(minutes=8)
+    t = now - timedelta(days=4)
+    while t < now:
+        env.log(a, "alpha", "orders", "read", True, at=t)
+        t += timedelta(minutes=10)
+    _roll(env, now)
+
+    async def stop(_s):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(usage_rollup, "_pause", stop)
+
+    async def purge():
+        with pytest.raises(asyncio.CancelledError):
+            await usage_rollup.purge_access_logs(env.db, now - timedelta(days=1), chunk_rows=30)
+
+    env.run(purge)
+    # 30 rows, one every 10 minutes, are gone: valid_from ends after the slot of the last one.
+    first = usage_rollup.floor_slot(now - timedelta(days=4))
+    valid_from = env.run(usage_rollup.summary_valid_from, env.db)
+    assert first + timedelta(hours=4) <= valid_from <= first + timedelta(hours=5, minutes=15)
+    _consistent(env)
+    monkeypatch.setattr(get_settings(), "access_log_retention_days", 5)
+    summarised = _report(env, now, tz)
+    assert summarised == _raw_report(env, now, tz)
+    assert summarised[("7d", "overview")]["totals"]["calls"] == 4 * 144 - 30
+
+
+def test_periods_without_a_whole_slot(env, monkeypatch):
+    from app.config import get_settings
+
+    tz = ZoneInfo("UTC")
+    a = env.token("alpha")
+    for minutes in (1, 20, 200):
+        env.log(a, "alpha", "orders", "read", True, at=_NOW - timedelta(minutes=minutes))
+    env.log(a, "alpha", "orders", "read", True, at=_NOW)
+    _roll(env, _NOW)
+    for days in (0, 1):
+        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        assert _report(env, _NOW, tz) == _raw_report(env, _NOW, tz)
+        _roll(env, _NOW)
+    monkeypatch.setattr(get_settings(), "access_log_retention_days", 0)
+    r = _report(env, _NOW, tz)
+    assert r[("24h", "overview")]["totals"]["calls"] == 1
+    res = env.get("/admin/api/usage/tokens", range="24h")
+    assert res.status_code == 200
+
+
+def test_shutdown_stops_the_first_cleanup(monkeypatch):
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    import app.main as main_mod
+
+    monkeypatch.setenv("TZ", "UTC")
+    create_database = main_mod.create_database
+    monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
+    monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: FakeRedis())
+    events: list[str] = []
+
+    async def slow_cleanup(_db):
+        events.append("started")
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+
+    monkeypatch.setattr(main_mod, "cleanup_expired_tokens", slow_cleanup)
+    with TestClient(main_mod.app) as c:
+        db = main_mod.app.state.db
+        close = db.close
+
+        async def closing():
+            events.append("closed")
+            await close()
+
+        monkeypatch.setattr(db, "close", closing)
+        for _ in range(100):
+            if events:
+                break
+            c.portal.call(asyncio.sleep, 0.01)
+        assert events == ["started"]
+    assert events == ["started", "cancelled", "closed"]
