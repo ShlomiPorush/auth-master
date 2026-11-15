@@ -49,7 +49,7 @@ _root = _settings.root_path.strip("/")
 ROOT_PATH = f"/{_root}" if _root else ""
 
 # FastAPI reads and parses a request body before any route check runs (rate
-# limit, bootstrap token, session), so bodies are capped for every route.
+# limit, session), so bodies are capped for every route.
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 
 

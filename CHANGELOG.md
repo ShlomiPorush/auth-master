@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The `BOOTSTRAP_TOKEN` setting and the `X-Bootstrap-Token` header. The first
+  person who completes the setup on `/setup`, including MFA, becomes the admin,
+  and the setup page no longer has a bootstrap token field. A `BOOTSTRAP_TOKEN`
+  that is still set is ignored. Complete the setup before the service can be
+  reached from other machines.
+
 ## [2.1.0] - 2026-11-15
 
 ### Security

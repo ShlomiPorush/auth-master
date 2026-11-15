@@ -198,13 +198,8 @@ def _record(sid: str, payload: dict) -> tuple[str, str]:
 
 def _register(c) -> tuple[str, str]:
     """Start the first-admin setup. Returns (password, csrf)."""
-    from app.config import get_settings
-
     password = secrets.token_urlsafe(16)
-    headers = {}
-    if get_settings().bootstrap_token:
-        headers["X-Bootstrap-Token"] = get_settings().bootstrap_token
-    res = c.post(REGISTER, json={"username": "admin", "password": password}, headers=headers)
+    res = c.post(REGISTER, json={"username": "admin", "password": password})
     assert res.status_code == 200, res.text
     return password, res.json()["csrf"]
 

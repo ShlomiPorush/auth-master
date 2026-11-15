@@ -34,7 +34,6 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
       ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
-      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       TZ: ${TZ:-UTC}
       # Passed through so that values set as stack variables (for example in
       # Portainer) reach the container, not only values in .env. The defaults

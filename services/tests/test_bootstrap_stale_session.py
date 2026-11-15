@@ -104,8 +104,6 @@ async def _env():
     for value in (s.admin_api_key, s.session_secret, s.app_encryption_key):
         if not value.strip() or value in KNOWN_PUBLIC_VALUES:
             raise RuntimeError("a secret setting is empty or a placeholder")
-    if s.bootstrap_token:
-        pytest.skip("BOOTSTRAP_TOKEN is set in this environment")
     saved_state = {n: getattr(app.state, n, None) for n in ("db", "redis")}
     rate_limit._buckets.clear()
     db = await create_database(_DB_URL)
@@ -208,6 +206,38 @@ def test_stale_setup_session_cannot_complete_after_bootstrap():
             assert len(await _enabled_ids(e.db)) == 1
             assert (await attacker.get("/admin/api/tokens")).status_code == 401
             assert (await legit.get("/admin/api/tokens")).status_code == 200
+
+    asyncio.run(run())
+
+
+def test_leftover_bootstrap_token_setting_does_not_gate_setup(monkeypatch):
+    """BOOTSTRAP_TOKEN was removed: a value still set changes nothing, and setup closes after one admin."""
+    from app.config import Settings
+    from app.routers import admin_bootstrap
+
+    # Settings as the service reads them when BOOTSTRAP_TOKEN is still set; only the setup
+    # routes see them, so the cached settings other tests use stay as they are.
+    monkeypatch.setenv("BOOTSTRAP_TOKEN", secrets.token_urlsafe(24))
+    leftover = Settings()
+    monkeypatch.setattr(admin_bootstrap, "get_settings", lambda: leftover)
+
+    async def run():
+        async with _env() as e:
+            await _register(e.client(), "no-header")
+            c = e.client()
+            resp = await c.post(
+                "/admin/api/bootstrap/register",
+                json={"username": "other-header", "password": secrets.token_urlsafe(18)},
+                headers={"X-Bootstrap-Token": secrets.token_urlsafe(24)},
+            )
+            assert resp.status_code == 200, resp.text
+            resp = await _verify(c, resp.json()["csrf"], await _enroll_secret(c))
+            assert resp.status_code == 200, resp.text
+            resp = await e.client().post(
+                "/admin/api/bootstrap/register",
+                json={"username": "late", "password": secrets.token_urlsafe(18)},
+            )
+            assert resp.status_code == 403, resp.text
 
     asyncio.run(run())
 

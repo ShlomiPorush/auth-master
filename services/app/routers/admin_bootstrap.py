@@ -39,14 +39,6 @@ async def has_completed_admin(db) -> bool:
     return v is not None
 
 
-def check_bootstrap_header(x_bootstrap_token: str | None) -> None:
-    s = get_settings().bootstrap_token
-    if not s:
-        return
-    if x_bootstrap_token != s:
-        raise HTTPException(status_code=403, detail="Invalid bootstrap token")
-
-
 @router.get("/setup/status")
 async def setup_status(request: Request):
     db = request.app.state.db
@@ -64,9 +56,7 @@ async def bootstrap_register(
     request: Request,
     response: Response,
     body: RegisterBody,
-    x_bootstrap_token: str | None = Header(None, alias="X-Bootstrap-Token"),
 ):
-    check_bootstrap_header(x_bootstrap_token)
     db = request.app.state.db
     r: Redis = request.app.state.redis
     if await has_completed_admin(db):

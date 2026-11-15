@@ -105,7 +105,6 @@ class Settings(BaseSettings):
     session_secret: str = Field(validation_alias="SESSION_SECRET")
     app_encryption_key: str = Field(validation_alias="APP_ENCRYPTION_KEY")
     allowed_areas: str = Field(default="orders,billing,webhooks", validation_alias="ALLOWED_AREAS")
-    bootstrap_token: str = Field(default="", validation_alias="BOOTSTRAP_TOKEN")
     totp_issuer: str = Field(default="AuthService", validation_alias="TOTP_ISSUER")
     environment: str = Field(default="development", validation_alias="ENVIRONMENT")
     root_path: str = Field(default="", validation_alias="ROOT_PATH")
