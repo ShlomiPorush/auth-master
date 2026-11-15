@@ -26,7 +26,7 @@ from app import login_limit, passkey_settings, passkeys
 from app.admin_deps import FullSession, csrf_check
 from app.config import get_settings
 from app.datetime_utils import fmt_datetime
-from app.db import UniqueViolationError
+from app.db import UniqueViolationError, write_transaction
 from app.logger import get_actor, log_activity
 from app.passkey_origin import InvalidOrigin, canonical_origin
 from app.sessions import (
@@ -325,16 +325,17 @@ async def rename_passkey(
     db = request.app.state.db
     pid = _passkey_uuid(passkey_id)
     name = passkeys.check_name(body.name)
-    old = await db.fetchrow("SELECT name FROM passkeys WHERE id = $1 AND admin_id = $2", pid, _admin_id(sess))
-    done = await db.fetchval_write(
-        "UPDATE passkeys SET name = $1 WHERE id = $2 AND admin_id = $3 RETURNING id", name, pid, _admin_id(sess)
-    )
-    if done is None or old is None:
-        raise HTTPException(404, "Not found")
-    await log_activity(
-        db, actor=await get_actor(request, sess), action="passkey_renamed", entity_type="passkey", entity_id=pid,
-        entity_name=name, details={"from": old["name"]}, ip_address=_ip(request),
-    )
+    actor = await get_actor(request, sess)
+    # The change and its audit entry commit together, or neither does.
+    async with write_transaction(db) as tx:
+        old = await tx.fetchval("SELECT name FROM passkeys WHERE id = $1 AND admin_id = $2", pid, _admin_id(sess))
+        if old is None:
+            raise HTTPException(404, "Not found")
+        await tx.execute("UPDATE passkeys SET name = $1 WHERE id = $2", name, pid)
+        await log_activity(
+            tx, actor=actor, action="passkey_renamed", entity_type="passkey", entity_id=pid,
+            entity_name=name, details={"from": old}, ip_address=_ip(request),
+        )
     return {"id": pid, "name": name}
 
 
@@ -348,15 +349,18 @@ async def delete_passkey(
     csrf_check(sess, x_csrf_token)
     db = request.app.state.db
     pid = _passkey_uuid(passkey_id)
-    name = await db.fetchval_write(
-        "DELETE FROM passkeys WHERE id = $1 AND admin_id = $2 RETURNING name", pid, _admin_id(sess)
-    )
-    if name is None:
-        raise HTTPException(404, "Not found")
-    await log_activity(
-        db, actor=await get_actor(request, sess), action="passkey_deleted", entity_type="passkey", entity_id=pid,
-        entity_name=name, ip_address=_ip(request),
-    )
+    actor = await get_actor(request, sess)
+    # The deletion and its audit entry commit together, or neither does.
+    async with write_transaction(db) as tx:
+        name = await tx.fetchval(
+            "DELETE FROM passkeys WHERE id = $1 AND admin_id = $2 RETURNING name", pid, _admin_id(sess)
+        )
+        if name is None:
+            raise HTTPException(404, "Not found")
+        await log_activity(
+            tx, actor=actor, action="passkey_deleted", entity_type="passkey", entity_id=pid,
+            entity_name=name, ip_address=_ip(request),
+        )
     return {"ok": True}
 
 

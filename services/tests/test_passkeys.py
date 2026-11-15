@@ -991,3 +991,28 @@ def test_control_characters_in_a_name_are_refused_before_the_ceremony_is_used():
             [pk] = (await c.get("/admin/api/passkeys")).json()["passkeys"]
             assert (await c.patch(f"/admin/api/passkeys/{pk['id']}", json={"name": "a\u0007b"})).status_code == 422
     run(scenario())
+
+
+@pytest.mark.parametrize("action", ["passkey_renamed", "passkey_deleted"])
+def test_rename_and_delete_are_never_saved_without_their_audit_entry(monkeypatch, action):
+    from app.routers import admin_passkeys
+
+    real = admin_passkeys.log_activity
+
+    async def failing(db, **kw):
+        if kw.get("action") == action:
+            raise RuntimeError("audit write failed")
+        return await real(db, **kw)
+
+    async def scenario():
+        async with _env() as e:
+            _, c = await setup_passkey(e)
+            [pk] = (await c.get("/admin/api/passkeys")).json()["passkeys"]
+            monkeypatch.setattr(admin_passkeys, "log_activity", failing)
+            with pytest.raises(RuntimeError):
+                if action == "passkey_renamed":
+                    await c.patch(f"/admin/api/passkeys/{pk['id']}", json={"name": "Other"})
+                else:
+                    await c.delete(f"/admin/api/passkeys/{pk['id']}")
+            assert await e.db.fetchval("SELECT name FROM passkeys") == "Laptop"
+    run(scenario())
