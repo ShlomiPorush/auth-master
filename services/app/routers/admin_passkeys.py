@@ -8,7 +8,13 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from webauthn import generate_registration_options, verify_registration_response
-from webauthn.helpers import bytes_to_base64url, options_to_json_dict, parse_registration_credential_json
+from webauthn.helpers import (
+    bytes_to_base64url,
+    decode_credential_public_key,
+    decoded_public_key_to_cryptography,
+    options_to_json_dict,
+    parse_registration_credential_json,
+)
 from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
@@ -247,7 +253,11 @@ async def register(
             expected_origin=c.origin,
             require_user_verification=True,
         )
-    except WebAuthnException:
+        # The library stores keys it cannot use later (such as an EC point off its curve);
+        # its own helpers turn the key into a usable one here, or fail.
+        decoded_public_key_to_cryptography(decode_credential_public_key(verified.credential_public_key))
+    except (WebAuthnException, ValueError, KeyError, TypeError):
+        # py_webauthn raises more than WebAuthnException on some malformed data or keys.
         raise HTTPException(400, "The passkey could not be created. Try again.") from None
 
     actor = await get_actor(request, sess)
@@ -273,21 +283,22 @@ async def register(
                 bytes_to_base64url(verified.credential_public_key), verified.sign_count, json.dumps(transports),
                 bool(verified.credential_backed_up), c.rp_id, name,
             )
+            # In the same transaction: a passkey is never usable without its audit entry.
+            if c.first:
+                await log_activity(
+                    tx, actor=actor, action="settings.update", entity_type="settings", entity_name="passkeys",
+                    details={"version": c.version + 1, "from": {"origin": None}, "to": {"origin": c.origin}},
+                    ip_address=_ip(request),
+                )
+            await log_activity(
+                tx, actor=actor, action="passkey_added", entity_type="passkey", entity_id=passkey_id,
+                entity_name=name, details={"rpId": c.rp_id}, ip_address=_ip(request),
+            )
     except UniqueViolationError:
         raise HTTPException(409, "This passkey is already registered.") from None
     except passkey_settings.InvalidStoredAddress as e:
         raise HTTPException(500, str(e)) from None
 
-    if c.first:
-        await log_activity(
-            db, actor=actor, action="settings.update", entity_type="settings", entity_name="passkeys",
-            details={"version": c.version + 1, "from": {"origin": None}, "to": {"origin": c.origin}},
-            ip_address=_ip(request),
-        )
-    await log_activity(
-        db, actor=actor, action="passkey_added", entity_type="passkey", entity_id=passkey_id, entity_name=name,
-        details={"rpId": c.rp_id}, ip_address=_ip(request),
-    )
     return {"id": passkey_id, "name": name}
 
 
@@ -395,9 +406,9 @@ async def put_address(
         if current.origin == origin:
             return _address_view(current)
         await passkey_settings.insert_version(tx, current.version + 1, origin, actor, _ip(request))
-    await log_activity(
-        db, actor=actor, action="settings.update", entity_type="settings", entity_name="passkeys",
-        details={"version": current.version + 1, "from": {"origin": current.origin}, "to": {"origin": origin}},
-        ip_address=_ip(request),
-    )
+        await log_activity(
+            tx, actor=actor, action="settings.update", entity_type="settings", entity_name="passkeys",
+            details={"version": current.version + 1, "from": {"origin": current.origin}, "to": {"origin": origin}},
+            ip_address=_ip(request),
+        )
     return _address_view(await _address(request))

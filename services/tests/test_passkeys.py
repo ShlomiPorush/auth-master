@@ -84,7 +84,7 @@ class Authenticator:
     def _flags(uv: bool, attested: bool = False) -> int:
         return 0x01 | (0x04 if uv else 0) | 0x08 | 0x10 | (0x40 if attested else 0)
 
-    def create(self, public_key: dict, origin: str = ORIGIN, uv: bool = True) -> dict:
+    def create(self, public_key: dict, origin: str = ORIGIN, uv: bool = True, cose: bytes | None = None) -> dict:
         self.user_handle = unb64u(public_key["user"]["id"])
         rp_id = public_key["rp"]["id"]
         client = json.dumps({"type": "webauthn.create", "challenge": public_key["challenge"], "origin": origin}).encode()
@@ -95,7 +95,7 @@ class Authenticator:
             + bytes(16)
             + struct.pack(">H", len(self.cred_id))
             + self.cred_id
-            + self._cose()
+            + (cose if cose is not None else self._cose())
         )
         att = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth})
         return {
@@ -319,7 +319,7 @@ async def actions(db) -> list[tuple[str, dict]]:
     ("https://auth.example.com:443", "https://auth.example.com"),
     ("https://auth.example.com:8443", "https://auth.example.com:8443"),
     ("http://localhost:8080", "http://localhost:8080"),
-    ("  https://bücher.example  ", "https://xn--bcher-kva.example"),
+    ("  https://xn--bcher-kva.example  ", "https://xn--bcher-kva.example"),
 ])
 def test_address_canonical_form(value, expected):
     from app.passkey_origin import canonical_origin
@@ -332,7 +332,7 @@ def test_address_canonical_form(value, expected):
     "https://[2001:db8::1]", "https://10.1", "https://user:pw@auth.example.com", "https://auth.example.com/auth",
     "https://auth.example.com?x=1", "https://auth.example.com#x", "https://auth..example.com",
     "https://-auth.example.com", "https://auth.example.com:0", "https://auth.example.com:99999",
-    "https://auth.example.com.", "https://" + "a" * 300 + ".com",
+    "https://auth.example.com.", "https://bücher.example", "https://faß.de", "https://" + "a" * 300 + ".com",
 ])
 def test_address_refused(value):
     from app.passkey_origin import InvalidOrigin, canonical_origin
@@ -910,4 +910,78 @@ def test_proposed_address_is_validated():
             for bad in ("http://auth.example.com", "https://10.0.0.5", None):
                 res = await c.post("/admin/api/passkeys/options", json={"code": e.code(), "proposedOrigin": bad})
                 assert res.status_code == 422
+    run(scenario())
+
+
+# ── Hostile or broken registrations ─────────────────────────────
+
+def _off_curve_cose() -> bytes:
+    # x and y that are not a point of P-256.
+    return cbor2.dumps({1: 2, 3: -7, -1: 1, -2: (1).to_bytes(32, "big"), -3: (2).to_bytes(32, "big")})
+
+
+@pytest.mark.parametrize("cose", [cbor2.dumps({1: 2}), _off_curve_cose()], ids=["incomplete-key", "off-curve-key"])
+def test_unusable_public_key_is_refused_at_registration(cose):
+    async def scenario():
+        async with _env() as e:
+            c = await e.signed_in()
+            opts = (await c.post("/admin/api/passkeys/options", json={"code": e.code(), "proposedOrigin": ORIGIN})).json()
+            res = await c.post("/admin/api/passkeys", json={
+                "name": "x", "credential": Authenticator().create(opts["publicKey"], cose=cose), "ceremony": opts["ceremony"]})
+            assert res.status_code == 400
+            assert await e.db.fetchval("SELECT COUNT(*) FROM passkeys") == 0
+            assert await e.db.fetchval("SELECT COUNT(*) FROM passkey_settings") == 0
+    run(scenario())
+
+
+def test_stored_unusable_key_fails_sign_in_without_500():
+    async def scenario():
+        async with _env() as e:
+            auth, _ = await setup_passkey(e)
+            # A key the library cannot load, as an older version or a manual edit could leave.
+            await e.db.execute("UPDATE passkeys SET public_key = $1", b64u(_off_curve_cose()))
+            res = await login(e.client(), auth)
+            assert res.status_code == 401
+    run(scenario())
+
+
+def test_a_passkey_is_never_saved_without_its_audit_entry(monkeypatch):
+    from app.routers import admin_passkeys
+
+    real = admin_passkeys.log_activity
+
+    async def failing(db, **kw):
+        if kw.get("action") == "passkey_added":
+            raise RuntimeError("audit write failed")
+        return await real(db, **kw)
+
+    monkeypatch.setattr(admin_passkeys, "log_activity", failing)
+
+    async def scenario():
+        async with _env() as e:
+            c = await e.signed_in()
+            opts = (await c.post("/admin/api/passkeys/options", json={"code": e.code(), "proposedOrigin": ORIGIN})).json()
+            auth = Authenticator()
+            with pytest.raises(RuntimeError):
+                await c.post("/admin/api/passkeys", json={
+                    "name": "x", "credential": auth.create(opts["publicKey"]), "ceremony": opts["ceremony"]})
+            assert await e.db.fetchval("SELECT COUNT(*) FROM passkeys") == 0
+            assert await e.db.fetchval("SELECT COUNT(*) FROM passkey_settings") == 0
+            assert await e.db.fetchval("SELECT COUNT(*) FROM activity_logs WHERE action = $1", "settings.update") == 0
+    run(scenario())
+
+
+def test_control_characters_in_a_name_are_refused_before_the_ceremony_is_used():
+    async def scenario():
+        async with _env() as e:
+            c = await e.signed_in()
+            opts = (await c.post("/admin/api/passkeys/options", json={"code": e.code(), "proposedOrigin": ORIGIN})).json()
+            auth = Authenticator()
+            credential = auth.create(opts["publicKey"])
+            res = await c.post("/admin/api/passkeys", json={"name": "Key\u0000name", "credential": credential, "ceremony": opts["ceremony"]})
+            assert res.status_code == 422
+            res = await c.post("/admin/api/passkeys", json={"name": "Key name", "credential": credential, "ceremony": opts["ceremony"]})
+            assert res.status_code == 200, res.text
+            [pk] = (await c.get("/admin/api/passkeys")).json()["passkeys"]
+            assert (await c.patch(f"/admin/api/passkeys/{pk['id']}", json={"name": "a\u0007b"})).status_code == 422
     run(scenario())

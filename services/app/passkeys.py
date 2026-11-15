@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import unicodedata
 import time
 import uuid
 from dataclasses import dataclass
@@ -172,6 +173,8 @@ def check_name(name: Any) -> str:
         text.encode("utf-8")
     except UnicodeEncodeError:
         raise HTTPException(422, "The name contains text that is not valid Unicode.") from None
+    if any(unicodedata.category(ch) == "Cc" for ch in text):
+        raise HTTPException(422, "The name cannot contain control characters.")
     return text
 
 
@@ -268,7 +271,8 @@ async def use_passkey(
             credential_current_sign_count=int(row["sign_count"]),
             require_user_verification=True,
         )
-    except WebAuthnException:
+    except (WebAuthnException, ValueError, KeyError, TypeError):
+        # py_webauthn raises more than WebAuthnException on some malformed data or keys.
         await _log_failure(request, owner, where, "invalid")
         raise HTTPException(401 if session_admin is None else 400, "The passkey could not be verified.") from None
 

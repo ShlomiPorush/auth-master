@@ -54,10 +54,10 @@ def canonical_origin(value: str) -> str:
         pass
     else:
         raise InvalidOrigin("Passkeys need a domain name, not an IP address.")
-    try:
-        host = host.encode("idna").decode("ascii").lower()
-    except UnicodeError:
-        raise InvalidOrigin("The host name is not a valid domain name.") from None
+    if not host.isascii():
+        # Browsers and Python convert some letters differently (such as German sharp s),
+        # so only the ASCII form the browser itself shows is accepted.
+        raise InvalidOrigin("Enter the host name in its ASCII form (xn--...), as the browser shows it in location.origin.")
     labels = host.split(".")
     if len(host) > 253 or not all(_LABEL.match(label) for label in labels):
         raise InvalidOrigin("The host name is not a valid domain name.")
