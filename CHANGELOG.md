@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Passkeys for the admin dashboard. An admin can sign in with a passkey
+  (fingerprint, face, PIN or screen lock) instead of the password and the
+  authenticator code, and can confirm "Copy token" and "Copy key" with a passkey
+  instead of the code. Passkeys are added, renamed and deleted on the new Account
+  page (`/admin/account`); adding one needs the authenticator code or another
+  passkey. The password and the code keep working and are the way back when a
+  passkey is lost. Passkeys need HTTPS, or `http://localhost`.
+- The Settings page has a **Passkeys** panel for the passkey address, and the
+  `PASSKEY_ORIGIN` setting overrides it and locks the field. The first passkey sets it
+  to the address the dashboard is open at. Passkeys made for another host name stop
+  working when the address changes. Each change is a new version in the table
+  `passkey_settings` and an entry in the Activity Log. See "Passkeys" in README.md.
+- New Python dependency: `webauthn` 3.0.1 (py_webauthn), which builds and checks
+  the passkey requests, with `cbor2`, `pyOpenSSL`, `pyasn1` and `pyasn1-modules`.
 - The Settings page has a **General** panel for the time zone, the activity log and
   access log retention, and the Secure session cookie. Each save is a new version in
   the table `app_settings` and an entry in the Activity Log. A lower retention first
@@ -27,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- "Copy token" and "Copy key" (`POST /admin/api/tokens/{id}/reveal` and
+  `POST /admin/api/api-keys/{id}/reveal`) accept `{"passkey", "ceremony"}` in
+  place of `{"code"}`, and their Activity Log entries say which one was used.
 - The Usage page reads a summary of the access log instead of every row, so it
   answers in a fraction of a second also with millions of log rows (before, the
   30-day view could take longer than the page waits). The figures are the same and

@@ -8,6 +8,7 @@ A self-hosted token authentication and authorization service. Manage API tokens,
 - **Zone-Based Authorization** — Define zones (areas) and assign `read` / `write` / `delete` / `all` access levels
 - **API Key Management** — Create scoped API keys for programmatic access (e.g. n8n, CI/CD)
 - **MFA-Protected** — Admin dashboard requires TOTP two-factor authentication
+- **Passkeys** — Sign in to the dashboard with a passkey (fingerprint, face or screen lock) instead of the password and authenticator code, and confirm token and API key copies with it. See [Passkeys](#passkeys)
 - **Fast Validation** — Token validation with rate limiting; revocations and other token changes apply to the next request
 - **Dual Database Support** — PostgreSQL for production, SQLite for lightweight/dev setups
 - **Modern Dashboard** — Admin UI with light and dark themes and phone layouts for managing tokens, zones, and API keys
@@ -70,6 +71,7 @@ the variable to manage the value on the page.
 | `RATE_LIMIT_WINDOW_MS` | `60000` | **Window**, in milliseconds |
 | `REDIS_URL` | _(empty)_ | **Redis connection**. See [Redis connection](#redis-connection) |
 | `TOTP_ISSUER` | `AuthService` | **Name in authenticator apps**, on the MFA step of the first setup. The name is used only there |
+| `PASSKEY_ORIGIN` | _(empty)_ | **Passkey address**, such as `https://auth.example.com`. Not copied to the page: when you remove it, the saved address applies. An empty value counts as not set. See [Passkeys](#passkeys) |
 
 At each start, the service copies `TZ`, `COOKIE_SECURE` and the two retention values from
 the environment to the Settings page when they differ from the saved values. Each copy is a
@@ -309,6 +311,33 @@ If the URL selects a database other than 0, also allow `+select`. Without them, 
 fail with `500`; the limit is never skipped. The check before a save runs these commands, so
 the page refuses a URL whose user lacks one of them.
 
+### Passkeys
+
+An admin can sign in with a passkey instead of the password and the authenticator
+code, and can use it in place of the code to copy a token or an API key. The password
+and the authenticator code keep working: they are the way back when a passkey is
+lost.
+
+- **HTTPS is required.** Browsers offer passkeys only on `https://` pages and on
+  `http://localhost`. Over `http://<ip>:8080` the dashboard says so and offers the
+  password and code only. See [Remote access and HTTPS](#remote-access-and-https).
+- **The passkey address.** Every passkey works at one address: the host name of
+  the address admins open the service at, such as `https://auth.example.com`. The
+  first passkey an admin adds sets it to the address of that page; the Settings
+  page shows it and can change it. `PASSKEY_ORIGIN` sets it from the environment
+  and locks the field. The address must be a host name (not an IP address), over
+  HTTPS or on `localhost`, without a path.
+- **Changing the address.** Passkeys made for another host name stop working until
+  the address is set back: sign in with the password and code, and add new
+  passkeys on the Account page. Changing only the port keeps the host name, so
+  passkeys keep working. Removing the address turns passkey sign-in off.
+- **Adding a passkey** (Account page) needs the authenticator code, or one of your
+  passkeys. Deleting one needs neither; also remove it from your device or password
+  manager.
+- The Activity Log records passkeys added, renamed and deleted, failed passkey
+  checks, sign-ins with the passkey used, and whether a copy was confirmed with a
+  passkey or a code.
+
 ### Secrets
 
 - Generate every secret with `tools/generate-env.sh` or `tools/generate-env.ps1`, or with `openssl rand -hex 32`. The service rejects every value that was ever published in this repository, in any of these settings.
@@ -388,7 +417,8 @@ Every dashboard section is a page with its own URL, so it can be bookmarked, sha
 - **Activity Log** (`/admin/logs/activity`) — Audit trail of admin actions
 - **Access Logs** (`/admin/logs/access`) — History of token validation requests, and the requests the rate limit rejected. `?token=<id>` lists one token's requests
 - **Usage** (`/admin/usage`) — Calls per token over the last 24 hours, 7 days or 30 days: allowed and denied calls per hour or day, the zones each token calls with their levels, and the addresses the calls come from. Figures come from the access log, so they cover at most the access log retention and leave out requests the log does not record (rate-limited requests and requests with an invalid level)
-- **Settings** (`/admin/settings`) — The time zone, log retention and the Secure session cookie, the rate limit and the addresses exempt from it, and the Redis connection
+- **Settings** (`/admin/settings`) — The time zone, log retention and the Secure session cookie, the rate limit and the addresses exempt from it, the Redis connection, and the passkey address
+- **Account** (`/admin/account`) — Your passkeys: add, rename and delete them
 
 Opening a page while signed out redirects to the login flow and returns to the same page after signing in.
 
@@ -400,6 +430,7 @@ See [API.md](API.md) for the full REST API reference.
 
 - Admin passwords are hashed with **bcrypt**, which uses at most 72 bytes of a password, so new admin passwords are limited to 72 bytes
 - Dashboard access requires **TOTP MFA** (two-factor authentication)
+- A **passkey** replaces the password and the authenticator code at sign-in. Passkeys are created and used with user verification required (the device checks the fingerprint, face, PIN or screen lock), each sign-in or confirmation request can be used once and for five minutes, and adding a passkey needs the authenticator code or another passkey
 - Each authenticator code is accepted once, and an admin gets 5 tries in 15 minutes, shared by sign-in, token reveal and API key copy; after that the service answers `429` with `Retry-After`
 - Tokens and API keys are encrypted at rest with **AES-256-GCM**
 - Token hashes use **SHA-256** for lookups

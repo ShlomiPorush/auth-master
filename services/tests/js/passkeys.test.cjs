@@ -353,7 +353,7 @@ test("Account page notes: HTTPS, old browser, no address, another address, locke
 test("Activity Log: passkey sign-ins, reveals, passkey actions and the address in words, escaped", () => {
     const { ctx } = dashboard(() => null);
     const d = (action, details, entityName) => ctx.dashLogDetails({ action, details, entityName });
-    assert.equal(d("login", { method: "passkey", passkey: "<b>Phone</b>" }), '<b>Signed in with:</b> Passkey <bdi dir="auto">&lt;b&gt;Phone&lt;/b&gt;</bdi>');
+    assert.equal(d("login", { method: "passkey", passkey: "<b>Phone</b>" }), '<b>Signed in with:</b> passkey (<bdi dir="auto">&lt;b&gt;Phone&lt;/b&gt;</bdi>)');
     assert.equal(d("token_reveal", { method: "passkey" }), "<b>Confirmed with:</b> Passkey");
     assert.equal(d("api_key_reveal", { method: "code" }), "<b>Confirmed with:</b> Authenticator code");
     assert.equal(d("passkey_added", { rpId: "auth.example.test" }), "<b>Made for:</b> auth.example.test");

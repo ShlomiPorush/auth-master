@@ -2035,7 +2035,7 @@ function dashLogPasskeyDetails(log, det) {
         return Object.prototype.hasOwnProperty.call(table, value) ? table[value] : esc(value);
     };
     if (act === "login" && det.method === "passkey") {
-        return "<b>Signed in with:</b> Passkey" + (det.passkey ? " " + uiUserText(det.passkey) : "");
+        return "<b>Signed in with:</b> passkey" + (det.passkey ? " (" + uiUserText(det.passkey) + ")" : "");
     }
     if ((act === "token_reveal" || act === "api_key_reveal") && det.method) {
         return "<b>Confirmed with:</b> " + word(DASH_STEP_UP_METHODS, det.method);
