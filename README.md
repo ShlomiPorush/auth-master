@@ -28,7 +28,7 @@ See [docker-compose.yml](docker-compose.yml)
    The script writes `ADMIN_API_KEY`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and `REDIS_PASSWORD`, makes the file readable by you only, and never replaces an existing `.env`. Keep the file private and out of version control. Optional settings are listed in [.env.example](.env.example).
 2. Start the containers: `docker compose up -d`
 3. Open `http://localhost:8080` — you'll be redirected to the setup wizard
-4. Create your admin account and set up MFA (TOTP)
+4. Create your admin account and set up MFA (TOTP). The service starts with no accounts, and the first person who completes this setup becomes the admin, so complete it before the service can be reached from other machines
 5. Log in and start managing tokens and zones
 
 The service refuses to start while a required secret is missing, empty, or has a value that was ever published in this repository, and its log names each setting and how to fix it.
@@ -45,7 +45,6 @@ The service refuses to start while a required secret is missing, empty, or has a
 | `APP_ENCRYPTION_KEY` | _(required)_ | See `SESSION_SECRET` |
 | `PGPASSWORD` | _(empty)_ | Optional PostgreSQL password when `DATABASE_URL` has none; checked like the others |
 | `ALLOWED_AREAS` | `orders,billing,webhooks` | Fallback zone list when the zones table is empty |
-| `BOOTSTRAP_TOKEN` | _(empty)_ | Optional token for bootstrapping the first admin account via API |
 | `TOTP_ISSUER` | `AuthService` | Issuer name shown in authenticator apps |
 | `ENVIRONMENT` | `production` | Application environment (`production` or `development`) |
 | `ROOT_PATH` | _(empty)_ | URL path prefix for sub-directory deployments (e.g. `/auth`) |

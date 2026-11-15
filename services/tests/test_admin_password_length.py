@@ -141,8 +141,6 @@ def app_ctx(monkeypatch):
     for field in _SECRET_FIELDS:
         if getattr(s, field) in _PLACEHOLDERS:
             raise RuntimeError(f"{field} is empty or a placeholder")
-    if s.bootstrap_token:
-        raise RuntimeError("these tests expect BOOTSTRAP_TOKEN to be unset")
     create_database = main_mod.create_database
     monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
     fake = FakeRedis()
