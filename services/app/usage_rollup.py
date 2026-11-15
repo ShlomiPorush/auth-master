@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 from app.db import Database, write_transaction
 
@@ -50,6 +50,27 @@ _INSERT_ROWS = 500
 _PG_LOCK_KEY = 0x75736167  # "usag"
 _SQLITE_TS = "%Y-%m-%d %H:%M:%S"
 _COLUMNS = "slot, token_id, area, level, result, ip_address, calls, last_at, token_name, name_at, name_id"
+# app_state key: the purge boundary (PurgeMark), stored as 2 x epoch microseconds of `at`,
+# plus 1 when `at_too`, so a larger number is always a later boundary.
+PURGED_BEFORE_KEY = "access_logs.purged_before"
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_US = timedelta(microseconds=1)
+
+
+class PurgeMark(NamedTuple):
+    """Access log rows before `at` may have been deleted. at_too: some rows of exactly `at`
+    were deleted too, and the rest of them are kept. The Usage page counts from `at`."""
+
+    at: datetime
+    at_too: bool = False
+
+    def encode(self) -> str:
+        return str((self.at - EPOCH) // _US * 2 + int(self.at_too))
+
+    @staticmethod
+    def decode(value: Any) -> "PurgeMark":
+        us, too = divmod(int(value), 2)
+        return PurgeMark(EPOCH + us * _US, bool(too))
 
 
 def floor_slot(t: datetime) -> datetime:
@@ -177,8 +198,25 @@ def _as_time(db: Database, v: Any) -> datetime:
     return datetime.strptime(v, _SQLITE_TS).replace(tzinfo=timezone.utc) if db.is_sqlite else v
 
 
+async def _raise_purged_before(db: Database, conn: Any, mark: PurgeMark) -> None:
+    """Move the purge boundary (PURGED_BEFORE_KEY) forward to mark, never back."""
+    if db.is_sqlite:
+        keep_later = "CAST(MAX(CAST(app_state.value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)"
+    else:
+        keep_later = "GREATEST(app_state.value::bigint, EXCLUDED.value::bigint)::text"
+    await conn.execute(
+        f"INSERT INTO app_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = {keep_later}",
+        PURGED_BEFORE_KEY, mark.encode(),
+    )
+
+
 async def purge_access_logs(
-    db: Database, cutoff: datetime, *, chunk_rows: int = CHUNK_ROWS, pause: float = CHUNK_PAUSE_SEC
+    db: Database,
+    cutoff: datetime,
+    *,
+    chunk_rows: int = CHUNK_ROWS,
+    pause: float = CHUNK_PAUSE_SEC,
+    settings_version: int | None = None,
 ) -> None:
     """Delete the access_logs rows older than cutoff, and the summary rows no report reads.
 
@@ -187,11 +225,23 @@ async def purge_access_logs(
     counts a deleted row, and a stop between transactions leaves valid_from where the
     deleted rows end. Then the summary rows before valid_from, which no report reads, go in
     transactions of at most chunk_rows rows.
+
+    The same transaction raises the purge boundary (PURGED_BEFORE_KEY), before which the
+    Usage page claims no data, exactly as far as rows are gone: to the cutoff once nothing
+    older is left; before that to the oldest kept row, with at_too when the chunk ended
+    inside the rows of that time (SQLite stores whole seconds, so a busy second can hold
+    more rows than a chunk). The report counts every kept row and marks a bucket partial
+    only when rows of it were deleted.
+
+    settings_version (app.logger.purge_old_logs): each DELETE runs only while it is still
+    the newest saved settings version, so a save in between stops the purge.
     """
+    unchanged = "" if settings_version is None else " AND (SELECT COALESCE(MAX(version), 0) FROM app_settings) = $3"
+    args: tuple[Any, ...] = () if settings_version is None else (settings_version,)
     if db.is_sqlite:
         rows_sql = (
             "DELETE FROM access_logs WHERE rowid IN (SELECT rowid FROM access_logs INDEXED BY idx_access_logs_created_at "
-            "WHERE created_at < $1 ORDER BY created_at LIMIT $2) RETURNING created_at"
+            f"WHERE created_at < $1 ORDER BY created_at LIMIT $2){unchanged} RETURNING created_at"
         )
         summary_sql = (
             "DELETE FROM access_log_rollup WHERE rowid IN (SELECT rowid FROM access_log_rollup "
@@ -200,16 +250,17 @@ async def purge_access_logs(
     else:
         rows_sql = (
             "DELETE FROM access_logs WHERE id IN (SELECT id FROM access_logs WHERE created_at < $1 "
-            "ORDER BY created_at LIMIT $2) RETURNING created_at"
+            f"ORDER BY created_at LIMIT $2){unchanged} RETURNING created_at"
         )
         summary_sql = (
             "DELETE FROM access_log_rollup WHERE ctid = ANY(ARRAY("
             "SELECT ctid FROM access_log_rollup WHERE slot < $1 LIMIT $2)) RETURNING 1"
         )
+    bound = bind_time(db, cutoff)
     while True:
         async with write_transaction(db) as conn:
             await _lock(db, conn)
-            gone = await conn.fetch(rows_sql, bind_time(db, cutoff), chunk_rows)
+            gone = await conn.fetch(rows_sql, bound, chunk_rows, *args)
             if gone:
                 newest = max(_as_time(db, r["created_at"]) for r in gone)
                 await conn.execute(
@@ -217,6 +268,18 @@ async def purge_access_logs(
                     "WHERE id = 1 AND (valid_from IS NULL OR valid_from < $1::timestamptz)",
                     bind_time(db, floor_slot(newest) + timedelta(seconds=SLOT_SECONDS)),
                 )
+                left = None
+                if len(gone) == chunk_rows:
+                    left = await conn.fetchval("SELECT MIN(created_at) FROM access_logs WHERE created_at < $1", bound)
+                if left is None:
+                    mark = PurgeMark(cutoff)
+                elif _as_time(db, left) > newest:
+                    mark = PurgeMark(_as_time(db, left))
+                else:
+                    # Kept rows of the newest deleted time. (left < newest only when the
+                    # database wrote a row with an older time meanwhile; it is not counted.)
+                    mark = PurgeMark(newest, at_too=True)
+                await _raise_purged_before(db, conn, mark)
         if len(gone) < chunk_rows:
             break
         await _pause(pause)

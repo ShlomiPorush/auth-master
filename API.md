@@ -15,7 +15,7 @@ Authorization: Bearer <api-key>
 ```
 
 API keys can be:
-- The master `ADMIN_API_KEY` environment variable (full access)
+- The master `ADMIN_API_KEY` environment variable (full access). It is optional: when it is not set, there is no master key, and every key is a key from the dashboard that can be revoked there
 - A scoped key created from the admin dashboard
 
 ### Scopes

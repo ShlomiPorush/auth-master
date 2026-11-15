@@ -1,16 +1,20 @@
-"""Admin Settings page: the /validate rate limit and the addresses exempt from it."""
+"""Admin Settings page: the /validate rate limit and the addresses exempt from it, the
+general settings (time zone, Secure session cookie, log retention), and the Redis connection."""
 from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import rate_limit, rate_limit_settings as rls
+from app import general_settings as gs, rate_limit, rate_limit_settings as rls, redis_settings as rs
 from app.admin_deps import FullSession, csrf_check
+from app.config import _redis_url_problem, get_settings
 from app.datetime_utils import fmt_datetime
 from app.logger import get_actor, log_activity
 
@@ -171,6 +175,316 @@ async def put_rate_limit_settings(
 
     current = await _read(request)
     view = _view(new if isinstance(current, JSONResponse) else current, request)
+    if warning:
+        view["warning"] = warning
+    return view
+
+
+# ── General settings ────────────────────────────────────────────
+
+_CONFLICT = "Someone else changed these settings after you opened the page."
+_BUSY = "The database is busy. Try again in a moment."
+_ACTIVITY_WARNING = "Saved, but the activity log entry could not be written."
+
+COOKIE_SECURE_OVER_HTTP = (
+    "Browsers send a Secure cookie only over HTTPS. Signing in over plain HTTP will stop working; "
+    "sessions already open keep working until they end. To undo it without the page, set COOKIE_SECURE=false."
+)
+
+
+def _general_view(stored: gs.Stored) -> dict[str, Any]:
+    eff = gs.effective(stored)
+    locked = gs.locked_fields()
+
+    def item(name: str) -> dict[str, Any]:
+        if locked[name]:
+            source = "env"
+        else:
+            source = "stored" if stored.values[name] is not None else "default"
+        return {"value": eff.value(name), "source": source, "locked": locked[name], "envName": gs.ENV_FIELDS[name][1]}
+
+    retention = {"min": gs.RETENTION_MIN, "max": gs.RETENTION_MAX}
+    s = get_settings()
+    return {
+        "version": stored.version,
+        "savedBy": stored.actor,
+        "savedAt": fmt_datetime(stored.created_at),
+        "savedFrom": stored.ip_address,
+        "fields": {
+            "timeZone": {**item("timeZone"), "envInvalid": gs.env_time_zone_invalid()},
+            "cookieSecure": item("cookieSecure"),
+            "activityLogRetentionDays": {**item("activityLogRetentionDays"), **retention},
+            "accessLogRetentionDays": {**item("accessLogRetentionDays"), **retention},
+        },
+        "timeZones": sorted(gs.time_zones()),
+        "applied": gs.status_view(),
+        "purge": gs.purge_view(),
+        # Read when the process starts and must match the reverse proxy; shown, never changed here.
+        "rootPath": {"envName": "ROOT_PATH", "value": s.root_path if "root_path" in s.model_fields_set else None},
+    }
+
+
+async def _read_general(request: Request) -> gs.Stored | JSONResponse:
+    try:
+        return await gs.read_current(request.app.state.settings_db)
+    except gs.InvalidSettings as e:
+        return _error(500, "invalid_stored", e.message)
+
+
+@router.get("/general")
+async def get_general_settings(request: Request, _sess: FullSession):
+    stored = await _read_general(request)
+    if isinstance(stored, JSONResponse):
+        return stored
+    return _general_view(stored)
+
+
+class ConfirmPurge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activityLogRetentionDays: StrictInt
+    accessLogRetentionDays: StrictInt
+
+
+class GeneralSettingsBody(BaseModel):
+    """Only the fields being changed; a field the environment sets must be left out."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseVersion: StrictInt = Field(ge=0, description="The settings version the form was loaded from.")
+    timeZone: StrictStr | None = None
+    cookieSecure: StrictBool | None = None
+    activityLogRetentionDays: StrictInt | None = None
+    accessLogRetentionDays: StrictInt | None = None
+    confirmPurge: ConfirmPurge | None = None
+    confirmCookieSecure: StrictBool = False
+
+
+async def _count_older(request: Request, table: str, days: int) -> int | None:
+    db = request.app.state.db
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        return int(await db.fetchval(
+            f"SELECT COUNT(*) FROM {table} WHERE created_at < $1",
+            cutoff.strftime("%Y-%m-%d %H:%M:%S") if db.is_sqlite else cutoff,
+        ))
+    except Exception:
+        return None
+
+
+@router.put("/general")
+async def put_general_settings(
+    request: Request,
+    body: GeneralSettingsBody,
+    sess: FullSession,
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csrf_check(sess, x_csrf_token)
+    sent = body.model_fields_set & set(gs.FIELDS)
+    locked = gs.locked_fields()
+    for name in gs.FIELDS:
+        if name in sent and locked[name]:
+            env = gs.ENV_FIELDS[name][1]
+            return _error(409, "locked", f"The {env} environment variable sets this value, so it cannot be changed here.", field=name)
+    for name in gs.FIELDS:
+        if name in sent and getattr(body, name) is None:
+            return _error(422, "invalid", "Leave a field out to keep its value; it cannot be empty.", field=name)
+
+    stored = await _read_general(request)
+    if isinstance(stored, JSONResponse):
+        return stored
+    if stored.version != body.baseVersion:
+        return _error(409, "conflict", _CONFLICT, current=_general_view(stored))
+
+    values = dict(stored.values)
+    try:
+        for name in gs.FIELDS:
+            if name in sent:
+                values[name] = gs.check(name, getattr(body, name))
+    except gs.InvalidSettings as e:
+        return _error(422, "invalid", e.message, field=e.field)
+
+    before = gs.effective(stored)
+    new = gs.Stored(stored.version + 1, values)
+    after = gs.effective(new)
+
+    lowered = [
+        name for name in ("activityLogRetentionDays", "accessLogRetentionDays")
+        if after.value(name) < before.value(name)
+    ]
+    if lowered:
+        confirm = {name: after.value(name) for name in ("activityLogRetentionDays", "accessLogRetentionDays")}
+        given = body.confirmPurge.model_dump() if body.confirmPurge is not None else None
+        if given != confirm:
+            estimate = {
+                "activityLogs": await _count_older(request, "activity_logs", after.activity_log_retention_days)
+                if "activityLogRetentionDays" in lowered else None,
+                "accessLogs": await _count_older(request, "access_logs", after.access_log_retention_days)
+                if "accessLogRetentionDays" in lowered else None,
+            }
+            return _error(
+                409, "confirm_purge",
+                "A shorter retention deletes the older log entries within about a minute, and they cannot be restored.",
+                estimate=estimate, confirm=confirm,
+            )
+
+    if after.cookie_secure and not before.cookie_secure and request.url.scheme == "http" and not body.confirmCookieSecure:
+        return _error(409, "confirm_cookie_secure", COOKIE_SECURE_OVER_HTTP)
+
+    if values == stored.values:
+        return _general_view(stored)
+
+    actor = await get_actor(request, sess)
+    own = _own_address(request)
+    try:
+        saved = await gs.insert_version(request.app.state.settings_db, new.version, gs.dump_value(values), actor, own)
+    except sqlite3.OperationalError:
+        return _error(503, "busy", _BUSY)
+    if not saved:
+        current = await _read_general(request)
+        view = None if isinstance(current, JSONResponse) else _general_view(current)
+        return _error(409, "conflict", _CONFLICT, current=view)
+
+    gs.apply(after)
+    warning = None
+    try:
+        await gs.log_change(
+            request.app.state.db, actor, new.version, stored.values, values,
+            request.client.host if request.client else None,
+        )
+    except Exception as e:
+        print(f"General settings version {new.version} saved, but the activity log entry failed ({type(e).__name__})")
+        warning = _ACTIVITY_WARNING
+
+    current = await _read_general(request)
+    view = _general_view(gs.Stored(new.version, values, actor, own) if isinstance(current, JSONResponse) else current)
+    if warning:
+        view["warning"] = warning
+    return view
+
+
+# ── Redis connection ────────────────────────────────────────────
+
+CONFIRM_RESTART = (
+    "Takes effect when every instance of the service restarts. Then every admin signs in again, because "
+    "sessions live in Redis, and a first-admin setup in progress starts over."
+)
+
+CHECK_FAILED = {
+    "unreachable": "Could not reach this Redis server in time. Check the host, port and network. Nothing was saved.",
+    "auth": "The Redis server refused the user name or password. Nothing was saved.",
+    "no_write": (
+        "This Redis user cannot run the commands the service uses on its auth:* keys, or the server is a "
+        "read-only replica. README.md lists the commands and key prefixes. Nothing was saved."
+    ),
+    "other": "The Redis server did not pass the check. Nothing was saved.",
+}
+
+_REDIS_BODY_FIELDS = ("baseVersion", "url", "confirmRestart")
+
+
+def _redis_view(stored: rs.Stored) -> dict[str, Any]:
+    saved = rs.saved_url(stored)
+    choice = rs.current_choice(stored)
+    connected = rs.state.connection
+    return {
+        "version": stored.version,
+        "savedBy": stored.actor,
+        "savedAt": fmt_datetime(stored.created_at),
+        "savedFrom": stored.ip_address,
+        "url": {
+            "connected": rs.mask_url(connected.url) if connected else None,
+            "saved": rs.mask_url(saved),
+            "source": choice.source if choice else "default",
+            "locked": rs.env_url() is not None,
+            "envName": rs.ENV_NAME,
+            "syncPending": rs.state.sync_pending,
+        },
+        "restartNeeded": connected is not None and (choice is None or choice.url != connected.url),
+    }
+
+
+@router.get("/redis")
+async def get_redis_settings(request: Request, _sess: FullSession):
+    return _redis_view(await rs.read_current(request.app.state.settings_db))
+
+
+class RedisSettingsBody(BaseModel):
+    # Validated by the handler, not declared as the route's body: FastAPI's validation
+    # errors echo the input, which here holds a password.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    baseVersion: StrictInt = Field(ge=0)
+    url: StrictStr = Field(min_length=1, max_length=rs.MAX_URL_LENGTH)
+    confirmRestart: StrictBool = False
+
+
+@router.put("/redis")
+async def put_redis_settings(
+    request: Request,
+    sess: FullSession,
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csrf_check(sess, x_csrf_token)
+    invalid_body = "Send a JSON object with baseVersion (a whole number), url (text) and optionally confirmRestart (true or false)."
+    try:
+        data = await request.json()
+    except StarletteHTTPException:
+        # The request body limit (64 KiB, main.py) answers 413 for an oversized body.
+        raise
+    except Exception:
+        return _error(422, "invalid", invalid_body, field="body")
+    try:
+        body = RedisSettingsBody.model_validate(data)
+    except ValidationError as e:
+        loc = e.errors(include_input=False, include_url=False)[0]["loc"]
+        # A key of the body is client text: name only the fields this endpoint has.
+        name = loc[0] if loc and loc[0] in _REDIS_BODY_FIELDS else "body"
+        return _error(422, "invalid", invalid_body, field=name)
+
+    if rs.env_url() is not None:
+        return _error(409, "locked", f"The {rs.ENV_NAME} environment variable sets this value, so it cannot be changed here.", field="url")
+    url = body.url.strip()
+    try:
+        url.encode("utf-8")
+    except UnicodeEncodeError:
+        return _error(422, "invalid", "The Redis URL contains text that is not valid Unicode.", field="url")
+    if problem := _redis_url_problem(url, "The Redis URL"):
+        return _error(422, "invalid", problem, field="url")
+
+    settings_db = request.app.state.settings_db
+    stored = await rs.read_current(settings_db)
+    if stored.version != body.baseVersion:
+        return _error(409, "conflict", _CONFLICT, current=_redis_view(stored))
+    before = rs.saved_url(stored)
+    if url == before:
+        return _redis_view(stored)
+    if not body.confirmRestart:
+        return _error(409, "confirm_restart", CONFIRM_RESTART)
+
+    category = await rs.check(url)
+    if category is not None:
+        return _error(422, "redis_check_failed", CHECK_FAILED[category], category=category)
+
+    actor = await get_actor(request, sess)
+    own = _own_address(request)
+    try:
+        saved = await rs.insert_version(settings_db, stored.version + 1, rs.dump_value(rs.encrypt_url(url)), actor, own)
+    except sqlite3.OperationalError:
+        return _error(503, "busy", _BUSY)
+    if not saved:
+        return _error(409, "conflict", _CONFLICT, current=_redis_view(await rs.read_current(settings_db)))
+
+    warning = None
+    try:
+        await rs.log_change(
+            request.app.state.db, actor, stored.version + 1, before, url,
+            request.client.host if request.client else None,
+        )
+    except Exception as e:
+        print(f"Redis URL version {stored.version + 1} saved, but the activity log entry failed ({type(e).__name__})")
+        warning = _ACTIVITY_WARNING
+    view = _redis_view(await rs.read_current(settings_db))
     if warning:
         view["warning"] = warning
     return view

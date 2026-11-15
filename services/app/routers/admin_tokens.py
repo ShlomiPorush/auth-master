@@ -46,7 +46,7 @@ async def _normalize_grants(db: Any, raw: list[dict[str, Any]]) -> list[dict[str
     if not grants:
         raise HTTPException(400, "grants required")
     if not allowed:
-        raise HTTPException(400, "Define at least one zone (or set ALLOWED_AREAS in env when zones table is empty)")
+        raise HTTPException(400, "Define at least one zone first (Zones page, or POST /tokens/zones)")
     try:
         grants = canonical_grants(grants, allowed)
     except ValueError as e:

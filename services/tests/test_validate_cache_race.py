@@ -28,6 +28,7 @@ import os
 import secrets
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -127,9 +128,16 @@ async def _env():
     db = await create_database(_DB_URL)
     client = None
     e = None
+    zone_id = None
     try:
         assert db.is_pg == _EXPECT_PG, "test ran on the wrong database backend"
         await ensure_database_schema(db)
+        # Zones come only from the zones table (ALLOWED_AREAS is no longer a fallback).
+        # Created here only when missing, and then removed again, so tests that need an
+        # empty zones table still run on a shared database.
+        if not await db.fetchval("SELECT 1 FROM zones WHERE name = $1", "orders"):
+            zone_id = str(uuid.uuid4())
+            await db.execute("INSERT INTO zones (id, name) VALUES ($1::uuid, $2)", zone_id, "orders")
         redis = FakeRedis()
         app.state.db, app.state.redis = db, redis
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -147,6 +155,9 @@ async def _env():
         if e is not None and e.token_id is not None:
             with contextlib.suppress(Exception):
                 await db.execute("DELETE FROM tokens WHERE id = $1", e.token_id)
+        if zone_id is not None:
+            with contextlib.suppress(Exception):
+                await db.execute("DELETE FROM zones WHERE id = $1::uuid", zone_id)
         if client is not None:
             await client.aclose()
         await db.close()

@@ -281,7 +281,12 @@ def test_lookup_rejects_invalid_unicode(client):
 
 
 def test_expiry_matches_token_list_format(client, monkeypatch):
-    monkeypatch.setenv("TZ", "Asia/Jerusalem")
+    from dataclasses import replace
+
+    from app import general_settings
+
+    # The time zone setting in effect (TZ, the saved value, or the default).
+    monkeypatch.setattr(general_settings, "_current", replace(general_settings.current(), time_zone="Asia/Jerusalem"))
     tok = secrets.token_urlsafe(24)
     # SQLite's own datetime form (UTC, no offset): the formatter must convert it to TZ.
     _run(client, _insert_token, tok, [{"area": "orders", "level": "read"}], expires_at="2031-01-01 00:00:00")

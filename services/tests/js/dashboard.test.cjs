@@ -227,10 +227,15 @@ test("R4: a zones or API keys read that started before a save publishes nothing"
     await zones;
     assert.equal(ctx.dash.zones[0].name, "after-save");
 
+    // The keys page asks for the list and for the master key at once
+    const answers = [];
+    ctx.adminJson = () => new Promise((resolve) => { answers.push(resolve); });
     ctx.dashKeys.rows = [{ id: "k2", name: "after-save" }];
     const keys = ctx.dashKeysLoad(false);
     ctx.uiMutated();
-    answer({ ok: true, status: 200, data: [{ id: "k1", name: "before-save" }], json: true, error: "" });
+    assert.equal(answers.length, 2);
+    answers[0]({ ok: true, status: 200, data: [{ id: "k1", name: "before-save" }], json: true, error: "" });
+    answers[1]({ ok: true, status: 200, data: { active: true, envName: "ADMIN_API_KEY" }, json: true, error: "" });
     await keys;
     assert.equal(ctx.dashKeys.rows[0].name, "after-save");
 });

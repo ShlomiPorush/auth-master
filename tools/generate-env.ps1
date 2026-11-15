@@ -27,7 +27,7 @@ if (-not $IsWindows) {
     Fail 'This script is for Windows. On Linux and macOS run: sh tools/generate-env.sh'
 }
 
-$names = @('ADMIN_API_KEY', 'SESSION_SECRET', 'APP_ENCRYPTION_KEY', 'REDIS_PASSWORD')
+$names = @('SESSION_SECRET', 'APP_ENCRYPTION_KEY', 'REDIS_PASSWORD')
 $out = Join-Path (Get-Location).ProviderPath '.env'
 
 $file = [System.IO.FileInfo]::new($out)

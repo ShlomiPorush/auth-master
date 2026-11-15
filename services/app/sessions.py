@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from fastapi import Response
 
+from app import general_settings
 from app.config import get_settings
 
 COOKIE_NAME = "auth_sid"
@@ -131,11 +132,11 @@ async def delete_pending_totp(r: redis.Redis, admin_id: str) -> None:
 
 
 def cookie_params(max_age_sec: int) -> dict[str, Any]:
-    s = get_settings()
+    # The effective setting when the cookie is issued; cookies issued earlier keep their flag.
     return {
         "key": COOKIE_NAME,
         "httponly": True,
-        "secure": s.cookie_secure,
+        "secure": general_settings.current().cookie_secure,
         "samesite": "lax",
         "max_age": max_age_sec,
         "path": "/",
@@ -147,5 +148,4 @@ def set_sid_cookie(response: Response, sid: str, max_age_sec: int) -> None:
 
 
 def clear_sid_cookie(response: Response) -> None:
-    s = get_settings()
-    response.delete_cookie(COOKIE_NAME, path="/", secure=s.cookie_secure, samesite="lax")
+    response.delete_cookie(COOKIE_NAME, path="/", secure=general_settings.current().cookie_secure, samesite="lax")

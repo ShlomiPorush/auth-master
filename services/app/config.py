@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
@@ -74,21 +74,24 @@ def _postgres_url_problem(url: str) -> str | None:
     return None
 
 
-def _redis_url_problem(url: str) -> str | None:
+def _redis_url_problem(url: str, name: str = "REDIS_URL") -> str | None:
+    """Why `url` cannot be used as the Redis connection, or None.  `name` says where the
+    value came from (an environment variable, or the saved setting) and starts the text;
+    the text never contains the URL."""
     try:
         password = Redis.from_url(url).get_connection_kwargs().get("password")
     except Exception:
-        return "REDIS_URL is not a valid Redis URL (redis://, rediss:// or unix://)."
+        return f"{name} is not a valid Redis URL (redis://, rediss:// or unix://)."
     if not password:
         return (
-            "REDIS_URL has no password. With the bundled Redis, set REDIS_PASSWORD. With an "
-            "external Redis, require a password on that server and put it in REDIS_URL."
+            f"{name} has no password. With the bundled Redis, set REDIS_PASSWORD. With an "
+            "external Redis, require a password on that server and put it in the URL."
         )
     if _is_public(password):
         return (
-            "REDIS_URL uses a publicly known password. With the bundled Redis, set "
+            f"{name} uses a publicly known password. With the bundled Redis, set "
             "REDIS_PASSWORD to a new random value. With an external Redis, change the "
-            "password on that server, then update REDIS_URL."
+            "password on that server, then update the URL."
         )
     return None
 
@@ -100,27 +103,41 @@ class Settings(BaseSettings):
 
     port: int = Field(default=8080, validation_alias="PORT")
     database_url: str = Field(default="sqlite:///data/auth.db", validation_alias="DATABASE_URL")
-    redis_url: str = Field(validation_alias="REDIS_URL")
-    admin_api_key: str = Field(validation_alias="ADMIN_API_KEY")
+    # The Redis connection: REDIS_URL overrides the URL saved on the Settings page, and
+    # REDIS_DEFAULT_URL (set by the bundled compose file) is used when neither is set.
+    # Empty means not set.  app.redis_settings resolves and checks the effective URL.
+    redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    redis_default_url: str | None = Field(default=None, validation_alias="REDIS_DEFAULT_URL")
+    # Optional master key with every API scope; empty means there is no master key.
+    admin_api_key: str = Field(default="", validation_alias="ADMIN_API_KEY")
     session_secret: str = Field(validation_alias="SESSION_SECRET")
     app_encryption_key: str = Field(validation_alias="APP_ENCRYPTION_KEY")
+    # Deprecated: read only once, to fill an empty zones table (app.zones.copy_allowed_areas_once).
     allowed_areas: str = Field(default="orders,billing,webhooks", validation_alias="ALLOWED_AREAS")
     totp_issuer: str = Field(default="AuthService", validation_alias="TOTP_ISSUER")
-    environment: str = Field(default="development", validation_alias="ENVIRONMENT")
     root_path: str = Field(default="", validation_alias="ROOT_PATH")
+    # The fields below are also on the Settings page (app.general_settings); a variable
+    # that is set overrides the saved value there.
+    # An invalid zone is not an error: dates stay in UTC and the Settings page says why.
+    time_zone: str = Field(default="UTC", validation_alias="TZ")
     # Must be explicit: True breaks session cookies on plain http://localhost (Secure not sent).
-    cookie_secure: bool = Field(default=False, validation_alias="COOKIE_SECURE")
+    # Empty means not set (the bundled compose file passes it empty when it is not set).
+    cookie_secure: bool | None = Field(default=None, validation_alias="COOKIE_SECURE")
     rate_limit_window_ms: int = Field(default=60_000, validation_alias="RATE_LIMIT_WINDOW_MS")
     rate_limit_max_req: int = Field(default=120, validation_alias="RATE_LIMIT_MAX_REQ")
-    activity_log_retention_days: int = Field(default=30, validation_alias="ACTIVITY_LOG_RETENTION_DAYS")
-    access_log_retention_days: int = Field(default=30, validation_alias="ACCESS_LOG_RETENTION_DAYS")
+    activity_log_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="ACTIVITY_LOG_RETENTION_DAYS")
+    access_log_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="ACCESS_LOG_RETENTION_DAYS")
+
+    @field_validator("cookie_secure", mode="before")
+    @classmethod
+    def _empty_means_not_set(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
     def _reject_missing_or_public_secrets(self) -> "Settings":
         problems: list[str] = []
 
         required_secrets = (
-            ("ADMIN_API_KEY", self.admin_api_key, "Update every integration that uses the master key."),
             ("SESSION_SECRET", self.session_secret, _ENCRYPTION_NOTE),
             ("APP_ENCRYPTION_KEY", self.app_encryption_key, _ENCRYPTION_NOTE),
         )
@@ -130,8 +147,18 @@ class Settings(BaseSettings):
             elif _is_public(value):
                 problems.append(f"{name} uses a publicly known value. Set it to a new random value. {note}")
 
-        if problem := _redis_url_problem(self.redis_url):
-            problems.append(problem)
+        # Optional: empty means there is no master key; a set value must not be public.
+        if self.admin_api_key.strip() and _is_public(self.admin_api_key):
+            problems.append(
+                "ADMIN_API_KEY uses a publicly known value. Set it to a new random value. "
+                "Update every integration that uses the master key, or remove it."
+            )
+
+        for name in ("REDIS_URL", "REDIS_DEFAULT_URL"):
+            value = getattr(self, name.lower())
+            if value is not None and value.strip():
+                if problem := _redis_url_problem(value, name):
+                    problems.append(problem)
 
         # The bundled compose file passes REDIS_PASSWORD to this container through
         # env_file; it is the password of the bundled Redis server.
@@ -159,6 +186,11 @@ class Settings(BaseSettings):
     @property
     def allowed_areas_list(self) -> list[str]:
         return [a.strip() for a in self.allowed_areas.split(",") if a.strip()]
+
+    def env_value(self, attr: str) -> str | None:
+        """A text setting the environment sets, or None when it is unset or empty."""
+        value = getattr(self, attr)
+        return value if value is not None and value.strip() else None
 
 
 def _describe(error: ValidationError) -> str:

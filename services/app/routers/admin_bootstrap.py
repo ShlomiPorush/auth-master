@@ -1,9 +1,11 @@
+import unicodedata
 import uuid as uuid_mod
 
 import bcrypt
 import pyotp
 from fastapi import APIRouter, Header, HTTPException, Request, Response
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, StrictStr
 from redis.asyncio import Redis
 
 from app import login_limit
@@ -33,6 +35,12 @@ PASSWORD_TOO_LONG = (
     "Password: use at most 72 bytes. Letters outside English, such as Hebrew, "
     "and emoji take 2 to 4 bytes each"
 )
+
+# The name authenticator apps show for the account.  TOTP_ISSUER sets it for every setup;
+# otherwise the setup wizard may change it, for its own setup session only.
+ISSUER_ENV_NAME = "TOTP_ISSUER"
+ISSUER_MAX_LENGTH = 64
+
 
 async def has_completed_admin(db) -> bool:
     v = await db.fetchval("SELECT 1 FROM admin_users WHERE totp_enabled = $1 LIMIT 1", True)
@@ -98,31 +106,99 @@ async def bootstrap_register(
     return {"ok": True, "csrf": csrf}
 
 
+def _issuer_locked() -> bool:
+    return "totp_issuer" in get_settings().model_fields_set
+
+
+def _issuer(sess: dict) -> str:
+    if _issuer_locked():
+        return get_settings().totp_issuer
+    return sess.get("issuer") or get_settings().totp_issuer
+
+
+def _enrollment(secret: str, username: str, issuer: str) -> dict:
+    return {
+        "otpauthUrl": pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer),
+        "secretBase32": secret,
+        "issuer": issuer,
+        "accountName": username,
+        "issuerLocked": _issuer_locked(),
+        "issuerEnvName": ISSUER_ENV_NAME,
+        "issuerMaxLength": ISSUER_MAX_LENGTH,
+    }
+
+
+async def _setup_session(request: Request) -> tuple[str, dict]:
+    sid = request.cookies.get(COOKIE_NAME)
+    if not sid:
+        raise HTTPException(401, "No session")
+    sess = await get_session(request.app.state.redis, sid)
+    if not sess or sess.get("kind") != "setup":
+        raise HTTPException(401, "Invalid session")
+    return sid, sess
+
+
 @router.get("/bootstrap/mfa-enroll")
 async def mfa_enroll(request: Request):
     db = request.app.state.db
     r: Redis = request.app.state.redis
-    sid = request.cookies.get(COOKIE_NAME)
-    if not sid:
-        raise HTTPException(401, "No session")
-    sess = await get_session(r, sid)
-    if not sess or sess.get("kind") != "setup":
-        raise HTTPException(401, "Invalid session")
+    _sid, sess = await _setup_session(request)
     secret = await get_pending_totp(r, sess["adminId"])
     if not secret:
         raise HTTPException(400, "Enrollment expired; restart bootstrap")
     username = await db.fetchval("SELECT username FROM admin_users WHERE id = $1", sess["adminId"])
     if not username:
         raise HTTPException(400, "User missing")
-    issuer = get_settings().totp_issuer
-    totp = pyotp.TOTP(secret)
-    otpauth_url = totp.provisioning_uri(name=username, issuer_name=issuer)
-    return {
-        "otpauthUrl": otpauth_url,
-        "secretBase32": secret,
-        "issuer": issuer,
-        "accountName": username,
-    }
+    return _enrollment(secret, username, _issuer(sess))
+
+
+class IssuerBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issuer: StrictStr
+
+
+def _issuer_problem(issuer: str) -> str | None:
+    if not issuer:
+        return "Enter a name."
+    if len(issuer) > ISSUER_MAX_LENGTH:
+        return f"Use at most {ISSUER_MAX_LENGTH} characters."
+    if any(unicodedata.category(ch) in ("Cc", "Cs") for ch in issuer):
+        return "Use letters, digits, spaces and punctuation only."
+    return None
+
+
+@router.post("/bootstrap/issuer")
+async def set_issuer(request: Request, body: IssuerBody, x_csrf_token: str | None = Header(None, alias="X-CSRF-Token")):
+    """Change the name authenticator apps show, for this setup session only (nothing is
+    stored outside it), and answer with the new enrollment."""
+    db = request.app.state.db
+    r: Redis = request.app.state.redis
+    sid, sess = await _setup_session(request)
+    if not x_csrf_token or x_csrf_token != sess.get("csrf"):
+        raise HTTPException(403, "CSRF")
+    if await has_completed_admin(db):
+        raise HTTPException(403, "Bootstrap already completed")
+    if _issuer_locked():
+        return JSONResponse(
+            status_code=409,
+            content={"detail": f"The {ISSUER_ENV_NAME} environment variable sets this name, so it cannot be changed here.", "code": "locked"},
+        )
+    issuer = body.issuer.strip()
+    if problem := _issuer_problem(issuer):
+        return JSONResponse(status_code=422, content={"detail": problem, "code": "invalid", "field": "issuer"})
+    username = await db.fetchval(
+        "SELECT username FROM admin_users WHERE id = $1 AND totp_enabled = $2", sess["adminId"], False
+    )
+    if not username:
+        raise HTTPException(400, "User missing")
+    secret = await get_pending_totp(r, sess["adminId"])
+    if not secret:
+        raise HTTPException(400, "Enrollment expired; restart bootstrap")
+    # Written like every session record (the Redis check on the Settings page covers the
+    # commands it uses).  The pending secret keeps its own expiry, so enrollment does not last longer.
+    await save_session(r, sid, {**sess, "issuer": issuer}, SETUP_TTL)
+    return _enrollment(secret, username, issuer)
 
 
 class MfaVerifyBody(BaseModel):

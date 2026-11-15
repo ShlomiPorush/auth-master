@@ -1,22 +1,22 @@
 """Shared date/time formatting utilities — timezone-aware."""
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app import general_settings
+
 
 def _get_tz() -> ZoneInfo:
-    """Return the ZoneInfo for the TZ env-var (default: UTC)."""
-    tz_name = os.environ.get("TZ", "UTC").strip()
+    """Return the ZoneInfo of the effective time zone setting (TZ, the saved value, or UTC)."""
     try:
-        return ZoneInfo(tz_name)
+        return ZoneInfo(general_settings.current().time_zone)
     except Exception:
         return ZoneInfo("UTC")
 
 
 def get_tz_name() -> str:
-    """Return the IANA name of the zone the server formats dates in (UTC if TZ is invalid)."""
+    """Return the IANA name of the zone the server formats dates in."""
     return _get_tz().key
 
 

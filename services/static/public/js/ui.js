@@ -227,12 +227,12 @@ function formatAgo(value, now) {
     return Math.round(diff / 86400) + " d ago";
 }
 
-// A date cell: <time> with the instant, the full timestamp on hover
-function uiTime(value, text) {
+// A date cell: <time> with the instant, the full timestamp on hover (in zone, else the app zone)
+function uiTime(value, text, zone) {
     var ms = uiParseInstant(value);
     if (isNaN(ms)) return '<span class="ui-muted">-</span>';
     var shown = text === undefined ? formatListTime(ms) : text;
-    return '<time class="ui-num" datetime="' + esc(new Date(ms).toISOString()) + '" title="' + esc(formatTime(ms)) + '">' + esc(shown) + "</time>";
+    return '<time class="ui-num" datetime="' + esc(new Date(ms).toISOString()) + '" title="' + esc(formatTime(ms, zone ? { zone: zone } : undefined)) + '">' + esc(shown) + "</time>";
 }
 
 // The wall time of an instant for a datetime-local field, in the app zone

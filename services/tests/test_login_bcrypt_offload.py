@@ -462,8 +462,10 @@ def test_a_correct_password_does_not_reset_the_count(login_limit, app_ctx):
 
 def test_the_counter_key_expires_with_its_window(login_limit, app_ctx):
     user = _add_user(app_ctx, secrets.token_hex(8))
+    # The Redis connection check at startup leaves a probe counter that expires on its own.
+    before = set(app_ctx.fake.data)
     _login(app_ctx, user, _wrong())
-    (key,) = [k for k in app_ctx.fake.data if k.startswith(login_limit.COUNTER_PREFIX)]
+    (key,) = [k for k in app_ctx.fake.data if k.startswith(login_limit.COUNTER_PREFIX) and k not in before]
     assert app_ctx.fake.expiry[key] == login_limit.WINDOW_SECONDS
 
 

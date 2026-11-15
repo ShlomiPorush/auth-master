@@ -9,7 +9,7 @@
 set -eu
 
 out=.env
-generated="ADMIN_API_KEY SESSION_SECRET APP_ENCRYPTION_KEY REDIS_PASSWORD"
+generated="SESSION_SECRET APP_ENCRYPTION_KEY REDIS_PASSWORD"
 
 fail() {
     printf '%s\n' "$*" >&2

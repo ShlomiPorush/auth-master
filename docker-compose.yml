@@ -1,7 +1,11 @@
-# Every secret below must be set in .env. Create it once with
+# Every required secret below must be set in .env. Create it once with
 #   sh tools/generate-env.sh      (Linux, macOS)
 #   pwsh tools/generate-env.ps1   (Windows)
 # docker compose refuses to start while a required value is missing.
+#
+# Settings such as the time zone, log retention, the Secure cookie and the
+# Redis connection are managed on the dashboard's Settings page. A variable set
+# in .env overrides the saved value and locks the field there (see README.md).
 services:
   redis:
     image: redis:7-alpine
@@ -25,25 +29,26 @@ services:
       # To use PostgreSQL instead, set it in .env, for example:
       # DATABASE_URL=postgres://auth:<password>@postgres:5432/authdb
       #
-      # The bundled Redis. For an external Redis, see "External PostgreSQL or
-      # Redis" in README.md: an override file sets REDIS_URL and removes the redis
-      # service, because a value set here wins over .env. REDIS_PASSWORD must stay
-      # set in .env even then, because this file is checked before the override.
-      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}@redis:6379
-      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
+      # The bundled Redis, used until a Redis connection is saved on the Settings
+      # page. REDIS_URL in .env (or an override file) overrides both and locks the
+      # field. For an external Redis, see "Redis connection" in README.md.
+      # REDIS_PASSWORD must stay set in .env even then, because this file is
+      # checked before an override.
+      REDIS_DEFAULT_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is not set. Run tools/generate-env.sh or tools/generate-env.ps1}@redis:6379
+      # Optional master API key with every scope. Empty or unset: no master key.
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?APP_ENCRYPTION_KEY is not set. Run tools/generate-env.sh or tools/generate-env.ps1}
-      ALLOWED_AREAS: ${ALLOWED_AREAS:-orders,billing,webhooks}
-      TZ: ${TZ:-UTC}
       # Passed through so that values set as stack variables (for example in
-      # Portainer) reach the container, not only values in .env. The defaults
-      # apply only when the variable is not set at all; an empty value is passed
-      # as it is. See "Remote access and HTTPS" in README.md.
+      # Portainer) reach the container, not only values in .env. See "Remote
+      # access and HTTPS" in README.md.
       # The addresses of reverse proxies whose X-Forwarded-For header uvicorn trusts.
-      # The default is uvicorn's own.
+      # The default applies only when the variable is not set at all; an empty
+      # value is passed as it is. The default is uvicorn's own.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS-127.0.0.1,::1}
-      # Set to true when the service is reached over HTTPS.
-      COOKIE_SECURE: ${COOKIE_SECURE-false}
+      # Empty when not set: the Secure cookie setting on the Settings page applies.
+      # true or false here overrides it and locks the field.
+      COOKIE_SECURE: ${COOKIE_SECURE-}
     volumes:
       - ./data:/app/data
     depends_on:

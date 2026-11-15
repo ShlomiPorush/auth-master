@@ -459,56 +459,9 @@ def test_failed_zone_change_changes_nothing_and_can_be_retried(op):
 
 
 # ---------------------------------------------------------------------------
-# 4. ALLOWED_AREAS fallback: a grant write that started while there were no zones
-#    is refused when a zone is created before it writes
+# 4. (removed) ALLOWED_AREAS no longer stands in for zones; its areas are copied into
+#    the zones table once (test_zones_copy.py), so grants always name a zone row.
 # ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("route", GRANT_ROUTES)
-def test_fallback_grant_write_is_refused_after_the_first_zone_is_created(route, monkeypatch):
-    from app.config import get_settings
-
-    async def run():
-        async with _env() as e:
-            if await e.zone_names():
-                _skip_or_fail_in_ci("the zones table of this database is not empty")
-            area = e.area("env")
-            monkeypatch.setattr(get_settings(), "allowed_areas", area)
-            token = None
-            if route.endswith("_patch"):
-                token = await e.token("t", [{"area": area, "level": "read"}])
-            seen_before: dict[int, bool] = {}
-            for step in range(1, _MAX_STEPS + 1):
-                name = f"{e.prefix}-n{step}"
-                level = "write" if step % 2 else "delete"  # each trial writes a different grant
-                wanted = [{"area": area, "level": level}]
-
-                async def create_zone():
-                    tid = token["id"] if token else await e.token_id_by_name(name)
-                    seen_before[step] = tid is not None and (await e.grants_of(tid)) == wanted
-                    z = await e.zone(f"z{step}")
-                    created.append(z)
-
-                created: list[dict] = []
-                resp, fired = await _run_with_injection(
-                    e, step, lambda: _grant_write(e, route, token, name, wanted), create_zone
-                )
-                for z in created:
-                    r = await e.client.delete(f"/admin/api/zones/{z['id']}", headers=e.admin)
-                    assert r.status_code == 200, r.text
-                if not fired:
-                    break
-                if seen_before[step]:
-                    continue  # written before the zone existed: kept by design
-                tid = token["id"] if token else await e.token_id_by_name(name)
-                stored = (await e.grants_of(tid)) if tid else None
-                assert stored != wanted, (
-                    f"{route} wrote an ALLOWED_AREAS grant after a zone was created at its database call {step}"
-                )
-                assert resp.status_code == 400, resp.text
-            else:
-                pytest.fail("the grant write made more database calls than the test covers")
-
-    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------
@@ -620,44 +573,6 @@ def test_grant_write_waits_for_an_uncommitted_zone_change(op, route):
             )
             assert resp.status_code == 400, resp.text
             assert "Area not allowed" in resp.text, resp.text
-
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("route", GRANT_ROUTES)
-def test_fallback_grant_write_waits_for_an_uncommitted_first_zone(route, monkeypatch):
-    from app.config import get_settings
-
-    async def run():
-        async with _env() as e:
-            if await e.zone_names():
-                _skip_or_fail_in_ci("the zones table of this database is not empty")
-            area = e.area("env")
-            monkeypatch.setattr(get_settings(), "allowed_areas", area)
-            token = await e.token("t", [{"area": area, "level": "read"}]) if route.endswith("_patch") else None
-            name = f"{e.prefix}-n"
-            wanted = [{"area": area, "level": "write"}]
-            zid = uuid.uuid4()
-
-            async def stored():
-                tid = token["id"] if token else await e.token_id_by_name(name)
-                return (await e.grants_of(tid)) if tid else None
-
-            async def written_before_commit():
-                return await stored() == wanted
-
-            resp, written_first = await _grant_write_across_commit(
-                e,
-                [("INSERT INTO zones (id, name) VALUES ($1, $2)", (zid if _EXPECT_PG else str(zid), e.area("first")))],
-                lambda: _grant_write(e, route, token, name, wanted),
-                written_before_commit,
-            )
-            if written_first:
-                # Saved while there was no zone yet: kept by design.
-                assert resp.status_code in (200, 201), resp.text
-                return
-            assert await stored() != wanted, f"{route} saved an ALLOWED_AREAS grant after the first zone was committed"
-            assert resp.status_code == 400, resp.text
 
     asyncio.run(run())
 
@@ -803,7 +718,7 @@ def test_zone_change_during_grant_write_rewrites_the_new_grant(op, route, isolat
 
 
 # ---------------------------------------------------------------------------
-# 8. The last zone is deleted while ALLOWED_AREAS is empty: a grant write refuses
+# 8. The last zone is deleted: a grant write refuses
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("how", ("uncommitted", "between_calls"))

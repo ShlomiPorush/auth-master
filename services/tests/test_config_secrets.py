@@ -1,4 +1,9 @@
-"""The service refuses to start with a missing or publicly known secret.
+"""The service refuses to start with a missing or publicly known secret, or with an
+out-of-range log retention.
+
+ADMIN_API_KEY is optional (empty means no master key) but a set value must not be
+public.  REDIS_URL is optional here: the Redis URL may also be saved on the Settings
+page, and app.redis_settings refuses to start without any (test_redis_settings.py).
 
 Every secret used here is generated per run with ``secrets``. Requires pytest.
 """
@@ -19,13 +24,18 @@ from app.config import KNOWN_PUBLIC_VALUES, Settings, get_settings  # noqa: E402
 # modules cached when they imported the app.
 load_settings = get_settings.__wrapped__
 
-ENCRYPTION_AND_KEY_SETTINGS = ("ADMIN_API_KEY", "SESSION_SECRET", "APP_ENCRYPTION_KEY")
+REQUIRED_SECRETS = ("SESSION_SECRET", "APP_ENCRYPTION_KEY")
+OPTIONAL_SECRETS = ("ADMIN_API_KEY",)
 CLEARED = (
-    *ENCRYPTION_AND_KEY_SETTINGS,
+    *REQUIRED_SECRETS,
+    *OPTIONAL_SECRETS,
     "REDIS_URL",
+    "REDIS_DEFAULT_URL",
     "REDIS_PASSWORD",
     "DATABASE_URL",
     "PGPASSWORD",
+    "ACTIVITY_LOG_RETENTION_DAYS",
+    "ACCESS_LOG_RETENTION_DAYS",
 )
 
 
@@ -62,7 +72,7 @@ def test_valid_configuration_loads(env):
     assert s.database_url.startswith("sqlite")
 
 
-@pytest.mark.parametrize("name", [*ENCRYPTION_AND_KEY_SETTINGS, "REDIS_URL"])
+@pytest.mark.parametrize("name", REQUIRED_SECRETS)
 def test_missing_secret_is_named(env, monkeypatch, name):
     monkeypatch.delenv(name)
     message = startup_error()
@@ -70,14 +80,25 @@ def test_missing_secret_is_named(env, monkeypatch, name):
     assert "Configuration error" in message
 
 
-@pytest.mark.parametrize("name", ENCRYPTION_AND_KEY_SETTINGS)
+@pytest.mark.parametrize("name", REQUIRED_SECRETS)
 @pytest.mark.parametrize("value", ["", "   "])
 def test_empty_secret_is_refused(env, monkeypatch, name, value):
     monkeypatch.setenv(name, value)
     assert f"{name} is empty" in startup_error()
 
 
-@pytest.mark.parametrize("name", ENCRYPTION_AND_KEY_SETTINGS)
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_optional_secrets_may_be_unset_or_empty(env, monkeypatch, value):
+    for name in OPTIONAL_SECRETS:
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    s = load_settings()
+    assert not s.admin_api_key.strip()
+
+
+@pytest.mark.parametrize("name", [*REQUIRED_SECRETS, *OPTIONAL_SECRETS])
 @pytest.mark.parametrize("value", sorted(KNOWN_PUBLIC_VALUES))
 def test_every_public_value_is_refused_in_every_secret(env, monkeypatch, name, value):
     monkeypatch.setenv(name, value)
@@ -125,16 +146,34 @@ def test_public_redis_password_is_refused(env, monkeypatch, url):
     assert "REDIS_URL uses a publicly known password" in startup_error()
 
 
+@pytest.mark.parametrize("name", ["REDIS_URL", "REDIS_DEFAULT_URL"])
 @pytest.mark.parametrize("url", ["redis://redis:6379", "redis://redis:6379/0", "redis://:@redis:6379"])
-def test_redis_url_without_password_is_refused(env, monkeypatch, url):
-    monkeypatch.setenv("REDIS_URL", url)
-    assert "REDIS_URL has no password" in startup_error()
+def test_redis_url_without_password_is_refused(env, monkeypatch, name, url):
+    monkeypatch.setenv(name, url)
+    assert f"{name} has no password" in startup_error()
 
 
+@pytest.mark.parametrize("name", ["REDIS_URL", "REDIS_DEFAULT_URL"])
 @pytest.mark.parametrize("url", ["http://redis:6379", "not a url"])
-def test_invalid_redis_url_is_refused(env, monkeypatch, url):
-    monkeypatch.setenv("REDIS_URL", url)
-    assert "REDIS_URL is not a valid Redis URL" in startup_error()
+def test_invalid_redis_url_is_refused(env, monkeypatch, name, url):
+    monkeypatch.setenv(name, url)
+    assert f"{name} is not a valid Redis URL" in startup_error()
+
+
+def test_public_redis_default_url_password_is_refused(env, monkeypatch):
+    monkeypatch.delenv("REDIS_URL")
+    monkeypatch.setenv("REDIS_DEFAULT_URL", "redis://:changeme@redis:6379")
+    assert "REDIS_DEFAULT_URL uses a publicly known password" in startup_error()
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_redis_url_may_be_unset_or_empty(env, monkeypatch, value):
+    # Then the saved URL or REDIS_DEFAULT_URL is used (app.redis_settings.resolve).
+    if value is None:
+        monkeypatch.delenv("REDIS_URL")
+    else:
+        monkeypatch.setenv("REDIS_URL", value)
+    assert load_settings().env_value("redis_url") is None
 
 
 @pytest.mark.parametrize(
@@ -226,7 +265,7 @@ def test_pgpassword_is_not_checked_for_sqlite(env, monkeypatch):
 
 def test_error_output_never_contains_submitted_values(env, monkeypatch):
     marker = fresh()
-    monkeypatch.setenv("ADMIN_API_KEY", "")
+    monkeypatch.setenv("SESSION_SECRET", "")
     monkeypatch.setenv("REDIS_URL", f"redis://user{marker}@redis:6379")
     monkeypatch.setenv("PORT", f"not-a-number-{marker}")
     message = startup_error()
@@ -245,6 +284,30 @@ def test_validation_error_hides_input(env, monkeypatch):
 
 
 def test_message_points_to_the_generator(env, monkeypatch):
-    monkeypatch.delenv("ADMIN_API_KEY")
+    monkeypatch.delenv("SESSION_SECRET")
     assert "tools/generate-env.sh" in startup_error()
     assert config.GENERATE_HINT in startup_error()
+
+
+# ── Log retention ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", ["ACTIVITY_LOG_RETENTION_DAYS", "ACCESS_LOG_RETENTION_DAYS"])
+@pytest.mark.parametrize("value", ["0", "-1", "3651"])
+def test_out_of_range_retention_stops_the_start(env, monkeypatch, name, value):
+    # 0 or a negative value would delete every log row within a minute.
+    monkeypatch.setenv(name, value)
+    message = startup_error()
+    assert name in message and "Configuration error" in message
+
+
+@pytest.mark.parametrize("value", ["1", "3650"])
+def test_retention_limits_are_accepted(env, monkeypatch, value):
+    monkeypatch.setenv("ACTIVITY_LOG_RETENTION_DAYS", value)
+    monkeypatch.setenv("ACCESS_LOG_RETENTION_DAYS", value)
+    s = load_settings()
+    assert s.activity_log_retention_days == s.access_log_retention_days == int(value)
+
+
+def test_environment_setting_is_gone():
+    assert "environment" not in Settings.model_fields

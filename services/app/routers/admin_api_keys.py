@@ -7,6 +7,7 @@ import uuid as uuid_mod
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
+from app.config import get_settings
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, sha256_hex
 from app.crypto_totp import decrypt_totp_secret
 from app.datetime_utils import fmt_datetime
@@ -33,6 +34,12 @@ class RevealBody(BaseModel):
     code: str
 
 
+
+
+@router.get("/master")
+async def master_api_key(_sess: FullSession):
+    """Whether the ADMIN_API_KEY environment variable sets a master key (never the key)."""
+    return {"active": bool(get_settings().admin_api_key.strip()), "envName": "ADMIN_API_KEY"}
 
 
 @router.get("")

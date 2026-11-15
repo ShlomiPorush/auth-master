@@ -155,7 +155,7 @@ function dashZonesLoad() {
             dash.areas = res.data.map(function (z) { return z.name; });
             return dash.zones;
         }
-        // No zones: the areas from ALLOWED_AREAS, read again from /me
+        // No zones: the areas the server allows, read again from /me
         return api("GET", "/admin/api/me").then(function (me) {
             if (uiStaleSince(mark)) return dash.zones;
             if (me.ok && me.data && Array.isArray(me.data.allowedAreas)) dash.allowedAreas = me.data.allowedAreas;
@@ -1250,7 +1250,7 @@ function dashZonesDraw(quiet) {
             return !q || String(z.name).toLowerCase().indexOf(q) !== -1 || String(z.description || "").toLowerCase().indexOf(q) !== -1;
         }), dashZones.sort, function (z, key) { return key === "name" ? String(z.name) : uiParseInstant(z.createdAt); });
         document.getElementById("zone-count").textContent = uiCountLabel(shown.length, "zone", "zones");
-        if (!dash.zones.length) html = dashEmpty("No zones yet.", "Until you add one, tokens use the areas from <code>ALLOWED_AREAS</code>.");
+        if (!dash.zones.length) html = dashEmpty("No zones yet.", "Add a zone so tokens can be granted access to it.");
         else if (!shown.length) html = dashEmpty("No zones match your search.", "");
         else html = shown.map(function (z) {
             return '<div class="ui-tr" role="row" tabindex="0" data-key="' + esc(z.id) + '" aria-label="' + esc(z.name) + '">' +
@@ -1427,7 +1427,7 @@ registerPageRefresh("zones", 30000, function () { return dashZonesLoadPage(true)
 // API keys
 // ===========================================================================
 
-var dashKeys = { rows: null, failed: "", sort: { key: "", dir: "" }, drawn: "", bound: false };
+var dashKeys = { rows: null, failed: "", master: null, sort: { key: "", dir: "" }, drawn: "", bound: false };
 var DASH_KEY_COLS = [{ key: "name", label: "Name", kind: "text" }, { key: "createdAt", label: "Created", kind: "date" }];
 
 function dashKeyFind(id) {
@@ -1436,7 +1436,9 @@ function dashKeyFind(id) {
 
 function dashKeysLoad(quiet) {
     var mark = uiMutationMark();
-    return api("GET", "/admin/api/api-keys").then(function (res) {
+    return Promise.all([api("GET", "/admin/api/api-keys"), api("GET", "/admin/api/api-keys/master")]).then(function (both) {
+        var res = both[0];
+        var master = both[1];
         if (uiStaleSince(mark)) return;
         if (res.ok && Array.isArray(res.data)) {
             dashKeys.rows = res.data;
@@ -1444,8 +1446,22 @@ function dashKeysLoad(quiet) {
         } else {
             dashKeys.failed = apiError(res, "Failed");
         }
+        // The master key row follows its own answer; a failed check keeps what was shown
+        if (master.ok && master.data && typeof master.data.active === "boolean") dashKeys.master = master.data;
         dashKeysDraw(quiet);
     });
+}
+
+// ADMIN_API_KEY in the environment: a row that cannot be opened, edited or deleted here
+function dashKeyMasterRow() {
+    var m = dashKeys.master;
+    if (!m || !m.active) return "";
+    return '<div class="ui-tr" role="row" aria-label="Master key">' +
+        '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">Master key</span></div>' +
+        '<div class="ui-td ui-td-full ui-td-wrap" role="cell"><div class="ui-tags"><span class="ui-tag ui-tag-line">All scopes</span></div>' +
+        '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + "Set by the <code>" + esc(m.envName || "ADMIN_API_KEY") + "</code> environment variable; full access; remove it from the environment to revoke." + "</span></p></div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">Created </span><span class="ui-muted">-</span></div>' +
+        '<div class="ui-td ui-td-end" role="cell"></div></div>';
 }
 
 function dashKeysDraw(quiet) {
@@ -1459,8 +1475,8 @@ function dashKeysDraw(quiet) {
     } else {
         var rows = uiSortRows(dashKeys.rows, dashKeys.sort, function (k, key) { return key === "name" ? String(k.name) : uiParseInstant(k.createdAt); });
         document.getElementById("key-count").textContent = uiCountLabel(rows.length, "API key", "API keys");
-        if (!rows.length) html = dashEmpty("No API keys yet", "Create one with New Key.");
-        else html = rows.map(function (k) {
+        if (!rows.length) html = dashKeyMasterRow() + dashEmpty("No API keys yet", "Create one with New Key.");
+        else html = dashKeyMasterRow() + rows.map(function (k) {
             var scopes = String(k.scopes || "").split(",").filter(Boolean);
             return '<div class="ui-tr" role="row" tabindex="0" data-key="' + esc(k.id) + '" aria-label="' + esc(k.name) + '">' +
                 '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(k.name) + "</span></div>" +
@@ -1900,8 +1916,39 @@ function dashLogDetails(log) {
         }
         if (act === "zone_create") return det.description ? "<b>Description:</b> " + esc(det.description) : '<span class="ui-muted">-</span>';
         if (act === "api_key_create") return det.scopes ? "<b>Scopes:</b> " + esc(det.scopes) : '<span class="ui-muted">-</span>';
+        if (act === "settings.update" && DASH_LOG_SETTINGS[log.entityName]) return dashLogSettings(DASH_LOG_SETTINGS[log.entityName], det);
     } catch (e) { /* shown as data below */ }
     return '<code class="ui-mono">' + esc(JSON.stringify(det)) + "</code>";
+}
+
+// settings.update: the fields a version changed, from the old value to the new one
+var DASH_LOG_SETTINGS = {
+    general: [
+        ["timeZone", "Time zone", ""],
+        ["activityLogRetentionDays", "Activity log retention", "days"],
+        ["accessLogRetentionDays", "Access log retention", "days"],
+        ["cookieSecure", "Secure cookie", "onoff"],
+    ],
+    redis: [["url", "Redis URL", ""]],
+};
+
+function dashLogSettingValue(v, kind) {
+    if (v === null || v === undefined) return "default";
+    if (kind === "onoff") return v ? "on" : "off";
+    if (kind === "days") return uiCountLabel(v, "day", "days");
+    return String(v);
+}
+
+function dashLogSettings(fields, det) {
+    // The Redis entry may carry the masked URLs themselves or an object with a url field
+    var side = function (v) { return v !== null && typeof v === "object" ? v : { url: v }; };
+    var from = fields[0][0] === "url" ? side(det.from) : det.from || {};
+    var to = fields[0][0] === "url" ? side(det.to) : det.to || {};
+    var items = fields.filter(function (f) { return JSON.stringify(from[f[0]]) !== JSON.stringify(to[f[0]]); }).map(function (f) {
+        return esc(f[1]) + ": " + esc(dashLogSettingValue(from[f[0]], f[2])) + " to " + esc(dashLogSettingValue(to[f[0]], f[2]));
+    });
+    var version = det.version ? "<b>Version " + esc(uiNum(det.version)) + ":</b> " : "";
+    return version + (items.length ? items.join(", ") : '<span class="ui-muted">No modifications</span>');
 }
 
 function dashLogDraw(s, quiet) {
@@ -2228,15 +2275,30 @@ function dashUsePct(part, whole) {
     return Math.round(p) + "%";
 }
 
+// The report counts hours and days in the time zone the server computed it in, and names
+// them in that zone too, so a zone saved in another tab cannot shift the labels
+function dashUseZone(d) {
+    return d && uiZoneValid(d.timeZone) ? d.timeZone : uiAppZone;
+}
+
 function dashUseBucketName(d, b) {
-    return d.range === "24h" ? formatTime(b.start, { seconds: false }) : formatDay(b.start);
+    var z = dashUseZone(d);
+    return d.range === "24h" ? formatTime(b.start, { seconds: false, zone: z }) : formatDay(b.start, { zone: z });
+}
+
+// The data starts at the purge boundary: an earlier, shorter retention already deleted older calls
+function dashUsePurged(d) {
+    return d.dataFromReason === "purge";
 }
 
 // One bucket in words: the chart's readout, each bar's name and the table behind the chart
 function dashUseBucketWords(d, b) {
-    if (b.coverage === "none") return "No data: access logs older than " + uiCountLabel(d.retentionDays, "day", "days") + " are deleted";
+    if (b.coverage === "none") {
+        return dashUsePurged(d) ? "No data: these access logs were deleted under an earlier, shorter retention"
+            : "No data: access logs older than " + uiCountLabel(d.retentionDays, "day", "days") + " are deleted";
+    }
     var text = uiCountLabel(b.allowed + b.denied, "call", "calls") + ", " + uiNum(b.allowed) + " allowed, " + uiNum(b.denied) + " denied";
-    if (b.coverage === "partial") text += " (counted from " + formatTime(d.dataFrom, { seconds: false }) + "; older logs are deleted)";
+    if (b.coverage === "partial") text += " (counted from " + formatTime(d.dataFrom, { seconds: false, zone: dashUseZone(d) }) + "; older logs are deleted)";
     return text;
 }
 
@@ -2249,6 +2311,7 @@ function dashUseChartHtml(d) {
     series.forEach(function (b) { max = Math.max(max, b.allowed + b.denied); });
     var top = dashUseNiceMax(max);
     var hourly = d.range === "24h";
+    var zone = { zone: dashUseZone(d) };
     var every = hourly ? 3 : n > 10 ? 5 : 1;
     var gaps = false;
     var cols = series.map(function (b, i) {
@@ -2266,7 +2329,7 @@ function dashUseChartHtml(d) {
         if (back % every) return "";
         // On a phone every other hour label goes, so the rest do not touch
         var minor = hourly && (back / every) % 2 ? ' class="is-minor"' : "";
-        return "<span" + minor + ' style="grid-column:' + (i + 1) + '">' + esc(hourly ? formatClock(b.start) : formatShortDay(b.start)) + "</span>";
+        return "<span" + minor + ' style="grid-column:' + (i + 1) + '">' + esc(hourly ? formatClock(b.start, zone) : formatShortDay(b.start, zone)) + "</span>";
     }).join("");
     var rows = series.map(function (b) {
         return "<tr><th scope=\"row\">" + esc(dashUseBucketName(d, b)) + "</th><td>" +
@@ -2310,9 +2373,20 @@ function dashUseKpi(label, value, sub) {
 
 function dashUseNotices(d) {
     var out = "";
+    var zone = dashUseZone(d);
     if (d.partial) {
-        out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>Part of this period is no longer in the log</b>Access logs are kept for ' +
-            esc(uiCountLabel(d.retentionDays, "day", "days")) + ", so these figures start at " + uiTime(d.dataFrom, formatTime(d.dataFrom, { seconds: false })) + ".</div></div>";
+        var from = uiTime(d.dataFrom, formatTime(d.dataFrom, { seconds: false, zone: zone }), zone);
+        out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>Part of this period is no longer in the log</b>' +
+            (dashUsePurged(d) ? "Older calls were deleted under an earlier, shorter retention, so these figures start at " + from + "."
+                : "Access logs are kept for " + esc(uiCountLabel(d.retentionDays, "day", "days")) + ", so these figures start at " + from + ".") + "</div></div>";
+    }
+    if (d.timeZone && !uiZoneValid(d.timeZone)) {
+        out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>' + "This browser cannot show this report's time zone</b>" +
+            "The hours and days are counted in <code>" + esc(d.timeZone) + "</code>, but their names here use <code>" + esc(zone) +
+            "</code>, so they can be off by the difference between the two. Choose another time zone on the Settings page.</div></div>";
+    } else if (zone !== uiAppZone) {
+        out += '<div class="ui-banner" role="status"><div><b>This report uses another time zone</b>Its hours and days are counted in <code>' +
+            esc(zone) + "</code>, a time zone saved after this page was opened. Reload the page to show every date in it.</div></div>";
     }
     if (d.areasIncomplete) {
         out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>Area figures are incomplete for this period</b>' +
@@ -2587,17 +2661,222 @@ DASH_PAGE_IMPL.usage = function () {
 registerPageRefresh("usage", 60000, function (isCurrent) { return dashUseLoad(isCurrent); });
 
 // ===========================================================================
-// Settings: the rate limit and the addresses exempt from it. The form edits a
-// draft based on one saved version (base); a refresh never touches a changed
-// draft, and the base only moves on a save or an explicit choice after a conflict.
+// Settings: three panels, each with its own saved versions and Save. General
+// (time zone, log retention, the session cookie), the rate limit and the
+// addresses exempt from it, and the Redis connection. Each form edits a draft
+// based on one saved version (base); a refresh never touches a changed draft,
+// and the base only moves on a save or an explicit choice after a conflict.
 // ===========================================================================
 
 var DASH_LOCK_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>';
+
+function dashSetPanelState() {
+    return { snap: null, baseSnap: null, draft: null, dirty: false, saving: false, failed: "", refreshFailed: "",
+        conflict: null, error: "", errorField: "", seq: 0 };
+}
 
 var dashSet = {
     snap: null, baseSnap: null, draft: null, dirty: false, saving: false, failed: "", refreshFailed: "",
     conflict: null, error: "", errorField: "", askOwn: false, seq: 0, bound: false,
 };
+// askPurge / askCookie / askRestart: the server asked to confirm the values it was sent
+// ({ ..., ok }); they go as soon as one of those values changes
+var dashGen = dashSetPanelState();
+dashGen.askPurge = null;
+dashGen.askCookie = null;
+var dashRedis = dashSetPanelState();
+dashRedis.askRestart = null;
+
+// ---------------------------------------------------------------------------
+// Shared by the panels
+// ---------------------------------------------------------------------------
+
+function dashSetSourceHint(field) {
+    if (field.source === "stored") return "Saved here.";
+    if (field.source === "default") return "Default value.";
+    return "";
+}
+
+function dashSetLocked(field, shown) {
+    return '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(field.envName) + "</code> environment variable (" +
+        esc(shown) + "). Remove it there to change the value here.</span></p>";
+}
+
+function dashSetAlert(tone, title, sub, actions) {
+    return '<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub +
+        "</small></div>" + (actions || "<span></span>") + "</div>";
+}
+
+function dashSetSavedLine(s, none) {
+    return s.version
+        ? "Version " + esc(uiNum(s.version)) + ", saved by " + uiUserText(s.savedBy || "?") + (s.savedFrom ? " from <code>" + esc(s.savedFrom) + "</code>" : "") +
+          " " + uiTime(s.savedAt) + "."
+        : none;
+}
+
+// The version this server process uses, for panels that reload every 15 seconds
+function dashSetAppliedAlerts(s, alerts) {
+    var a = s.applied || {};
+    if (a.lastReloadError) {
+        alerts.push(dashSetAlert(" is-fail", "This server process could not reload the settings",
+            esc(a.lastReloadError) + " It keeps using version " + esc(uiNum(a.version)) + "."));
+    } else if (a.version < s.version) {
+        alerts.push(dashSetAlert(" is-warn", "This server process still uses version " + uiNum(a.version), "It reloads the settings every 15 seconds."));
+    }
+    return "This server process enforces version " + esc(uiNum(a.version || 0)) + (a.lastReload ? ", checked " + uiTime(a.lastReload) : "") + ".";
+}
+
+function dashPanelLoad(p, isCurrent) {
+    var st = p.st;
+    var seq = ++st.seq;
+    return p.get().then(function (res) {
+        // A newer load, a save in flight, or a save that finished after this load began owns the panel
+        if (seq !== st.seq || st.saving || (isCurrent && !isCurrent())) return;
+        var d = res.data;
+        if (!res.ok || !d || !p.valid(d)) {
+            var why = apiError(res, "The server did not answer.");
+            if (st.snap) st.refreshFailed = why;
+            else st.failed = why;
+            p.draw();
+            return;
+        }
+        st.failed = "";
+        st.refreshFailed = "";
+        st.snap = d;
+        if (!st.dirty && !st.saving && !st.conflict) {
+            // A panel with a key keeps its form while the saved values stay the same (an open
+            // picker or a focused field survives the 30-second refresh)
+            var same = p.formKey && st.baseSnap && p.formKey(st.baseSnap) === p.formKey(d);
+            st.baseSnap = d;
+            if (!same) {
+                st.draft = p.draftFrom(d);
+                st.error = "";
+                st.errorField = "";
+                p.clearAsks(st);
+                p.drawForm();
+            }
+        }
+        p.draw();
+    });
+}
+
+function dashPanelDraw(p) {
+    var st = p.st;
+    var info = document.getElementById(p.ids.info);
+    var body = document.getElementById(p.ids.body);
+    if (!info || !body) return;
+    if (!st.snap) {
+        info.innerHTML = "";
+        body.innerHTML = st.failed ? dashFailed(p.failedTitle, st.failed, 'data-settings-retry="' + p.name + '"') : dashLoading(p.loadingText);
+        return;
+    }
+    var alerts = [];
+    if (st.conflict) {
+        alerts.push(dashSetAlert(" is-warn", "Someone else saved these settings after you opened the page",
+            p.conflictText(st.conflict) + " Your changes are still in the form.",
+            '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-set-discard="' + p.name + '">Discard my changes</button>' +
+            '<button type="button" class="ui-btn ui-btn-sm" data-set-keep="' + p.name + '">Keep my changes</button></div>'));
+    }
+    if (st.refreshFailed) {
+        alerts.push(dashSetAlert(" is-fail", "Could not refresh the settings", esc(st.refreshFailed) + " They are checked again every 30 seconds."));
+    }
+    p.alerts(st.snap, alerts);
+    var html = alerts.join("");
+    if (!uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = html; });
+    if (!document.getElementById(p.ids.form)) p.drawForm();
+    p.sync();
+}
+
+// A save that went through: the answer is the new base
+function dashPanelSaved(p, d, message) {
+    var st = p.st;
+    st.snap = d;
+    st.baseSnap = d;
+    st.draft = p.draftFrom(d);
+    st.dirty = false;
+    st.conflict = null;
+    p.clearAsks(st);
+    p.drawForm();
+    p.draw();
+    showToast(d.warning || message, d.warning ? "error" : "success");
+}
+
+// Another admin saved first: the draft and its base stay until the admin chooses
+function dashPanelConflict(p, current) {
+    var st = p.st;
+    st.conflict = current;
+    st.snap = current;
+    p.draw();
+}
+
+function dashPanelFail(p, message, field) {
+    p.st.error = message;
+    p.st.errorField = field;
+    p.sync();
+}
+
+function dashPanelDiscard(p) {
+    var st = p.st;
+    var to = st.conflict || st.snap;
+    st.baseSnap = to;
+    st.snap = to;
+    st.draft = p.draftFrom(to);
+    st.dirty = false;
+    st.conflict = null;
+    p.clearAsks(st);
+    st.error = "";
+    st.errorField = "";
+    p.drawForm();
+    p.draw();
+}
+
+// An explicit choice: the draft now changes the version saved by the other admin. In panels
+// whose confirmations are bound to values (asksBound), the confirmations go too
+function dashPanelKeep(p) {
+    var st = p.st;
+    st.baseSnap = st.conflict;
+    st.conflict = null;
+    if (p.asksBound) p.clearAsks(st);
+    p.input();
+    p.draw();
+}
+
+// The error line, the invalid field, the busy state and Discard follow the state
+function dashPanelSyncCommon(p, pairs) {
+    var st = p.st;
+    var err = document.getElementById(p.ids.err);
+    err.textContent = st.error;
+    err.classList.toggle("hidden", !st.error);
+    pairs.forEach(function (pair) {
+        var el = document.getElementById(pair[0]);
+        if (!el) return;
+        if (st.errorField === pair[1]) el.setAttribute("aria-invalid", "true");
+        else el.removeAttribute("aria-invalid");
+    });
+    document.getElementById(p.ids.fields).disabled = st.saving;
+    var save = document.getElementById(p.ids.save);
+    if (save) save.textContent = st.saving ? "Saving..." : "Save";
+    var discard = document.getElementById(p.ids.discard);
+    if (discard) discard.classList.toggle("hidden", !st.dirty);
+}
+
+// A confirmation box inside a form: the server's words and a checkbox, drawn again only when it changes
+function dashSetAskHtml(id, title, sub, label, ok) {
+    return '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub + "</small>" +
+        '<label class="ui-check-label"><input type="checkbox" class="ui-check" id="' + id + '"' + (ok ? " checked" : "") + " /> <span>" + esc(label) +
+        "</span></label></div><span></span></div>";
+}
+
+function dashSetAsksDraw(id, html) {
+    var box = document.getElementById(id);
+    if (!box || box.getAttribute("data-drawn") === html) return;
+    box.setAttribute("data-drawn", html);
+    uiKeepFocus(box, function () { box.innerHTML = html; });
+}
+
+// ---------------------------------------------------------------------------
+// Rate limit
+// ---------------------------------------------------------------------------
 
 function dashSetDraftFrom(s) {
     var f = s.fields;
@@ -2623,44 +2902,12 @@ function dashSetChanges() {
     return out;
 }
 
-
 function dashSettingsLoad(isCurrent) {
-    var seq = ++dashSet.seq;
-    return api("GET", "/admin/api/settings/rate-limit").then(function (res) {
-        // A newer load, a save in flight, or a save that finished after this load began owns the page
-        if (seq !== dashSet.seq || dashSet.saving || (isCurrent && !isCurrent())) return;
-        var d = res.data;
-        if (!res.ok || !d || !d.fields) {
-            var why = apiError(res, "The server did not answer.");
-            if (dashSet.snap) dashSet.refreshFailed = why;
-            else dashSet.failed = why;
-            dashSettingsDraw();
-            return;
-        }
-        dashSet.failed = "";
-        dashSet.refreshFailed = "";
-        dashSet.snap = d;
-        if (!dashSet.dirty && !dashSet.saving && !dashSet.conflict) {
-            dashSet.baseSnap = d;
-            dashSet.draft = dashSetDraftFrom(d);
-            dashSet.error = "";
-            dashSet.errorField = "";
-            dashSet.askOwn = false;
-            dashSettingsDrawForm();
-        }
-        dashSettingsDraw();
-    });
+    return dashPanelLoad(DASH_SET_PANELS.rate, isCurrent);
 }
 
-function dashSetSourceHint(field) {
-    if (field.source === "stored") return "Saved here.";
-    if (field.source === "default") return "Default value.";
-    return "";
-}
-
-function dashSetLocked(field, shown) {
-    return '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(field.envName) + "</code> environment variable (" +
-        esc(shown) + "). Remove it there to change the value here.</span></p>";
+function dashSettingsLoadAll(isCurrent) {
+    return Promise.all([dashGenLoad(isCurrent), dashSettingsLoad(isCurrent), dashRedisLoad(isCurrent)]);
 }
 
 // True when FORWARDED_ALLOW_IPS lists only loopback addresses, as uvicorn reads it
@@ -2729,7 +2976,7 @@ function dashSettingsDrawForm() {
         "</div>" +
         '<p class="ui-error hidden" id="set-err" role="alert"></p>' +
         '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-save">Save</button>' +
-        '<button type="button" class="ui-btn hidden" id="set-discard">Discard changes</button></div>' +
+        '<button type="button" class="ui-btn hidden" id="set-discard" data-set-discard="rate">Discard changes</button></div>' +
         "</fieldset></form>";
     dashSettingsSyncForm();
 }
@@ -2743,66 +2990,23 @@ function dashSettingsSyncForm() {
     // Shown when the server answered that the change exempts the admin's own address
     wrap.classList.toggle("hidden", !dashSet.askOwn);
     if (!dashSet.askOwn) document.getElementById("set-own").checked = false;
-    var err = document.getElementById("set-err");
-    err.textContent = dashSet.error;
-    err.classList.toggle("hidden", !dashSet.error);
-    [["set-max", "maxReq"], ["set-window", "windowMs"], ["set-exempt", "exempt"]].forEach(function (pair) {
-        var el = document.getElementById(pair[0]);
-        if (!el) return;
-        if (dashSet.errorField === pair[1]) el.setAttribute("aria-invalid", "true");
-        else el.removeAttribute("aria-invalid");
-    });
-    document.getElementById("settings-fields").disabled = dashSet.saving;
-    document.getElementById("set-save").textContent = dashSet.saving ? "Saving..." : "Save";
-    document.getElementById("set-discard").classList.toggle("hidden", !dashSet.dirty);
+    dashPanelSyncCommon(DASH_SET_PANELS.rate, [["set-max", "maxReq"], ["set-window", "windowMs"], ["set-exempt", "exempt"]]);
 }
 
 function dashSettingsDraw() {
-    var info = document.getElementById("settings-info");
-    var body = document.getElementById("settings-body");
-    if (!info || !body) return;
-    if (!dashSet.snap) {
-        info.innerHTML = "";
-        body.innerHTML = dashSet.failed ? dashFailed("Could not load the settings", dashSet.failed, "data-settings-retry") : dashLoading("Loading settings...");
-        return;
-    }
-    var s = dashSet.snap;
-    var alerts = [];
-    var addAlert = function (tone, title, sub, actions) {
-        alerts.push('<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub +
-            "</small></div>" + (actions || "<span></span>") + "</div>");
-    };
-    if (dashSet.conflict) {
-        var c = dashSet.conflict;
-        var f = c.fields;
-        addAlert(" is-warn", "Someone else saved these settings after you opened the page",
-            "Saved now: " + esc(uiCountLabel(f.maxReq.value, "request", "requests")) + " per " + esc(uiNum(f.windowMs.value / 1000)) + " s; exempt: " +
-            (f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : "none") +
-            ". Your changes are still in the form.",
-            '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-set-discard>Discard my changes</button>' +
-            '<button type="button" class="ui-btn ui-btn-sm" data-set-keep>Keep my changes</button></div>');
-    }
-    if (dashSet.refreshFailed) {
-        addAlert(" is-fail", "Could not refresh the settings", esc(dashSet.refreshFailed) + " They are checked again every 30 seconds.");
-    }
-    var a = s.applied || {};
-    if (a.lastReloadError) {
-        addAlert(" is-fail", "This server process could not reload the settings",
-            esc(a.lastReloadError) + " It keeps using version " + esc(uiNum(a.version)) + ".");
-    } else if (a.version < s.version) {
-        addAlert(" is-warn", "This server process still uses version " + uiNum(a.version), "It reloads the settings every 15 seconds.");
-    }
-    var applied = "This server process enforces version " + esc(uiNum(a.version || 0)) +
-        (a.lastReload ? ", checked " + uiTime(a.lastReload) : "") + ".";
-    var saved = s.version
-        ? "Version " + esc(uiNum(s.version)) + ", saved by " + uiUserText(s.savedBy || "?") + (s.savedFrom ? " from <code>" + esc(s.savedFrom) + "</code>" : "") +
-          " " + uiTime(s.savedAt) + "."
-        : "Nothing saved here yet. The values come from the defaults and the environment.";
-    addAlert("", "Saved settings", saved + " " + applied + " Changes apply at once in this server process and within about 15 seconds in any other.");
-    var html = alerts.join("");
-    if (!uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = html; });
-    if (!document.getElementById("settings-form")) dashSettingsDrawForm();
-    dashSettingsSyncForm();
+    dashPanelDraw(DASH_SET_PANELS.rate);
+}
+
+function dashSettingsAlerts(s, alerts) {
+    var applied = dashSetAppliedAlerts(s, alerts);
+    var saved = dashSetSavedLine(s, "Nothing saved here yet. The values come from the defaults and the environment.");
+    alerts.push(dashSetAlert("", "Saved settings", saved + " " + applied + " Changes apply at once in this server process and within about 15 seconds in any other."));
+}
+
+function dashSettingsConflictText(c) {
+    var f = c.fields;
+    return "Saved now: " + esc(uiCountLabel(f.maxReq.value, "request", "requests")) + " per " + esc(uiNum(f.windowMs.value / 1000)) + " s; exempt: " +
+        (f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : "none") + ".";
 }
 
 function dashSettingsInput() {
@@ -2844,21 +3048,11 @@ function dashSettingsSave() {
         dashSet.seq += 1; // and so must a load that started while it ran
         var d = res.data || {};
         if (res.ok && d.fields) {
-            dashSet.snap = d;
-            dashSet.baseSnap = d;
-            dashSet.draft = dashSetDraftFrom(d);
-            dashSet.dirty = false;
-            dashSet.conflict = null;
-            dashSet.askOwn = false;
-            dashSettingsDrawForm();
-            dashSettingsDraw();
-            showToast(d.warning || "Settings saved", d.warning ? "error" : "success");
+            dashPanelSaved(DASH_SET_PANELS.rate, d, "Settings saved");
             return;
         }
         if (res.status === 409 && d.code === "conflict" && d.current) {
-            dashSet.conflict = d.current;
-            dashSet.snap = d.current;
-            dashSettingsDraw();
+            dashPanelConflict(DASH_SET_PANELS.rate, d.current);
             return;
         }
         if (res.status === 409 && d.code === "own_address") dashSet.askOwn = true;
@@ -2868,68 +3062,528 @@ function dashSettingsSave() {
 }
 
 function dashSettingsFail(message, field) {
-    dashSet.error = message;
-    dashSet.errorField = field;
-    dashSettingsSyncForm();
+    dashPanelFail(DASH_SET_PANELS.rate, message, field);
 }
+
+// ---------------------------------------------------------------------------
+// General: time zone, log retention, the session cookie, and ROOT_PATH (read only)
+// ---------------------------------------------------------------------------
+
+var DASH_GEN_RETENTION = [
+    ["activityLogRetentionDays", "gen-activity", "Activity log retention, in days"],
+    ["accessLogRetentionDays", "gen-access", "Access log retention, in days"],
+];
+
+function dashGenLoad(isCurrent) {
+    return dashPanelLoad(DASH_SET_PANELS.general, isCurrent);
+}
+
+function dashGenDraftFrom(s) {
+    var f = s.fields;
+    return {
+        timeZone: f.timeZone.value,
+        cookieSecure: f.cookieSecure.value === true,
+        activityLogRetentionDays: String(f.activityLogRetentionDays.value),
+        accessLogRetentionDays: String(f.accessLogRetentionDays.value),
+    };
+}
+
+function dashGenChanges() {
+    var f = dashGen.baseSnap.fields;
+    var d = dashGen.draft;
+    var out = {};
+    if (!f.timeZone.locked && d.timeZone !== f.timeZone.value) out.timeZone = d.timeZone;
+    if (!f.cookieSecure.locked && d.cookieSecure !== (f.cookieSecure.value === true)) out.cookieSecure = d.cookieSecure;
+    DASH_GEN_RETENTION.forEach(function (r) {
+        var v = d[r[0]].trim();
+        if (!f[r[0]].locked && v !== String(f[r[0]].value)) out[r[0]] = v;
+    });
+    return out;
+}
+
+// After the draft changed: a confirmation goes when a value it was asked for changes
+function dashGenDraftChanged() {
+    var st = dashGen;
+    var d = st.draft;
+    if (st.askPurge && (st.askPurge.activityLogRetentionDays !== d.activityLogRetentionDays.trim() ||
+        st.askPurge.accessLogRetentionDays !== d.accessLogRetentionDays.trim())) st.askPurge = null;
+    if (st.askCookie && st.askCookie.cookieSecure !== d.cookieSecure) st.askCookie = null;
+    st.dirty = Object.keys(dashGenChanges()).length > 0;
+}
+
+function dashGenClearAsks(st) {
+    st.askPurge = null;
+    st.askCookie = null;
+}
+
+function dashGenInput() {
+    var d = dashGen.draft;
+    if (!d) return;
+    var tz = document.getElementById("gen-tz");
+    var cookie = document.getElementById("gen-cookie");
+    if (tz) d.timeZone = tz.value;
+    if (cookie) d.cookieSecure = cookie.checked;
+    DASH_GEN_RETENTION.forEach(function (r) {
+        var el = document.getElementById(r[1]);
+        if (el) d[r[0]] = el.value;
+    });
+    dashGenDraftChanged();
+    dashGenSyncForm();
+}
+
+// The admin ticked or cleared a confirmation box
+function dashGenConfirm(kind, ok) {
+    var ask = kind === "purge" ? dashGen.askPurge : dashGen.askCookie;
+    if (ask) ask.ok = !!ok;
+}
+
+function dashGenRetentionField(f, r, d) {
+    var field = f[r[0]];
+    if (field.locked) return dashSetLocked(field, uiCountLabel(field.value, "day", "days"));
+    return '<input class="ui-input" id="' + r[1] + '" type="number" inputmode="numeric" min="' + esc(field.min) + '" max="' + esc(field.max) +
+        '" step="1" required value="' + esc(d[r[0]]) + '" aria-describedby="' + r[1] + '-hint" />' +
+        '<span class="ui-hint" id="' + r[1] + '-hint">' + esc(dashSetSourceHint(field)) + " Whole days, from " + esc(uiNum(field.min)) + " to " +
+        esc(uiNum(field.max)) + ". Older entries are deleted about once a minute.</span>";
+}
+
+function dashGenDrawForm() {
+    var body = document.getElementById("general-body");
+    if (!body || !dashGen.baseSnap) return;
+    var s = dashGen.baseSnap;
+    var f = s.fields;
+    var d = dashGen.draft;
+    // Only zones this browser can show dates in; the current value stays so it is not changed silently
+    var zones = (Array.isArray(s.timeZones) ? s.timeZones : []).filter(function (z) { return uiZoneValid(z); });
+    if (zones.indexOf(d.timeZone) === -1) zones.unshift(d.timeZone);
+    var tzField = f.timeZone.locked
+        ? dashSetLocked(f.timeZone, f.timeZone.envInvalid ? "not a time zone, so UTC is used" : f.timeZone.value)
+        : '<select class="ui-select" id="gen-tz" aria-describedby="gen-tz-hint">' + zones.map(function (z) {
+            return '<option value="' + esc(z) + '"' + (z === d.timeZone ? " selected" : "") + ">" + esc(z) + "</option>";
+        }).join("") + "</select>" +
+          '<span class="ui-hint" id="gen-tz-hint">' + esc(dashSetSourceHint(f.timeZone)) + " Dates on every page and the Usage report use it. " +
+          "Other open tabs show the previous time zone until they are reloaded.</span>";
+    var cookieField = f.cookieSecure.locked
+        ? dashSetLocked(f.cookieSecure, f.cookieSecure.value ? "true" : "false")
+        : '<label class="ui-check-label"><input type="checkbox" class="ui-check" id="gen-cookie"' + (d.cookieSecure ? " checked" : "") +
+          ' aria-describedby="gen-cookie-hint" /> <span>Send the session cookie over HTTPS only</span></label>' +
+          '<span class="ui-hint" id="gen-cookie-hint">' + esc(dashSetSourceHint(f.cookieSecure)) +
+          " Turn it on when admins reach this portal over HTTPS. It applies to sessions that start after the change.</span>";
+    var root = s.rootPath || { envName: "ROOT_PATH", value: null };
+    var rootField = root.value === null || root.value === undefined
+        ? '<p class="ui-hint"><code>' + esc(root.envName) + "</code> is not set, so the portal is served at the root of its address.</p>"
+        : '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>Set by the <code>" + esc(root.envName) + "</code> environment variable" +
+          (root.value ? ": <code>" + esc(root.value) + "</code>" : " to an empty value, so the portal is served at the root of its address") +
+          ". It must match the route of your reverse proxy, so it is set in the environment only.</span></p>";
+    var locked = f.timeZone.locked && f.cookieSecure.locked && f.activityLogRetentionDays.locked && f.accessLogRetentionDays.locked;
+    body.innerHTML =
+        '<form class="ui-form" id="general-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="general-fields">' +
+        '<div class="ui-field"><label class="ui-label" for="gen-tz">Time zone</label>' + tzField + "</div>" +
+        '<div class="ui-form-row">' + DASH_GEN_RETENTION.map(function (r) {
+            return '<div class="ui-field"><label class="ui-label" for="' + r[1] + '">' + esc(r[2]) + "</label>" + dashGenRetentionField(f, r, d) + "</div>";
+        }).join("") + "</div>" +
+        '<div class="ui-field"><span class="ui-label">Secure session cookie</span>' + cookieField + "</div>" +
+        '<div class="ui-field"><span class="ui-label">URL path prefix</span>' + rootField + "</div>" +
+        '<div class="ui-settings-asks" id="gen-asks" aria-live="polite"></div>' +
+        '<p class="ui-error hidden" id="gen-err" role="alert"></p>' +
+        (locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="gen-save">Save</button>' +
+            '<button type="button" class="ui-btn hidden" id="gen-discard" data-set-discard="general">Discard changes</button></div>') +
+        "</fieldset></form>";
+    var sel = document.getElementById("gen-tz");
+    if (sel) uiPicker(sel, { label: "Time zone", field: true });
+    dashGenSyncForm();
+}
+
+// True when the confirmation lowers this retention below the value the page was showing.
+function dashGenLowered(ask, name) {
+    var snap = dashGen.snap;
+    var cur = snap && snap.fields && snap.fields[name] ? snap.fields[name].value : null;
+    return !!ask.confirm && typeof cur === "number" && ask.confirm[name] < cur;
+}
+
+function dashGenAsksHtml() {
+    var st = dashGen;
+    var html = "";
+    if (st.askPurge) {
+        var e = st.askPurge.estimate || {};
+        var rows = function (n, one, many) { return n === null || n === undefined ? "an unknown number of " + many : "about " + uiCountLabel(n, one, many); };
+        // Only the logs whose retention goes down; the server leaves the other estimate out.
+        var parts = [];
+        if (dashGenLowered(st.askPurge, "activityLogRetentionDays")) parts.push(rows(e.activityLogs, "activity log entry", "activity log entries"));
+        if (dashGenLowered(st.askPurge, "accessLogRetentionDays")) parts.push(rows(e.accessLogs, "access log entry", "access log entries"));
+        html += dashSetAskHtml("gen-purge-ok", "Lowering the retention deletes older entries",
+            esc(st.askPurge.detail || "") + (parts.length ? " Older than the new limit: " + esc(parts.join(" and ")) + "." : ""),
+            "Delete them when I save", st.askPurge.ok);
+    }
+    if (st.askCookie) {
+        html += dashSetAskHtml("gen-cookie-ok", "This page was opened over plain HTTP", esc(st.askCookie.detail || ""),
+            "Turn on the Secure cookie anyway", st.askCookie.ok);
+    }
+    return html;
+}
+
+function dashGenSyncForm() {
+    var form = document.getElementById("general-form");
+    if (!form) return;
+    dashSetAsksDraw("gen-asks", dashGenAsksHtml());
+    dashPanelSyncCommon(DASH_SET_PANELS.general, [["gen-tz-pick", "timeZone"], ["gen-cookie", "cookieSecure"],
+        ["gen-activity", "activityLogRetentionDays"], ["gen-access", "accessLogRetentionDays"]]);
+    var pick = document.getElementById("gen-tz");
+    if (pick && pick.uiPicker) uiPickerSync(pick);
+}
+
+function dashGenDraw() {
+    dashPanelDraw(DASH_SET_PANELS.general);
+}
+
+var DASH_GEN_PURGE = [["activity", "activity log"], ["access", "access log"]];
+
+function dashGenAlerts(s, alerts) {
+    var tz = s.fields.timeZone;
+    if (tz.envInvalid) {
+        alerts.push(dashSetAlert(" is-warn", "TZ is not a time zone",
+            "The <code>" + esc(tz.envName) + "</code> environment variable is empty or not a time zone name, so dates use UTC. " +
+            "Set it to a name such as <code>Europe/London</code>, or remove it to choose the time zone here."));
+    }
+    var purge = s.purge || {};
+    DASH_GEN_PURGE.forEach(function (x) {
+        var p = purge[x[0]];
+        if (p && p.state === "skipped") {
+            alerts.push(dashSetAlert(" is-warn", "Old " + x[1] + " entries were not deleted",
+                esc(p.reason || "This server process skipped the cleanup.") + (p.lastRun ? " Last attempt " + uiTime(p.lastRun) + "." : "") +
+                " The cleanup runs again every minute."));
+        }
+    });
+    var applied = dashSetAppliedAlerts(s, alerts);
+    var saved = dashSetSavedLine(s, "Nothing saved here yet. The values come from the defaults and the environment.");
+    alerts.push(dashSetAlert("", "Saved settings", saved + " " + applied + " Changes apply at once in this server process and within about 15 seconds in any other."));
+}
+
+function dashGenConflictText(c) {
+    var f = c.fields;
+    return "Saved now: time zone " + esc(f.timeZone.value) + "; activity log " + esc(uiCountLabel(f.activityLogRetentionDays.value, "day", "days")) +
+        "; access log " + esc(uiCountLabel(f.accessLogRetentionDays.value, "day", "days")) + "; Secure cookie " + (f.cookieSecure.value ? "on" : "off") + ".";
+}
+
+function dashGenSave() {
+    var st = dashGen;
+    if (st.saving || !st.baseSnap) return;
+    var changes = dashGenChanges();
+    var body = { baseVersion: st.baseSnap.version };
+    var whole = /^\d+$/;
+    if ("timeZone" in changes) body.timeZone = changes.timeZone;
+    if ("cookieSecure" in changes) body.cookieSecure = changes.cookieSecure;
+    for (var i = 0; i < DASH_GEN_RETENTION.length; i++) {
+        var key = DASH_GEN_RETENTION[i][0];
+        if (!(key in changes)) continue;
+        if (!whole.test(changes[key])) return dashPanelFail(DASH_SET_PANELS.general, "Retention must be a whole number of days.", key);
+        body[key] = Number(changes[key]);
+    }
+    if (st.askPurge && st.askPurge.ok) body.confirmPurge = st.askPurge.confirm;
+    if (st.askCookie && st.askCookie.ok) body.confirmCookieSecure = true;
+    // The values this request asks about; a confirmation the server asks for is bound to them
+    var sent = { activityLogRetentionDays: st.draft.activityLogRetentionDays.trim(), accessLogRetentionDays: st.draft.accessLogRetentionDays.trim(),
+        cookieSecure: st.draft.cookieSecure };
+    var zoneBefore = st.baseSnap.fields.timeZone.value;
+    st.saving = true;
+    st.error = "";
+    st.errorField = "";
+    dashGenSyncForm();
+    st.seq += 1;
+    uiMutated();
+    return api("PUT", "/admin/api/settings/general", body).then(function (res) {
+        st.saving = false;
+        st.seq += 1;
+        var d = res.data || {};
+        if (res.ok && d.fields) {
+            dashPanelSaved(DASH_SET_PANELS.general, d, "Settings saved");
+            var zone = d.fields.timeZone && d.fields.timeZone.value;
+            if (zone && zone !== zoneBefore) dashGenZoneSaved(zone);
+            return;
+        }
+        if (res.status === 409 && d.code === "conflict" && d.current) {
+            dashGenClearAsks(st);
+            dashPanelConflict(DASH_SET_PANELS.general, d.current);
+            dashGenSyncForm();
+            return;
+        }
+        if (res.status === 409 && d.code === "confirm_purge" && d.confirm) {
+            st.askPurge = { confirm: d.confirm, estimate: d.estimate || {}, detail: d.detail || "", ok: false,
+                activityLogRetentionDays: sent.activityLogRetentionDays, accessLogRetentionDays: sent.accessLogRetentionDays };
+            dashGenSyncForm();
+            return;
+        }
+        if (res.status === 409 && d.code === "confirm_cookie_secure") {
+            st.askCookie = { detail: d.detail || "", ok: false, cookieSecure: sent.cookieSecure };
+            dashGenSyncForm();
+            return;
+        }
+        dashPanelFail(DASH_SET_PANELS.general, apiError(res, "Could not save the settings."), d.field || "");
+        if (d.code === "locked") dashGenLoad();
+    });
+}
+
+// This tab takes the new zone at once; other open tabs keep the old one until reloaded
+function dashGenZoneSaved(zone) {
+    dash.zoneAsked = zone;
+    uiSetAppZone(zone);
+    dashRedrawDates();
+    dashSettingsDraw();
+    dashGenDraw();
+    dashRedisDraw();
+}
+
+// ---------------------------------------------------------------------------
+// Redis connection: saved only after the server checked it; used after a restart
+// ---------------------------------------------------------------------------
+
+var DASH_REDIS_SOURCE = {
+    env: "the <code>REDIS_URL</code> environment variable, which overrides a value saved here",
+    stored: "the value saved here",
+    "default": "the deployment's default, <code>REDIS_DEFAULT_URL</code>",
+};
+var DASH_REDIS_CHECK = {
+    unreachable: "Could not connect to this Redis. Check the host, the port and that the server runs, then try again.",
+    auth: "Redis refused the user name or password. Check them and try again.",
+    no_write: "This connection cannot write the keys the service uses. Check the user's permissions, and that the server is not a read-only replica.",
+    other: "The check of this Redis failed. Check the URL and the server, then try again.",
+};
+
+function dashRedisLoad(isCurrent) {
+    return dashPanelLoad(DASH_SET_PANELS.redis, isCurrent);
+}
+
+// The field is write-only: the draft is only what the admin typed
+function dashRedisDraftFrom() {
+    return { url: "" };
+}
+
+function dashRedisClearAsks(st) {
+    st.askRestart = null;
+}
+
+function dashRedisDraftChanged() {
+    var st = dashRedis;
+    if (st.askRestart && st.askRestart.url !== st.draft.url.trim()) st.askRestart = null;
+    st.dirty = !!st.baseSnap && !st.baseSnap.url.locked && st.draft.url.trim() !== "";
+}
+
+function dashRedisInput() {
+    if (!dashRedis.draft) return;
+    var el = document.getElementById("redis-url");
+    if (el) dashRedis.draft.url = el.value;
+    dashRedisDraftChanged();
+    dashRedisSyncForm();
+}
+
+function dashRedisConfirm(ok) {
+    if (dashRedis.askRestart) dashRedis.askRestart.ok = !!ok;
+}
+
+function dashRedisDrawForm() {
+    var body = document.getElementById("redis-body");
+    if (!body || !dashRedis.baseSnap) return;
+    var u = dashRedis.baseSnap.url;
+    var now = '<p class="ui-hint">This server process uses <code>' + esc(u.connected) + "</code>." +
+        (u.saved ? " Saved here: <code>" + esc(u.saved) + "</code>." : "") +
+        " The service takes the connection from " + (DASH_REDIS_SOURCE[u.source] || esc(u.source)) + ". Passwords are never shown.</p>";
+    var field = u.locked
+        ? dashSetLocked(u, u.connected)
+        : '<input class="ui-input" id="redis-url" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr" ' +
+          'placeholder="redis://:&lt;password&gt;@host:6379/0" aria-describedby="redis-url-hint" />' +
+          '<span class="ui-hint" id="redis-url-hint">The whole URL, with its password; use <code>rediss://</code> for TLS. Before saving, the server connects ' +
+          "with it and tries the commands the service uses, on test keys. If that fails, nothing is saved.</span>";
+    body.innerHTML =
+        '<form class="ui-form" id="redis-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="redis-fields">' +
+        '<div class="ui-field"><span class="ui-label">Current connection</span>' + now + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="redis-url">New connection URL</label>' + field + "</div>" +
+        '<div class="ui-settings-asks" id="redis-asks" aria-live="polite"></div>' +
+        '<p class="ui-error hidden" id="redis-err" role="alert"></p>' +
+        (u.locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="redis-save">Save</button>' +
+            '<button type="button" class="ui-btn hidden" id="redis-discard" data-set-discard="redis">Discard changes</button></div>') +
+        "</fieldset></form>";
+    dashRedisSyncForm();
+}
+
+function dashRedisSyncForm() {
+    var form = document.getElementById("redis-form");
+    if (!form) return;
+    var ask = dashRedis.askRestart;
+    dashSetAsksDraw("redis-asks", ask ? dashSetAskHtml("redis-restart-ok", "Saving takes effect only after a restart", esc(ask.detail || ""),
+        "Save it; I will restart every instance of the service", ask.ok) : "");
+    dashPanelSyncCommon(DASH_SET_PANELS.redis, [["redis-url", "url"]]);
+}
+
+function dashRedisDraw() {
+    dashPanelDraw(DASH_SET_PANELS.redis);
+}
+
+function dashRedisAlerts(s, alerts) {
+    var u = s.url;
+    if (u.syncPending) {
+        alerts.push(dashSetAlert(" is-warn", "The environment value is not saved yet; keep REDIS_URL set until this note goes away.",
+            "The service saves <code>" + esc(u.envName) + "</code> here once a check against it passes. It tries again every 15 seconds."));
+    }
+    if (s.restartNeeded) {
+        alerts.push(dashSetAlert(" is-warn", "Restart the service to use the saved connection",
+            "This server process still uses <code>" + esc(u.connected) + "</code>. Restart every instance of the service together, for example with " +
+            "<code>docker compose restart auth-service</code>; with several replicas, stop them all, then start them. Every admin then signs in again."));
+    }
+    var saved = dashSetSavedLine(s, "Nothing saved here yet.");
+    alerts.push(dashSetAlert("", "Saved connection", saved + " A saved connection takes effect when the service restarts."));
+}
+
+function dashRedisConflictText(c) {
+    return "Saved now: " + (c.url.saved ? "<code>" + esc(c.url.saved) + "</code>" : "nothing") + ".";
+}
+
+function dashRedisSave() {
+    var st = dashRedis;
+    if (st.saving || !st.baseSnap) return;
+    var url = st.draft.url.trim();
+    if (!url) return dashPanelFail(DASH_SET_PANELS.redis, "Enter the new connection URL.", "url");
+    var body = { baseVersion: st.baseSnap.version, url: url };
+    if (st.askRestart && st.askRestart.ok) body.confirmRestart = true;
+    st.saving = true;
+    st.error = "";
+    st.errorField = "";
+    dashRedisSyncForm();
+    st.seq += 1;
+    uiMutated();
+    return api("PUT", "/admin/api/settings/redis", body).then(function (res) {
+        st.saving = false;
+        st.seq += 1;
+        var d = res.data || {};
+        if (res.ok && d.url) {
+            var el = document.getElementById("redis-url");
+            if (el) el.value = "";
+            dashPanelSaved(DASH_SET_PANELS.redis, d, "Redis connection saved. Restart the service to use it.");
+            return;
+        }
+        if (res.status === 409 && d.code === "conflict" && d.current) {
+            dashRedisClearAsks(st);
+            dashPanelConflict(DASH_SET_PANELS.redis, d.current);
+            dashRedisSyncForm();
+            return;
+        }
+        if (res.status === 409 && d.code === "confirm_restart") {
+            st.askRestart = { detail: d.detail || "", ok: false, url: url };
+            dashRedisSyncForm();
+            return;
+        }
+        if (d.code === "redis_check_failed") {
+            dashPanelFail(DASH_SET_PANELS.redis, (DASH_REDIS_CHECK[d.category] || DASH_REDIS_CHECK.other) + " Nothing was saved.", "url");
+            return;
+        }
+        dashPanelFail(DASH_SET_PANELS.redis, apiError(res, "Could not save the Redis connection."), d.field || "");
+        if (d.code === "locked") dashRedisLoad();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// The panels, the page and its events
+// ---------------------------------------------------------------------------
+
+var DASH_SET_PANELS = {
+    rate: {
+        name: "rate", st: dashSet, failedTitle: "Could not load the settings", loadingText: "Loading settings...",
+        ids: { info: "settings-info", body: "settings-body", form: "settings-form", fields: "settings-fields", err: "set-err", save: "set-save", discard: "set-discard" },
+        get: function () { return api("GET", "/admin/api/settings/rate-limit"); },
+        valid: function (d) { return !!d.fields; },
+        draftFrom: dashSetDraftFrom, drawForm: dashSettingsDrawForm, draw: dashSettingsDraw, sync: dashSettingsSyncForm, input: dashSettingsInput,
+        save: dashSettingsSave, alerts: dashSettingsAlerts, conflictText: dashSettingsConflictText,
+        clearAsks: function (st) { st.askOwn = false; },
+    },
+    general: {
+        name: "general", st: dashGen, failedTitle: "Could not load the general settings", loadingText: "Loading the general settings...",
+        ids: { info: "general-info", body: "general-body", form: "general-form", fields: "general-fields", err: "gen-err", save: "gen-save", discard: "gen-discard" },
+        get: function () { return api("GET", "/admin/api/settings/general"); },
+        valid: function (d) { return !!(d.fields && d.fields.timeZone); },
+        formKey: function (d) { return JSON.stringify([d.version, d.fields, d.rootPath, (d.timeZones || []).length]); },
+        draftFrom: dashGenDraftFrom, drawForm: dashGenDrawForm, draw: dashGenDraw, sync: dashGenSyncForm, input: dashGenInput,
+        save: dashGenSave, alerts: dashGenAlerts, conflictText: dashGenConflictText, clearAsks: dashGenClearAsks, asksBound: true,
+    },
+    redis: {
+        name: "redis", st: dashRedis, failedTitle: "Could not load the Redis connection", loadingText: "Loading the Redis connection...",
+        ids: { info: "redis-info", body: "redis-body", form: "redis-form", fields: "redis-fields", err: "redis-err", save: "redis-save", discard: "redis-discard" },
+        get: function () { return api("GET", "/admin/api/settings/redis"); },
+        valid: function (d) { return !!d.url; },
+        formKey: function (d) { return JSON.stringify([d.version, d.url]); },
+        draftFrom: dashRedisDraftFrom, drawForm: dashRedisDrawForm, draw: dashRedisDraw, sync: dashRedisSyncForm, input: dashRedisInput,
+        save: dashRedisSave, alerts: dashRedisAlerts, conflictText: dashRedisConflictText, clearAsks: dashRedisClearAsks, asksBound: true,
+    },
+};
+var DASH_SET_FORMS = { "settings-form": "rate", "general-form": "general", "redis-form": "redis" };
+var DASH_SET_CONFIRMS = {
+    "gen-purge-ok": function (ok) { dashGenConfirm("purge", ok); },
+    "gen-cookie-ok": function (ok) { dashGenConfirm("cookie", ok); },
+    "redis-restart-ok": dashRedisConfirm,
+};
 
 function dashSettingsBind() {
     if (dashSet.bound) return;
     dashSet.bound = true;
     var page = document.querySelector('[data-page="settings"]');
-    page.addEventListener("input", function (event) {
-        if (event.target.closest("#settings-form") && event.target.id !== "set-own") dashSettingsInput();
-    });
+    // Typing, a picked time zone (change) and a ticked box (both) update the draft
+    var edited = function (event) {
+        var t = event.target;
+        if (DASH_SET_CONFIRMS[t.id]) {
+            DASH_SET_CONFIRMS[t.id](t.checked);
+            return;
+        }
+        if (t.id === "set-own") return;
+        var form = t.closest("form");
+        var p = form && DASH_SET_PANELS[DASH_SET_FORMS[form.id]];
+        if (p) p.input();
+    };
+    page.addEventListener("input", edited);
+    page.addEventListener("change", edited);
     page.addEventListener("submit", function (event) {
-        if (event.target.id !== "settings-form") return;
+        var p = DASH_SET_PANELS[DASH_SET_FORMS[event.target.id]];
+        if (!p) return;
         event.preventDefault();
-        dashSettingsSave();
+        p.save();
     });
     page.addEventListener("click", function (event) {
         var t = event.target;
-        if (t.closest("[data-settings-retry]")) {
-            dashSet.failed = "";
-            dashSettingsDraw();
-            dashSettingsLoad();
-        } else if (t.closest("#set-discard") || t.closest("[data-set-discard]")) {
-            var to = dashSet.conflict || dashSet.snap;
-            dashSet.baseSnap = to;
-            dashSet.snap = to;
-            dashSet.draft = dashSetDraftFrom(to);
-            dashSet.dirty = false;
-            dashSet.conflict = null;
-            dashSet.askOwn = false;
-            dashSet.error = "";
-            dashSet.errorField = "";
-            dashSettingsDrawForm();
-            dashSettingsDraw();
-        } else if (t.closest("[data-set-keep]")) {
-            // An explicit choice: the draft now changes the version saved by the other admin
-            dashSet.baseSnap = dashSet.conflict;
-            dashSet.conflict = null;
-            dashSettingsInput();
-            dashSettingsDraw();
+        var retry = t.closest("[data-settings-retry]");
+        var discard = t.closest("[data-set-discard]");
+        var keep = t.closest("[data-set-keep]");
+        var p;
+        if (retry && (p = DASH_SET_PANELS[retry.getAttribute("data-settings-retry")])) {
+            p.st.failed = "";
+            p.draw();
+            dashPanelLoad(p);
+        } else if (discard && (p = DASH_SET_PANELS[discard.getAttribute("data-set-discard")])) {
+            dashPanelDiscard(p);
+        } else if (keep && (p = DASH_SET_PANELS[keep.getAttribute("data-set-keep")])) {
+            dashPanelKeep(p);
         }
     });
-    // A changed draft is an unsaved change
-    uiUnsavedRegister(function () {
-        return dashSet.dirty ? 1 : 0;
-    }, function () {
-        if (!dashSet.baseSnap) return;
-        dashSet.draft = dashSetDraftFrom(dashSet.baseSnap);
-        dashSet.dirty = false;
-        dashSet.conflict = null;
-        dashSettingsDrawForm();
+    // A changed draft is an unsaved change, in each panel
+    Object.keys(DASH_SET_PANELS).forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        uiUnsavedRegister(function () {
+            return p.st.dirty ? 1 : 0;
+        }, function () {
+            if (!p.st.baseSnap) return;
+            p.st.draft = p.draftFrom(p.st.baseSnap);
+            p.st.dirty = false;
+            p.st.conflict = null;
+            if (p.asksBound) p.clearAsks(p.st);
+            p.drawForm();
+        });
     });
 }
 
 DASH_PAGE_IMPL.settings = function () {
     dashSettingsBind();
+    dashGenDraw();
     dashSettingsDraw();
-    dashSettingsLoad().then(function () { uiRefreshLoaded("settings"); });
+    dashRedisDraw();
+    dashSettingsLoadAll().then(function () { uiRefreshLoaded("settings"); });
 };
 
-registerPageRefresh("settings", 30000, function (isCurrent) { return dashSettingsLoad(isCurrent); });
+registerPageRefresh("settings", 30000, function (isCurrent) { return dashSettingsLoadAll(isCurrent); });
 
 var DASH_SEARCH_ICON ='<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
 

@@ -24,6 +24,25 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r services/requirements.txt -r services/requirements-dev.txt
 
+      # A throwaway Redis for the Redis settings tests, with a password made for this run.
+      - name: Start Redis for the tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          password="$(openssl rand -hex 32)"
+          echo "::add-mask::$password"
+          REDIS_PASSWORD="$password" docker run -d --name test-redis -p 127.0.0.1:6379:6379 -e REDIS_PASSWORD \
+            redis:7-alpine sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD"'
+          for _ in $(seq 1 30); do
+            if REDISCLI_AUTH="$password" docker exec -e REDISCLI_AUTH test-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+              echo "TEST_REDIS_URL=redis://:${password}@127.0.0.1:6379/0" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Redis did not answer PING within 30 seconds." >&2
+          exit 1
+
       # The tests generate every secret they need; no repository secrets are used.
       - name: Run Python tests
         run: python -m pytest services/tests -q

@@ -138,3 +138,49 @@ test("a token address that is not a token id is not sent to the API", async () =
         assert.equal(ctx.dashUse.notFound, true, bad);
     }
 });
+
+test("the report names its hours and days in the zone it was counted in, not the tab's zone", () => {
+    const ctx = load(); // the tab shows UTC
+    // Days that start at midnight in Jerusalem (UTC+2 in November)
+    const series = Array.from({ length: 7 }, (_, i) => ({
+        start: new Date(Date.UTC(2026, 10, 6 + i, 22)).toISOString(),
+        end: new Date(Date.UTC(2026, 10, 7 + i, 22)).toISOString(),
+        allowed: 1, denied: 0, coverage: "full",
+    }));
+    const d = { range: "7d", retentionDays: 30, partial: false, timeZone: "Asia/Jerusalem", series };
+    const html = ctx.dashUseChartHtml(d);
+    // In UTC the first bucket would be named 06/11; in the report's zone it is 07/11
+    assert.match(html, /aria-label="07\/11\/2026: /);
+    assert.doesNotMatch(html, /06\/11/);
+    assert.match(html, /grid-column:7">13\/11</);
+    assert.match(ctx.dashUseNotices(d), /This report uses another time zone[^]*Asia\/Jerusalem/);
+
+    // Hours too
+    const hours = [{ start: "2026-11-13T10:00:00Z", end: "2026-11-13T11:00:00Z", allowed: 1, denied: 0, coverage: "full" }];
+    const hourly = ctx.dashUseChartHtml({ range: "24h", retentionDays: 30, partial: false, timeZone: "Asia/Jerusalem", series: hours });
+    assert.match(hourly, /13\/11\/2026, 12:00/);
+    assert.match(hourly, />12:00</);
+});
+
+test("a report in the tab's own zone, or one without a zone, shows no zone note", () => {
+    const ctx = load();
+    assert.equal(ctx.dashUseNotices({ ...WEEK, partial: false, timeZone: "UTC" }), "");
+    assert.equal(ctx.dashUseNotices({ ...WEEK, partial: false }), "");
+    assert.equal(ctx.dashUseZone({ timeZone: "Not/AZone" }), "UTC");
+});
+
+test("a report zone this browser cannot format is named, not hidden", () => {
+    const ctx = load();
+    const notes = ctx.dashUseNotices({ ...WEEK, partial: false, timeZone: "Not/AZone" });
+    assert.match(notes, /This browser cannot show this report's time zone[^]*Not\/AZone[^]*UTC/);
+    assert.doesNotMatch(notes, /This report uses another time zone/);
+});
+
+test("data that an earlier, shorter retention deleted is called that", () => {
+    const ctx = load();
+    const purged = { ...WEEK, dataFromReason: "purge", timeZone: "UTC" };
+    assert.match(ctx.dashUseNotices(purged), /Older calls were deleted under an earlier, shorter retention, so these figures start at/);
+    assert.match(ctx.dashUseChartHtml(purged), /07\/11\/2026: No data: these access logs were deleted under an earlier, shorter retention/);
+    const kept = { ...WEEK, dataFromReason: "retention", timeZone: "UTC" };
+    assert.match(ctx.dashUseNotices(kept), /Access logs are kept for 3 days/);
+});

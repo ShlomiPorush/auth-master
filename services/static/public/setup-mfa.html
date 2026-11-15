@@ -22,6 +22,15 @@
         <div id="setup-mfa-box" class="ui-form">
           <div class="ui-loading" id="setup-mfa-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p>Preparing your authenticator code...</p></div>
           <div class="ui-form hidden" id="setup-mfa-ready">
+            <form id="issuer-form" class="ui-form" novalidate>
+              <div class="ui-field">
+                <label class="ui-label" for="issuer">Name in authenticator apps</label>
+                <input class="ui-input" id="issuer" name="issuer" maxlength="64" autocomplete="off" spellcheck="false" dir="auto" aria-describedby="issuer-hint" />
+                <p class="ui-locked-note hidden" id="issuer-locked"></p>
+                <span class="ui-hint" id="issuer-hint">Your authenticator app shows this name with the code. A new name updates the QR code below.</span>
+              </div>
+              <p class="ui-error hidden" id="issuer-err" role="alert"></p>
+            </form>
             <div class="ui-qr" id="qr" role="img" aria-label="QR code for your authenticator app"></div>
             <div class="ui-field">
               <span class="ui-label">Manual entry secret:</span>

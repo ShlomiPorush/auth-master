@@ -18,10 +18,10 @@ from app.datetime_utils import is_expired
 from app.db import create_database, open_settings_database
 from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage
 from app.schema import ensure_database_schema
-from app import login_limit, rate_limit_settings
-from app.logger import purge_old_logs
-from app import usage_rollup
+from app import general_settings, login_limit, rate_limit_settings, redis_settings, usage_rollup
+from app.logger import init_purged_before, purge_old_logs
 from app.security_headers import AntiFramingMiddleware
+from app.zones import copy_allowed_areas_once
 from app import request_log
 
 request_log.install()
@@ -54,7 +54,7 @@ ROOT_PATH = f"/{_root}" if _root else ""
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 
 
-async def cleanup_expired_tokens(db) -> None:
+async def cleanup_expired_tokens(db, settings_db=None) -> None:
     try:
         if db.is_sqlite:
             rows = await db.fetch("SELECT id, expires_at FROM tokens WHERE expires_at IS NOT NULL")
@@ -72,27 +72,37 @@ async def cleanup_expired_tokens(db) -> None:
         print(f"Error in cleanup_expired_tokens: {e}")
 
     try:
-        s = get_settings()
-        await purge_old_logs(db, s.activity_log_retention_days, s.access_log_retention_days)
+        await purge_old_logs(db, settings_db or db)
     except Exception as e:
-        print(f"Error in purge_old_logs: {e}")
+        # Only the class name: driver messages can carry connection details.
+        print(f"Error in purge_old_logs ({type(e).__name__})")
 
     try:
         # After the purge, which drops the summaries of the slots it deletes from.
-        await usage_rollup.roll_up(db, get_settings().access_log_retention_days)
+        await usage_rollup.roll_up(db, general_settings.current().access_log_retention_days)
     except Exception as e:
-        print(f"Error in usage_rollup.roll_up: {e}")
+        print(f"Error in usage_rollup.roll_up ({type(e).__name__})")
 
 
-async def expired_tokens_cleanup_loop(db) -> None:
+async def expired_tokens_cleanup_loop(db, settings_db) -> None:
     while True:
         try:
             await asyncio.sleep(60)
-            await cleanup_expired_tokens(db)
+            await cleanup_expired_tokens(db, settings_db)
         except asyncio.CancelledError:
             break
         except Exception as e:
             print(f"Error in expired_tokens_cleanup_loop: {e}")
+
+
+async def settings_reload_loop(settings_db, db) -> None:
+    """Settings saved by another process (or by a request that was cut off) arrive here.
+    The Redis connection is not reloaded: it changes when the process restarts."""
+    while True:
+        await asyncio.sleep(rate_limit_settings.RELOAD_INTERVAL_SEC)
+        await rate_limit_settings.reload_once(settings_db)
+        await general_settings.reload_once(settings_db)
+        await redis_settings.retry_sync(settings_db, db)
 
 
 async def _stop(task: asyncio.Task) -> None:
@@ -114,19 +124,30 @@ async def lifespan(app: FastAPI):
             app.state.settings_db = settings_db
             # Before serving: invalid stored settings stop the start (the limits are unknown).
             await rate_limit_settings.load(settings_db)
-            app.state.redis = redis.from_url(s.redis_url, decode_responses=True)
-            app.state.login_redis = redis.from_url(s.redis_url, decode_responses=True, **login_limit.COUNTER_CLIENT_OPTIONS)
+            # Copies the values the environment sets, before the first purge.
+            await general_settings.load(settings_db, app.state.db)
+            # One-time steps, each recorded in app_state.
+            await copy_allowed_areas_once(app.state.db)
+            await init_purged_before(settings_db, general_settings.current().access_log_retention_days)
+            # The Redis client is built once, from the URL in effect now.
+            redis_settings.reset_state()
+            connection = redis_settings.resolve(await redis_settings.read_current(settings_db))
+            app.state.redis = redis.from_url(connection.url, decode_responses=True)
+            app.state.login_redis = redis.from_url(
+                connection.url, decode_responses=True, **login_limit.COUNTER_CLIENT_OPTIONS
+            )
+            redis_settings.state.connection = connection
+            await redis_settings.sync_from_environment(settings_db, app.state.db)
 
             # Start cleanup background task
             cleanup_task = asyncio.create_task(
-                expired_tokens_cleanup_loop(app.state.db)
+                expired_tokens_cleanup_loop(app.state.db, settings_db)
             )
             app.state.cleanup_task = cleanup_task
             # Trigger one cleanup immediately in the background. Its first summary of the
             # access log can take minutes, so it is stopped before the database closes.
-            first_cleanup_task = asyncio.create_task(cleanup_expired_tokens(app.state.db))
-            # Settings saved by another process (or by a request that was cut off) arrive here.
-            settings_reload_task = asyncio.create_task(rate_limit_settings.reload_loop(settings_db))
+            first_cleanup_task = asyncio.create_task(cleanup_expired_tokens(app.state.db, settings_db))
+            settings_reload_task = asyncio.create_task(settings_reload_loop(settings_db, app.state.db))
 
             yield
 
