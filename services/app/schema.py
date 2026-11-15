@@ -131,6 +131,33 @@ async def _ensure_pg(db: "Database") -> None:
     """)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at DESC)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
+    # The Usage page's summary of access_logs (app.usage_rollup). rolled marks the rows it
+    # counts; the partial index finds the rows it does not count yet.
+    await db.execute("ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS rolled BOOLEAN NOT NULL DEFAULT false")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_unrolled ON access_logs (created_at) WHERE NOT rolled")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_log_rollup (
+            slot TIMESTAMPTZ NOT NULL,
+            token_id TEXT NULL,
+            area TEXT NOT NULL,
+            level TEXT NOT NULL,
+            result BOOLEAN NOT NULL,
+            ip_address TEXT NULL,
+            calls INTEGER NOT NULL,
+            last_at TIMESTAMPTZ NOT NULL,
+            token_name TEXT NULL,
+            name_at TIMESTAMPTZ NULL,
+            name_id UUID NULL
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_log_rollup_slot ON access_log_rollup (slot)")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_log_rollup_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            valid_from TIMESTAMPTZ NULL
+        )
+    """)
+    await db.execute("INSERT INTO access_log_rollup_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
 
     # Rate limit settings from the admin Settings page: one row per saved version, never
     # updated or deleted, so it is also the history of who changed what (app.rate_limit_settings).
@@ -231,6 +258,32 @@ async def _ensure_sqlite(db: "Database") -> None:
     """)
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at)")
     await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
+    # See _ensure_pg.
+    await _sqlite_add_column_if_not_exists(db, "access_logs", "rolled", "INTEGER", "0")
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_unrolled ON access_logs (created_at) WHERE rolled = 0")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_log_rollup (
+            slot TEXT NOT NULL,
+            token_id TEXT NULL,
+            area TEXT NOT NULL,
+            level TEXT NOT NULL,
+            result INTEGER NOT NULL,
+            ip_address TEXT NULL,
+            calls INTEGER NOT NULL,
+            last_at TEXT NOT NULL,
+            token_name TEXT NULL,
+            name_at TEXT NULL,
+            name_id TEXT NULL
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_log_rollup_slot ON access_log_rollup (slot)")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS access_log_rollup_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            valid_from TEXT NULL
+        )
+    """)
+    await db.execute("INSERT INTO access_log_rollup_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
 
     # See _ensure_pg.
     await db.execute("""

@@ -18,6 +18,10 @@ Definitions (the same everywhere in this module):
   last 7 or 30 local days including today. SQL counts calls in 15-minute UTC slots, and
   every UTC offset in use is a multiple of 15 minutes, so each slot falls in exactly one
   local hour or day, also on daylight saving days.
+- The rows are read through _source: the summary rows of access_log_rollup for the whole
+  slots of the period (app.usage_rollup), the rows of those slots that no summary counts
+  yet, and the rows of the partial slots at both ends. Each summary row stands for `w`
+  calls, so every count is a sum of w.
 """
 from __future__ import annotations
 
@@ -34,6 +38,7 @@ from app.admin_deps import FullSession
 from app.config import get_settings
 from app.datetime_utils import fmt_datetime, get_tz_name, is_expired
 from app.db import report_database
+from app.usage_rollup import bind_time, ceil_slot, floor_slot, summary_valid_from, unrolled
 
 router = APIRouter(prefix="/admin/api/usage", tags=["admin-usage"])
 
@@ -47,17 +52,15 @@ MAX_TEXT = 120
 OVERVIEW_TOP_AREAS = 3
 DETAIL_TOP_AREAS = 50
 DETAIL_TOP_ADDRESSES = 10
-_SQLITE_TS = "%Y-%m-%d %H:%M:%S"
 _LEVELS = ("read", "readwrite", "write", "delete", "all")
 
 # result is BOOLEAN on PostgreSQL and 0/1 on SQLite; both read as a condition.
+# w is the number of calls a row of _source stands for.
 _CALL = "level <> 'grants'"
-_ALLOWED = f"CASE WHEN {_CALL} AND result THEN 1 ELSE 0 END"
-_CALLS = f"CASE WHEN {_CALL} THEN 1 ELSE 0 END"
-_GRANTS = "CASE WHEN level = 'grants' THEN 1 ELSE 0 END"
-# Every query reads the same rows: from the period's start to the moment it was computed.
-# Rows written while the queries run are left to the next refresh.
-_WINDOW = "created_at >= $1::timestamptz AND created_at <= $2::timestamptz"
+_CALLS = f"SUM(CASE WHEN {_CALL} THEN w ELSE 0 END)"
+_ALLOWED = f"SUM(CASE WHEN {_CALL} AND result THEN w ELSE 0 END)"
+_GRANTS = "SUM(CASE WHEN level = 'grants' THEN w ELSE 0 END)"
+_ALLOWED_OF_CALLS = "SUM(CASE WHEN result THEN w ELSE 0 END)"
 
 
 # ---------------------------------------------------------------------------
@@ -96,31 +99,76 @@ def _buckets(range_: str, now: datetime, tz: ZoneInfo) -> list[tuple[datetime, d
     return list(zip(edges[:-1], edges[1:]))
 
 
-def _bind_time(db, value: datetime) -> Any:
-    return value.strftime(_SQLITE_TS) if db.is_sqlite else value
-
-
 def _slot_expr(db) -> str:
-    """Start of the 15-minute UTC slot of created_at, as Unix seconds."""
+    """Start of the 15-minute UTC slot of t, as Unix seconds."""
     if db.is_sqlite:
-        # created_at is stored as "YYYY-MM-DD HH:MM:SS" in UTC.
-        return f"(CAST(strftime('%s', created_at) AS INTEGER) / {SLOT_SECONDS}) * {SLOT_SECONDS}"
-    return f"FLOOR(EXTRACT(EPOCH FROM created_at) / {SLOT_SECONDS}) * {SLOT_SECONDS}"
+        # Times are stored as "YYYY-MM-DD HH:MM:SS" in UTC.
+        return f"(CAST(strftime('%s', t) AS INTEGER) / {SLOT_SECONDS}) * {SLOT_SECONDS}"
+    return f"FLOOR(EXTRACT(EPOCH FROM t) / {SLOT_SECONDS}) * {SLOT_SECONDS}"
 
 
-def _period_source(db, p: "_Period") -> str:
-    """access_logs for a query over every token in the period.
+class _Params:
+    """Query arguments; each value is bound once and named by its key."""
 
-    Without table statistics SQLite answers GROUP BY token_id by walking the token_id index,
-    which visits every row of the table whatever the period. The choice is made explicit:
-    seek by time when the period holds a small part of the kept rows, read the table in
-    order when it holds most of them (faster than one index lookup per row).
+    def __init__(self, db) -> None:
+        self.db = db
+        self.args: list[Any] = []
+        self._index: dict[Any, int] = {}
+
+    def __call__(self, key: Any, value: Any) -> str:
+        if key not in self._index:
+            self.args.append(value)
+            self._index[key] = len(self.args)
+        return f"${self._index[key]}"
+
+    def time(self, key: str, value: datetime) -> str:
+        return self(key, bind_time(self.db, value)) + "::timestamptz"
+
+
+_ANY = object()
+_RAW = (
+    "token_id, area, level, result, ip_address, 1 AS w, created_at AS t, created_at AS last_at, "
+    "token_name, created_at AS name_at, id AS name_id"
+)
+_SUMMARY = "token_id, area, level, result, ip_address, calls AS w, slot AS t, last_at, token_name, name_at, name_id"
+
+
+def _source(db, p: "_Period", params: _Params, token: Any = _ANY) -> str:
+    """Every access log row of the period, as rows of (token_id, area, level, result,
+    ip_address, w, t, last_at, token_name, name_at, name_id).
+
+    Raw rows have w = 1 and t, last_at, name_at = created_at, name_id = id. A summary row
+    stands for w rows of its group: t is its slot, last_at the newest created_at, and
+    (name_at, name_id) the created_at and id of the row its token_name came from.
+
+    The whole slots [r1, r2) of the period come from the summary plus the rows no summary
+    counts yet; the partial slots [start, r1) and [r2, now] come from access_logs, whether
+    summarised or not. r1 is never before the summary's valid_from (app.usage_rollup). A
+    summary row's slot is the slot of every row it counts, so each row of [start, now] is
+    read exactly once. token: _ANY, None (the unknown group) or a token id.
     """
-    if not db.is_sqlite:
-        return "access_logs"
-    if (p.now - p.start) * 2 >= (p.now - p.cutoff):
-        return "access_logs NOT INDEXED"
-    return "access_logs INDEXED BY idx_access_logs_created_at"
+    if token is _ANY:
+        tf = ""
+    elif token is None:
+        tf = " AND token_id IS NULL"
+    else:
+        tf = f" AND token_id = {params('token', token)}"
+    by_time = "access_logs INDEXED BY idx_access_logs_created_at" if db.is_sqlite else "access_logs"
+    start, now = params.time("start", p.start), params.time("now", p.now)
+    r1, r2 = ceil_slot(p.start), floor_slot(p.now)
+    if p.valid_from is not None:
+        r1 = max(r1, p.valid_from)
+    if r2 <= r1:
+        # No whole slot in the period: read it like before the summary existed.
+        return f"SELECT {_RAW} FROM {by_time} WHERE created_at >= {start} AND created_at <= {now}{tf}"
+    first, last = params.time("r1", r1), params.time("r2", r2)
+    by_flag = "access_logs INDEXED BY idx_access_logs_unrolled" if db.is_sqlite else "access_logs"
+    return (
+        f"SELECT {_SUMMARY} FROM access_log_rollup WHERE slot >= {first} AND slot < {last}{tf}"
+        f" UNION ALL SELECT {_RAW} FROM {by_flag} WHERE {unrolled(db)} AND created_at >= {first} AND created_at < {last}{tf}"
+        f" UNION ALL SELECT {_RAW} FROM {by_time} WHERE created_at >= {start} AND created_at < {first}{tf}"
+        f" UNION ALL SELECT {_RAW} FROM {by_time} WHERE created_at >= {last} AND created_at <= {now}{tf}"
+    )
 
 
 class _Period:
@@ -134,6 +182,8 @@ class _Period:
         self.first = self.buckets[0][0]
         self.start = max(self.first, self.cutoff)
         self.now = now
+        # Set from the database in the report's snapshot (app.usage_rollup.summary_valid_from).
+        self.valid_from: datetime | None = None
 
     def coverage(self, start: datetime, end: datetime) -> str:
         if end <= self.cutoff:
@@ -245,46 +295,49 @@ def _counts(row: Any | None) -> dict[str, int]:
     }
 
 
-def _token_filter(token_id: str | None, n: int) -> tuple[str, list[Any]]:
-    """SQL condition on access_logs for one token (None = the unknown group)."""
-    if token_id is None:
-        return "token_id IS NULL", []
-    return f"token_id = ${n}", [token_id]
-
-
 _TOTALS_COLS = f"""
-    SUM({_CALLS}) AS calls,
-    SUM({_ALLOWED}) AS allowed,
-    SUM({_GRANTS}) AS grants_checks,
+    {_CALLS} AS calls,
+    {_ALLOWED} AS allowed,
+    {_GRANTS} AS grants_checks,
     COUNT(DISTINCT CASE WHEN {_CALL} THEN ip_address END) AS ip_count,
-    MAX(CASE WHEN {_CALL} THEN created_at END) AS last_call_at
+    MAX(CASE WHEN {_CALL} THEN last_at END) AS last_call_at
 """
 
 
-async def _slots(db, source: str, bounds: tuple[Any, Any], where: str, args: list[Any]) -> list[Any]:
-    return await db.fetch(
-        f"SELECT {_slot_expr(db)} AS slot, COUNT(*) AS calls, SUM(CASE WHEN result THEN 1 ELSE 0 END) AS allowed "
-        f"FROM {source} WHERE {_WINDOW} AND {_CALL}{where} GROUP BY 1",
-        *bounds, *args,
+async def _query(db, p: "_Period", sql: str, token: Any = _ANY) -> list[Any]:
+    """sql with {src} replaced by the period's rows (_source) for these tokens."""
+    params = _Params(db)
+    src = _source(db, p, params, token)
+    return await db.fetch(sql.format(src=f"({src}) AS u"), *params.args)
+
+
+async def _slots(db, p: "_Period", token: Any = _ANY) -> list[Any]:
+    return await _query(
+        db, p,
+        f"SELECT {_slot_expr(db)} AS slot, SUM(w) AS calls, {_ALLOWED_OF_CALLS} AS allowed "
+        f"FROM {{src}} WHERE {_CALL} GROUP BY 1",
+        token,
     )
 
 
-async def _newest_names(db, bounds: tuple[Any, Any], token_ids: list[str]) -> dict[str, str]:
+async def _newest_names(db, p: "_Period", token_ids: list[str]) -> dict[str, str]:
     """The newest token_name logged in the period for each of these (deleted) token ids."""
     names: dict[str, str] = {}
     for i in range(0, len(token_ids), 500):
         chunk = token_ids[i:i + 500]
-        marks = ", ".join(f"${n + 3}" for n in range(len(chunk)))
+        params = _Params(db)
+        src = _source(db, p, params)
+        marks = ", ".join(params(("id", n), tid) for n, tid in enumerate(chunk))
         rows = await db.fetch(
             f"""
             SELECT token_id, token_name FROM (
                 SELECT token_id, token_name,
-                       ROW_NUMBER() OVER (PARTITION BY token_id ORDER BY created_at DESC, id DESC) AS rn
-                FROM access_logs
-                WHERE token_id IN ({marks}) AND {_WINDOW} AND token_name IS NOT NULL
+                       ROW_NUMBER() OVER (PARTITION BY token_id ORDER BY name_at DESC, name_id DESC) AS rn
+                FROM ({src}) AS u
+                WHERE token_id IN ({marks}) AND token_name IS NOT NULL
             ) x WHERE rn = 1
             """,
-            *bounds, *chunk,
+            *params.args,
         )
         names.update({r["token_id"]: r["token_name"] for r in rows})
     return names
@@ -303,20 +356,14 @@ async def usage_overview(request: Request, _sess: FullSession, range_: Range = Q
 
 
 async def _overview(db, p: "_Period") -> dict[str, Any]:
-    bounds = (_bind_time(db, p.start), _bind_time(db, p.now))
-    source = _period_source(db, p)
-
-    per_token = await db.fetch(
-        f"SELECT token_id, {_TOTALS_COLS} FROM {source} WHERE {_WINDOW} GROUP BY token_id",
-        *bounds,
-    )
-    area_rows = await db.fetch(
-        f"SELECT token_id, area, COUNT(*) AS calls FROM {source} "
-        f"WHERE {_WINDOW} AND {_CALL} GROUP BY token_id, area "
+    p.valid_from = await summary_valid_from(db)
+    per_token = await _query(db, p, f"SELECT token_id, {_TOTALS_COLS} FROM {{src}} GROUP BY token_id")
+    area_rows = await _query(
+        db, p,
+        f"SELECT token_id, area, SUM(w) AS calls FROM {{src}} WHERE {_CALL} GROUP BY token_id, area "
         f"ORDER BY calls DESC LIMIT {MAX_AREA_GROUPS + 1}",
-        *bounds,
     )
-    slots = await _slots(db, source, bounds, "", [])
+    slots = await _slots(db, p)
     tokens = await db.fetch("SELECT id, name, is_active, expires_at FROM tokens")
 
     areas_incomplete = len(area_rows) > MAX_AREA_GROUPS
@@ -329,7 +376,7 @@ async def _overview(db, p: "_Period") -> dict[str, Any]:
 
     stats = {r["token_id"]: r for r in per_token}
     token_ids = {str(t["id"]) for t in tokens}
-    names = await _newest_names(db, bounds, sorted(t for t in stats if t is not None and t not in token_ids))
+    names = await _newest_names(db, p, sorted(t for t in stats if t is not None and t not in token_ids))
 
     def row(token_id: str | None, name: str, status: str) -> dict[str, Any]:
         r = stats.get(token_id)
@@ -399,14 +446,8 @@ async def usage_token(request: Request, token_id: str, _sess: FullSession, range
 
 
 async def _token_usage(db, p: "_Period", tid: str | None) -> dict[str, Any]:
-    bounds = (_bind_time(db, p.start), _bind_time(db, p.now))
-
-    cond, cond_args = _token_filter(tid, 3)
-    where = f" AND {cond}"
-    totals = await db.fetchrow(
-        f"SELECT {_TOTALS_COLS} FROM access_logs WHERE {_WINDOW}{where}",
-        *bounds, *cond_args,
-    )
+    p.valid_from = await summary_valid_from(db)
+    totals = (await _query(db, p, f"SELECT {_TOTALS_COLS} FROM {{src}}", tid))[0]
     token = None
     if tid is not None:
         token = await db.fetchrow("SELECT id, name, is_active, expires_at FROM tokens WHERE id = $1::uuid", tid)
@@ -418,18 +459,19 @@ async def _token_usage(db, p: "_Period", tid: str | None) -> dict[str, Any]:
     elif token is not None:
         name, status = token["name"], _status(token)
     else:
-        newest = await db.fetchrow(
-            f"SELECT token_name FROM access_logs WHERE {_WINDOW} AND token_id = $3 "
-            "AND token_name IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1",
-            *bounds, tid,
+        newest = await _query(
+            db, p,
+            "SELECT token_name FROM {src} WHERE token_name IS NOT NULL ORDER BY name_at DESC, name_id DESC LIMIT 1",
+            tid,
         )
-        name, status = (newest["token_name"] if newest else None) or "Deleted token", "deleted"
+        name, status = (newest[0]["token_name"] if newest else None) or "Deleted token", "deleted"
 
-    area_rows = await db.fetch(
-        f"SELECT area, level, COUNT(*) AS calls, SUM(CASE WHEN result THEN 1 ELSE 0 END) AS allowed "
-        f"FROM access_logs WHERE {_WINDOW} AND {_CALL}{where} GROUP BY area, level "
+    area_rows = await _query(
+        db, p,
+        f"SELECT area, level, SUM(w) AS calls, {_ALLOWED_OF_CALLS} AS allowed "
+        f"FROM {{src}} WHERE {_CALL} GROUP BY area, level "
         f"ORDER BY calls DESC LIMIT {MAX_AREA_GROUPS + 1}",
-        *bounds, *cond_args,
+        tid,
     )
     areas_incomplete = len(area_rows) > MAX_AREA_GROUPS
     groups: dict[str, _AreaGroup] = {}
@@ -440,11 +482,12 @@ async def _token_usage(db, p: "_Period", tid: str | None) -> dict[str, Any]:
             )
     ranked = _ranked(groups)
 
-    addr_rows = await db.fetch(
-        f"SELECT ip_address, COUNT(*) AS calls, SUM(CASE WHEN result THEN 1 ELSE 0 END) AS allowed, "
-        f"MAX(created_at) AS last_call_at FROM access_logs WHERE {_WINDOW} AND {_CALL}{where} "
+    addr_rows = await _query(
+        db, p,
+        f"SELECT ip_address, SUM(w) AS calls, {_ALLOWED_OF_CALLS} AS allowed, "
+        f"MAX(last_at) AS last_call_at FROM {{src}} WHERE {_CALL} "
         f"GROUP BY ip_address ORDER BY calls DESC, ip_address LIMIT {DETAIL_TOP_ADDRESSES}",
-        *bounds, *cond_args,
+        tid,
     )
     addresses = []
     for r in addr_rows:
@@ -458,7 +501,7 @@ async def _token_usage(db, p: "_Period", tid: str | None) -> dict[str, Any]:
             "lastCallAt": fmt_datetime(r["last_call_at"]),
         })
 
-    slots = await _slots(db, "access_logs", bounds, where, cond_args)
+    slots = await _slots(db, p, tid)
     return {
         **p.head(),
         "token": {"id": tid, "name": name, "status": status},

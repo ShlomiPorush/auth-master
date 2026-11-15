@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Usage page reads a summary of the access log instead of every row, so it
+  answers in a fraction of a second also with millions of log rows (before, the
+  30-day view could take longer than the page waits). The figures are the same and
+  stay up to date: the service summarises each 15-minute period once it has ended,
+  and reads the calls that are not summarised yet from the access log itself. The
+  first start of this version summarises the rows already in the log in the
+  background, newest first; until that ends, which takes a few minutes for a few
+  million rows, the 30-day view can be slower than before.
+
 ### Removed
 
 - The `BOOTSTRAP_TOKEN` setting and the `X-Bootstrap-Token` header. The first

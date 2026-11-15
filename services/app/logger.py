@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from fastapi import Request
 from app.db import Database
+from app.usage_rollup import purge_access_logs
 
 # Longest area, in characters, that /validate accepts and the access log stores.
 # Zone names are at most 63 characters; the rest leaves room for surrounding spaces.
@@ -78,13 +79,12 @@ async def purge_old_logs(db: Database, activity_days: int, access_days: int) -> 
     now_utc = datetime.now(timezone.utc)
     activity_cutoff = now_utc - timedelta(days=activity_days)
     access_cutoff = now_utc - timedelta(days=access_days)
-    
+
     if db.is_sqlite:
         # SQLite uses "YYYY-MM-DD HH:MM:SS" (UTC) format
         act_str = activity_cutoff.strftime("%Y-%m-%d %H:%M:%S")
-        acc_str = access_cutoff.strftime("%Y-%m-%d %H:%M:%S")
         await db.execute("DELETE FROM activity_logs WHERE created_at < $1", act_str)
-        await db.execute("DELETE FROM access_logs WHERE created_at < $1", acc_str)
     else:
         await db.execute("DELETE FROM activity_logs WHERE created_at < $1", activity_cutoff)
-        await db.execute("DELETE FROM access_logs WHERE created_at < $1", access_cutoff)
+    # Together with the Usage summary rows that count the deleted rows (app.usage_rollup).
+    await purge_access_logs(db, access_cutoff)
