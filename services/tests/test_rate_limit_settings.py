@@ -14,7 +14,8 @@
 
 Every secret is generated per run with ``secrets``; Redis is faked.  The app opens
 only this module's own database file.  PostgreSQL cases run when TEST_DATABASE_URL is
-set.  Requires pytest and httpx.
+set; that database is shared with other modules, so they remove the zones they add.
+Requires pytest and httpx.
 """
 from __future__ import annotations
 
@@ -220,6 +221,7 @@ def test_one_winner_per_version(backend, tmp_path):
 
     async def scenario():
         main, sdb, own = await _open(_url(backend, tmp_path))
+        zone = f"z{secrets.token_hex(4)}"
         try:
             assert await rls.read_current(sdb) == rls.EMPTY
             results = await asyncio.gather(*(rls.insert_version(sdb, 1, _value(rls, n), f"admin{n}", None) for n in (5, 6)))
@@ -228,11 +230,15 @@ def test_one_winner_per_version(backend, tmp_path):
             assert cur.version == 1 and cur.max_req == (5 if results[0] else 6)
             # A conflict leaves nothing open: other connections can write at once.
             assert not await rls.insert_version(sdb, 1, _value(rls, 9), "late", None)
-            await main.execute("INSERT INTO zones (name) VALUES ($1)", f"z{secrets.token_hex(4)}")
+            await main.execute("INSERT INTO zones (name) VALUES ($1)", zone)
             assert await rls.insert_version(sdb, 2, _value(rls, 9), "next", "10.0.0.9")
             cur = await rls.read_current(sdb)
             assert (cur.version, cur.max_req, cur.actor, cur.ip_address) == (2, 9, "next", "10.0.0.9")
         finally:
+            # The PostgreSQL case writes to the shared TEST_DATABASE_URL database. Any zone
+            # left there restricts token grants to the zone names and makes the tests that
+            # need an empty zones table skip in every later module.
+            await main.execute("DELETE FROM zones WHERE name = $1", zone)
             await _close(main, sdb, own)
 
     _run(scenario())
