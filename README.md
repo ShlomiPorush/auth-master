@@ -392,6 +392,9 @@ Version 2.1.x does not read the values saved on the General and Redis connection
    own compose file, set `REDIS_URL` and `COOKIE_SECURE` in `.env`.
 3. Set `ADMIN_API_KEY` in `.env`, because 2.1.x requires it.
 
+Version 2.1.x has no passkeys: admins sign in with the password and the authenticator code.
+The passkeys stay in the database and work again after an upgrade.
+
 ## Architecture
 
 ```

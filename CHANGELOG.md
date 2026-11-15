@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-15
+
 ### Added
 
 - Passkeys for the admin dashboard. An admin can sign in with a passkey
@@ -102,6 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an empty `COOKIE_SECURE`), and set `ADMIN_API_KEY`. Without the retention values, 2.1.x
   uses 30 days and deletes older log entries within a minute. README.md, "Roll back to
   2.1.x", has the steps.
+- Version 2.1.x has no passkeys. After a roll back, admins sign in with the password and
+  the authenticator code; the passkeys stay in the database and work again after an upgrade.
 
 ## [2.1.0] - 2026-11-15
 
@@ -622,7 +626,8 @@ Initial release. Self-hosted token authentication and authorization service with
 admin dashboard, TOTP-protected sessions, scoped API keys, authorization zones and a
 token validation endpoint.
 
-[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/ShlomiPorush/auth-master/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ShlomiPorush/auth-master/compare/v1.2.0...v2.0.0
