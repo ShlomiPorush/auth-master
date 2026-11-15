@@ -131,6 +131,51 @@ async def delete_pending_totp(r: redis.Redis, admin_id: str) -> None:
     await r.delete(_pending_totp_key(admin_id))
 
 
+# ── Passkey ceremonies (app.passkeys) ──────────────────────────
+# A ceremony's state travels with the client as a sealed token, not in Redis, so asking
+# for passkey options stores nothing.  Its key is derived for this purpose only.
+
+WEBAUTHN_USED_PREFIX = "auth:webauthn-used:"
+_CEREMONY_AAD = b"auth-master webauthn ceremony v1"
+
+
+@lru_cache(maxsize=4)
+def _ceremony_key(secret: str) -> bytes:
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"auth-master webauthn ceremony v1").derive(
+        secret.encode("utf-8")
+    )
+
+
+def seal_ceremony(payload: dict[str, Any]) -> str:
+    nonce = os.urandom(12)
+    ct = AESGCM(_ceremony_key(get_settings().session_secret)).encrypt(
+        nonce, json.dumps(payload).encode("utf-8"), _CEREMONY_AAD
+    )
+    return base64.urlsafe_b64encode(nonce + ct).decode("ascii")
+
+
+def open_ceremony(token: str) -> dict[str, Any] | None:
+    """The payload of a token from seal_ceremony, or None when it is not one."""
+    if not isinstance(token, str) or len(token) > 4096:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii"))
+        plain = AESGCM(_ceremony_key(get_settings().session_secret)).decrypt(raw[:12], raw[12:], _CEREMONY_AAD)
+        payload = json.loads(plain)
+    except (ValueError, InvalidTag, UnicodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def sid_tag(sid: str) -> str:
+    """Names a session inside a ceremony token without carrying the session ID itself."""
+    return _name("", b"ceremony_sid", sid)
+
+
+def webauthn_used_key(challenge: str) -> str:
+    return _name(WEBAUTHN_USED_PREFIX, b"webauthn_used", challenge)
+
+
 def cookie_params(max_age_sec: int) -> dict[str, Any]:
     # The effective setting when the cookie is issued; cookies issued earlier keep their flag.
     return {

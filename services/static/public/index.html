@@ -61,6 +61,10 @@
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.424.07-.764.383-.929.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.398.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             <span class="ui-nav-label">Settings</span><span class="ui-fly" aria-hidden="true">Settings</span>
           </a>
+          <a class="ui-nav-item" data-page-link="account" data-inventory="shell.nav.account" href="/admin/account">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span class="ui-nav-label">Account</span><span class="ui-fly" aria-hidden="true">Account</span>
+          </a>
         </nav>
 
         <div class="ui-side-foot">
@@ -253,6 +257,10 @@
                   <option value="api_key_patch">API Key Patch</option>
                   <option value="api_key_reveal">API Key Reveal</option>
                   <option value="api_key_delete">API Key Delete</option>
+                  <option value="passkey_added">Passkey Added</option>
+                  <option value="passkey_renamed">Passkey Renamed</option>
+                  <option value="passkey_deleted">Passkey Deleted</option>
+                  <option value="passkey_failed">Passkey Failed</option>
                   <option value="login">Login</option>
                   <option value="logout">Logout</option>
                 </select>
@@ -345,7 +353,7 @@
           <div class="ui-page-head">
             <div>
               <h1 class="ui-h1" id="h-settings">Settings</h1>
-              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, and the Redis connection.</p>
+              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, the Redis connection, and the address passkeys work at.</p>
             </div>
           </div>
           <div class="ui-panel" id="general-panel">
@@ -362,6 +370,38 @@
             <div class="ui-panel-head">Redis connection</div>
             <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
             <div class="ui-panel-body" id="redis-body"></div>
+          </div>
+          <div class="ui-panel" id="settings-pk-panel" data-inventory="settings.passkeys">
+            <div class="ui-panel-head">Passkeys</div>
+            <div class="ui-panel-body" id="settings-pk-body"></div>
+          </div>
+        </section>
+
+        <!-- ─── Account ─── -->
+        <section class="ui-page hidden" data-page="account" aria-labelledby="h-account">
+          <div class="ui-page-head">
+            <div>
+              <h1 class="ui-h1" id="h-account">Account</h1>
+              <p>How you sign in. A passkey signs you in with your fingerprint, face or screen lock in one step. Your password and authenticator code always work too.</p>
+            </div>
+            <div class="ui-page-actions">
+              <button type="button" class="ui-btn ui-btn-primary" id="pk-add" data-inventory="account.passkey.add" disabled>Add a passkey</button>
+            </div>
+          </div>
+          <div class="ui-panel" id="pk-panel">
+            <div class="ui-panel-head">Passkeys</div>
+            <div class="ui-settings-info" id="pk-info" aria-live="polite"></div>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="pk-count"></span></p>
+            <div class="ui-table ui-stack" id="pk-table" role="table" aria-label="Passkeys" data-inventory="account.passkeys.table" data-nosort>
+              <div class="ui-tr ui-tr-head" role="row">
+                <div class="ui-td" role="columnheader">Name</div>
+                <div class="ui-td" role="columnheader">Created</div>
+                <div class="ui-td" role="columnheader">Last used</div>
+                <div class="ui-td" role="columnheader">Status</div>
+                <div class="ui-td" role="columnheader"><span class="ui-sr">Actions</span></div>
+              </div>
+              <div class="ui-table-body" id="pk-rows" role="rowgroup"></div>
+            </div>
           </div>
         </section>
       </main>

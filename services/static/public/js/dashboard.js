@@ -1,6 +1,7 @@
 /*
  * The admin dashboard: the shell (navigation, Needs attention, preferences) and
- * its pages: Tokens, Zones, API Keys, Activity Log, Access Logs, Usage and Settings.
+ * its pages: Tokens, Zones, API Keys, Activity Log, Access Logs, Usage, Settings
+ * and Account (the admin's passkeys).
  *
  * Builds on js/ui.js (builders, router, refresh scheduler, date helpers) and
  * js/common.js (requests). Everything from the server is escaped with esc() or
@@ -16,6 +17,7 @@ var PAGES = {
     access: { path: "/admin/logs/access", title: "Access Logs" },
     usage: { path: "/admin/usage", title: "Usage" },
     settings: { path: "/admin/settings", title: "Settings" },
+    account: { path: "/admin/account", title: "Account" },
 };
 
 var TOKEN_FLAGS = ["read", "write", "delete"];
@@ -227,7 +229,7 @@ function dashShowPage(id, info) {
     });
     var more = document.getElementById("tab-more");
     if (more) {
-        if (id === "activity" || id === "access" || id === "usage" || id === "settings") more.setAttribute("aria-current", "page");
+        if (id === "activity" || id === "access" || id === "usage" || id === "settings" || id === "account") more.setAttribute("aria-current", "page");
         else more.removeAttribute("aria-current");
     }
     var title = document.getElementById("mtop-page");
@@ -326,7 +328,7 @@ function dashMoreOpen() {
     };
     d = uiDialog({
         title: "More", size: "sm", backdropClass: "ui-more-layer", close: close, backdropClose: close,
-        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("usage") + link("settings") +
+        body: '<nav class="ui-more-list" aria-label="All pages">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("usage") + link("settings") + link("account") +
             '<button type="button" class="ui-tool" data-more-prefs><span class="ui-tool-label">Preferences</span></button>' +
             '<button type="button" class="ui-tool" data-more-theme><span class="ui-tool-label"></span></button>' +
             '<p class="ui-side-user">Signed in as&nbsp;<bdi dir="auto">' + esc(dash.user) + "</bdi></p>" +
@@ -409,6 +411,8 @@ function dashRedrawDates() {
     dashLogs.access.drawn = "";
     dashLogDraw(dashLogs.activity, true);
     dashLogDraw(dashLogs.access, true);
+    dashPk.drawn = "";
+    dashPkDraw(true);
 }
 
 // ===========================================================================
@@ -1144,10 +1148,13 @@ function dashMfaDialog(kind, item) {
         if (d) d.backdrop.remove();
     };
     var formId = "mfa-form";
+    var what = kind === "token" ? "the token" : "the key";
     d = uiDialog({
         title: "MFA Verification", size: "sm", close: close,
-        body: '<div class="ui-form"><p>' + (kind === "token" ? "Enter your 6-digit authenticator code to copy the token." : "Enter your 6-digit authenticator code to copy the key.") + "</p>" +
+        body: '<div class="ui-form"><p id="mfa-text">' + (kind === "token" ? "Enter your 6-digit authenticator code to copy the token." : "Enter your 6-digit authenticator code to copy the key.") + "</p>" +
             '<p class="ui-hint">' + (kind === "token" ? "Token" : "API key") + ': <bdi dir="auto">' + esc(item.name) + "</bdi></p>" +
+            '<div class="ui-field hidden" id="mfa-pk"><button type="button" class="ui-btn ui-btn-block" id="mfa-pk-btn" data-inventory="mfa.passkey">Use a passkey</button>' +
+            '<p class="ui-hint">Or enter your 6-digit code below.</p></div>' +
             '<div class="ui-field"><label class="ui-label" for="mfa-code">6-digit code</label>' +
             '<input id="mfa-code" class="ui-input ui-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="000000" required data-inventory="mfa.code"></div></div>',
         foot: '<p class="ui-error hidden" id="mfa-err" role="alert"></p><button type="button" class="ui-btn" data-cancel>Cancel</button>' +
@@ -1159,32 +1166,96 @@ function dashMfaDialog(kind, item) {
     var code = d.body.querySelector("#mfa-code");
     var err = d.foot.querySelector("#mfa-err");
     var btn = d.foot.querySelector("[type=submit]");
+    var pkBtn = d.body.querySelector("#mfa-pk-btn");
+    var busy = false;
+    var verified = false;
+    var setBusy = function (on) {
+        busy = on;
+        btn.disabled = on;
+        pkBtn.disabled = on;
+    };
+    var fail = function (text) {
+        if (!text) return;
+        err.textContent = text;
+        err.classList.remove("hidden");
+    };
+    // "Use a passkey" when this browser can and the admin has a passkey for this address
+    if (!uiPasskeyBlocked(window, false)) {
+        dashPkLoad(false).then(function () {
+            if (!dashRevealCurrent(d, closed, seq) || verified || !dashPkUsable()) return;
+            d.body.querySelector("#mfa-pk").classList.remove("hidden");
+            d.body.querySelector("#mfa-text").textContent = "Use a passkey or your 6-digit authenticator code to copy " + what + ".";
+        });
+    }
+    pkBtn.addEventListener("click", function () {
+        if (busy || verified) return;
+        err.classList.add("hidden");
+        setBusy(true);
+        dashPkStepUp().then(function (r) {
+            // The browser's window may have stayed open after this dialog closed
+            if (!dashRevealCurrent(d, closed, seq)) return;
+            if (!r.passkey) {
+                setBusy(false);
+                fail(r.error);
+                return;
+            }
+            reveal({ passkey: r.passkey, ceremony: r.ceremony }, false);
+        });
+    });
     function submit() {
+        if (busy || verified) return;
         var value = code.value.trim();
         if (!value) { err.textContent = "Enter the code from your authenticator app."; err.classList.remove("hidden"); code.focus(); return; }
         err.classList.add("hidden");
-        btn.disabled = true;
+        setBusy(true);
+        reveal({ code: value }, true);
+    }
+    function reveal(body, withCode) {
         var path = kind === "token"
-            ? api("POST", "/admin/api/tokens/" + encodeURIComponent(item.id) + "/reveal", { code: value })
-            : api("POST", "/admin/api/api-keys/" + encodeURIComponent(item.id) + "/reveal", { code: value });
+            ? api("POST", "/admin/api/tokens/" + encodeURIComponent(item.id) + "/reveal", body)
+            : api("POST", "/admin/api/api-keys/" + encodeURIComponent(item.id) + "/reveal", body);
         path.then(function (res) {
             if (!dashRevealCurrent(d, closed, seq)) return;
-            btn.disabled = false;
+            setBusy(false);
             if (!res.ok) {
                 if (res.status === 401) return;
-                err.textContent = apiError(res, "Verification failed");
-                err.classList.remove("hidden");
-                code.select();
+                fail(apiError(res, "Verification failed"));
+                if (withCode) code.select();
                 return;
             }
+            verified = true;
             var secret = kind === "token" ? (res.data && res.data.token) || "" : (res.data && res.data.key) || "";
-            close();
             uiCopyText(secret).then(function (ok) {
-                if (kind === "token") showToast(ok ? "Token copied to clipboard" : "Failed to copy token", ok ? "success" : "error");
-                else showToast(ok ? "API key copied to clipboard" : "Failed to copy", ok ? "success" : "error");
+                if (ok) {
+                    close();
+                    showToast(kind === "token" ? "Token copied to clipboard" : "API key copied to clipboard", "success");
+                    return;
+                }
+                if (!dashRevealCurrent(d, closed, seq)) return;
+                dashMfaCopyStep(d, kind, secret, close);
             });
         });
     }
+}
+
+// The browser refused to copy without a fresh click (likely after a passkey
+// window): the dialog offers a Copy button instead of only saying it failed
+function dashMfaCopyStep(d, kind, secret, close) {
+    var label = kind === "token" ? "Copy token" : "Copy key";
+    d.body.innerHTML = '<div class="ui-form"><p>Verified. The browser did not let the page copy ' + (kind === "token" ? "the token" : "the key") +
+        " by itself. Press " + label + " to copy it.</p></div>";
+    d.foot.innerHTML = '<button type="button" class="ui-btn" data-cancel>Close</button>' +
+        '<button type="button" class="ui-btn ui-btn-primary" data-copy-now>' + label + "</button>";
+    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    var copyBtn = d.foot.querySelector("[data-copy-now]");
+    copyBtn.addEventListener("click", function () {
+        uiCopyText(secret).then(function (ok) {
+            if (ok) close();
+            if (kind === "token") showToast(ok ? "Token copied to clipboard" : "Failed to copy token", ok ? "success" : "error");
+            else showToast(ok ? "API key copied to clipboard" : "Failed to copy", ok ? "success" : "error");
+        });
+    });
+    copyBtn.focus({ preventScroll: true });
 }
 
 DASH_PAGE_IMPL.tokens = function (info) {
@@ -1917,6 +1988,8 @@ function dashLogDetails(log) {
         if (act === "zone_create") return det.description ? "<b>Description:</b> " + esc(det.description) : '<span class="ui-muted">-</span>';
         if (act === "api_key_create") return det.scopes ? "<b>Scopes:</b> " + esc(det.scopes) : '<span class="ui-muted">-</span>';
         if (act === "settings.update" && DASH_LOG_SETTINGS[log.entityName]) return dashLogSettings(DASH_LOG_SETTINGS[log.entityName], det);
+        var passkey = dashLogPasskeyDetails(log, det);
+        if (passkey !== null) return passkey;
     } catch (e) { /* shown as data below */ }
     return '<code class="ui-mono">' + esc(JSON.stringify(det)) + "</code>";
 }
@@ -1949,6 +2022,37 @@ function dashLogSettings(fields, det) {
     });
     var version = det.version ? "<b>Version " + esc(uiNum(det.version)) + ":</b> " : "";
     return version + (items.length ? items.join(", ") : '<span class="ui-muted">No modifications</span>');
+}
+
+var DASH_STEP_UP_METHODS = { passkey: "Passkey", code: "Authenticator code" };
+var DASH_PASSKEY_WHERE = { login: "Sign in", token_reveal: "Copy token", api_key_reveal: "Copy key", passkey_add: "Add a passkey" };
+var DASH_PASSKEY_REASONS = { invalid: "The passkey could not be verified", user_handle: "The passkey does not match its account" };
+
+// The passkey parts of the Activity Log in words; null when the row is not one of them
+function dashLogPasskeyDetails(log, det) {
+    var act = log.action;
+    var word = function (table, value) {
+        return Object.prototype.hasOwnProperty.call(table, value) ? table[value] : esc(value);
+    };
+    if (act === "login" && det.method === "passkey") {
+        return "<b>Signed in with:</b> passkey" + (det.passkey ? " (" + uiUserText(det.passkey) + ")" : "");
+    }
+    if ((act === "token_reveal" || act === "api_key_reveal") && det.method) {
+        return "<b>Confirmed with:</b> " + word(DASH_STEP_UP_METHODS, det.method);
+    }
+    if (act === "passkey_added") return det.rpId ? "<b>Made for:</b> " + esc(det.rpId) : '<span class="ui-muted">-</span>';
+    if (act === "passkey_renamed") return typeof det.from === "string" ? "<b>Renamed from:</b> " + uiUserText(det.from) : '<span class="ui-muted">-</span>';
+    if (act === "passkey_failed") {
+        return "<b>Where:</b> " + word(DASH_PASSKEY_WHERE, det.where) + "<br><b>Reason:</b> " + word(DASH_PASSKEY_REASONS, det.reason);
+    }
+    if (act === "settings.update" && log.entityName === "passkeys" && det.from && det.to) {
+        var from = det.from.origin;
+        var to = det.to.origin;
+        if (!from && to) return "<b>Passkey address set to:</b> " + esc(to);
+        if (from && !to) return "<b>Passkey address removed.</b> It was " + esc(from);
+        return "<b>Passkey address changed</b> from " + esc(from) + " to " + esc(to);
+    }
+    return null;
 }
 
 function dashLogDraw(s, quiet) {
@@ -3575,15 +3679,668 @@ function dashSettingsBind() {
     });
 }
 
+// The passkey address on the Settings page: one field, saved on top of the version
+// it was read at (baseVersion). A refresh never touches a changed draft.
+var dashPkSet = { snap: null, base: null, draft: "", dirty: false, saving: false, failed: "", refreshFailed: "", error: "", stale: false, seq: 0, bound: false };
+
+function dashPkSetLoad(isCurrent) {
+    var seq = ++dashPkSet.seq;
+    return api("GET", "/admin/api/settings/passkeys").then(function (res) {
+        if (seq !== dashPkSet.seq || dashPkSet.saving || (isCurrent && !isCurrent())) return;
+        var d = res.data;
+        if (!res.ok || !d || typeof d.version !== "number") {
+            var why = apiError(res, "The server did not answer.");
+            if (dashPkSet.snap) dashPkSet.refreshFailed = why;
+            else dashPkSet.failed = why;
+            dashPkSetDraw(false);
+            return;
+        }
+        var changed = !dashPkSet.snap || dashPkSet.snap.version !== d.version || dashPkSet.snap.locked !== d.locked;
+        dashPkSet.failed = "";
+        dashPkSet.refreshFailed = "";
+        dashPkSet.snap = d;
+        if (!dashPkSet.dirty) {
+            dashPkSet.base = d;
+            dashPkSet.draft = d.origin || "";
+            dashPkSet.stale = false;
+            if (changed) dashPkSet.error = "";
+        }
+        dashPkSetDraw(changed && !dashPkSet.dirty);
+    });
+}
+
+// The host name of an address, as the passkeys' rpId is; "" when it is not one
+function dashPkHost(value) {
+    try { return new URL(value).hostname.toLowerCase(); } catch (e) { return ""; }
+}
+
+function dashPkSetFormHtml() {
+    var b = dashPkSet.base;
+    var here = window.location.origin;
+    var field;
+    if (b.locked) {
+        field = dashSetLocked({ envName: b.envName || "PASSKEY_ORIGIN" }, b.origin || "");
+    } else {
+        field = '<input class="ui-input" id="set-pk-origin" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" ' +
+            'placeholder="' + esc(here) + '" value="' + esc(dashPkSet.draft) + '" aria-describedby="set-pk-hint" data-inventory="settings.passkeys.origin" />';
+    }
+    var hint = "The address admins open this service at, such as <code>" + esc(here) + "</code>. Passkeys work only there. HTTPS is required, except on localhost.";
+    if (!b.locked && !b.origin) hint += " Not set yet: the first passkey added on the Account page sets it to the address used then.";
+    if (!b.locked && b.origin && b.savedBy) hint += " Saved by " + uiUserText(b.savedBy) + " " + uiTime(b.savedAt) + ".";
+    return '<form class="ui-form" id="pk-set-form" novalidate><fieldset class="ui-settings-fields" id="pk-set-fields">' +
+        '<div class="ui-field"><label class="ui-label" for="set-pk-origin">Passkey address</label>' + field +
+        '<span class="ui-hint" id="set-pk-hint">' + hint + "</span></div>" +
+        '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>Passkeys made for another address stop working</p>' +
+        "<small>A new host name, or no address, makes the passkeys made for the old one unusable until it is set back. " +
+        "Passwords and authenticator codes keep working.</small></div><span></span></div>" +
+        '<p class="ui-error hidden" id="set-pk-err" role="alert"></p>' +
+        (b.locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-pk-save">Save</button>' +
+            '<button type="button" class="ui-btn hidden" id="set-pk-discard">Discard changes</button>' +
+            '<button type="button" class="ui-btn hidden" id="set-pk-reload">Reload</button></div>') +
+        "</fieldset></form>";
+}
+
+// Draw the section; the form itself only when it is new or redraw is set
+function dashPkSetDraw(redraw) {
+    var body = document.getElementById("settings-pk-body");
+    if (!body) return;
+    if (!dashPkSet.snap) {
+        body.innerHTML = dashPkSet.failed ? dashFailed("Could not load the passkey address", dashPkSet.failed, "data-pk-set-retry") : dashLoading("Loading the passkey address...");
+        return;
+    }
+    if (redraw || !document.getElementById("pk-set-form")) body.innerHTML = dashPkSetFormHtml();
+    var err = document.getElementById("set-pk-err");
+    var text = dashPkSet.error || (dashPkSet.refreshFailed ? "Could not refresh the passkey address: " + dashPkSet.refreshFailed : "");
+    err.textContent = text;
+    err.classList.toggle("hidden", !text);
+    var input = document.getElementById("set-pk-origin");
+    if (input) {
+        if (dashPkSet.error && !dashPkSet.stale) input.setAttribute("aria-invalid", "true");
+        else input.removeAttribute("aria-invalid");
+    }
+    document.getElementById("pk-set-fields").disabled = dashPkSet.saving;
+    var save = document.getElementById("set-pk-save");
+    if (save) save.textContent = dashPkSet.saving ? "Saving..." : "Save";
+    var discard = document.getElementById("set-pk-discard");
+    if (discard) discard.classList.toggle("hidden", !dashPkSet.dirty);
+    var reload = document.getElementById("set-pk-reload");
+    if (reload) reload.classList.toggle("hidden", !dashPkSet.stale);
+}
+
+function dashPkSetReset() {
+    var to = dashPkSet.snap;
+    dashPkSet.base = to;
+    dashPkSet.draft = (to && to.origin) || "";
+    dashPkSet.dirty = false;
+    dashPkSet.stale = false;
+    dashPkSet.error = "";
+}
+
+function dashPkSetSave() {
+    if (dashPkSet.saving || !dashPkSet.base || dashPkSet.base.locked) return;
+    var b = dashPkSet.base;
+    var value = dashPkSet.draft.trim();
+    var current = b.origin || "";
+    if (value === current) {
+        dashPkSet.dirty = false;
+        dashPkSetDraw(false);
+        return;
+    }
+    var ask = null;
+    if (!value) {
+        ask = { title: "Remove the passkey address?", message: "No passkey works until an address is set again. Passwords and authenticator codes keep working.", confirmText: "Remove" };
+    } else if (current && b.rpId && dashPkHost(value) && dashPkHost(value) !== b.rpId) {
+        ask = { title: "Change the passkey address?", message: "Passkeys made for " + b.rpId + " stop working at the new address. Passwords and authenticator codes keep working.", confirmText: "Change" };
+    }
+    if (ask) ask.danger = true;
+    (ask ? uiConfirm(ask) : Promise.resolve(true)).then(function (ok) {
+        if (!ok || dashPkSet.saving) return;
+        dashPkSet.saving = true;
+        dashPkSet.error = "";
+        dashPkSet.seq += 1; // a load that started before this save must not draw over it
+        dashPkSetDraw(false);
+        uiMutated();
+        api("PUT", "/admin/api/settings/passkeys", { baseVersion: b.version, origin: value }).then(function (res) {
+            dashPkSet.saving = false;
+            dashPkSet.seq += 1;
+            var d = res.data;
+            if (res.ok && d && typeof d.version === "number") {
+                dashPkSet.snap = d;
+                dashPkSetReset();
+                dashPkSetDraw(true);
+                dashPk.at = 0; // the Account page and Copy token read the list again
+                uiMutated();
+                showToast(d.origin ? "Passkey address saved" : "Passkey address removed", "success");
+                return;
+            }
+            if (res.status === 401) return;
+            dashPkSet.error = apiError(res, "Could not save the passkey address.");
+            // Locked by the environment, or saved by someone else: the admin reloads
+            dashPkSet.stale = res.status === 409;
+            dashPkSetDraw(false);
+        });
+    });
+}
+
+function dashPkSetBind() {
+    if (dashPkSet.bound) return;
+    dashPkSet.bound = true;
+    var panel = document.getElementById("settings-pk-panel");
+    panel.addEventListener("input", function (event) {
+        if (event.target.id !== "set-pk-origin") return;
+        dashPkSet.draft = event.target.value;
+        dashPkSet.dirty = dashPkSet.draft.trim() !== ((dashPkSet.base && dashPkSet.base.origin) || "");
+        dashPkSetDraw(false);
+    });
+    panel.addEventListener("submit", function (event) {
+        if (event.target.id !== "pk-set-form") return;
+        event.preventDefault();
+        dashPkSetSave();
+    });
+    panel.addEventListener("click", function (event) {
+        var t = event.target;
+        if (t.closest("[data-pk-set-retry]")) {
+            dashPkSet.failed = "";
+            dashPkSetDraw(false);
+            dashPkSetLoad();
+        } else if (t.closest("#set-pk-discard")) {
+            dashPkSetReset();
+            dashPkSetDraw(true);
+        } else if (t.closest("#set-pk-reload")) {
+            dashPkSet.dirty = false;
+            dashPkSet.stale = false;
+            dashPkSet.error = "";
+            dashPkSet.snap = null;
+            dashPkSetDraw(true);
+            dashPkSetLoad();
+        }
+    });
+    uiUnsavedRegister(function () {
+        return dashPkSet.dirty ? 1 : 0;
+    }, function () {
+        if (!dashPkSet.snap) return;
+        dashPkSetReset();
+        dashPkSetDraw(true);
+    });
+}
+
 DASH_PAGE_IMPL.settings = function () {
     dashSettingsBind();
     dashGenDraw();
     dashSettingsDraw();
     dashRedisDraw();
-    dashSettingsLoadAll().then(function () { uiRefreshLoaded("settings"); });
+    dashPkSetBind();
+    dashPkSetDraw(false);
+    Promise.all([dashSettingsLoadAll(), dashPkSetLoad()]).then(function () { uiRefreshLoaded("settings"); });
 };
 
-registerPageRefresh("settings", 30000, function (isCurrent) { return dashSettingsLoadAll(isCurrent); });
+registerPageRefresh("settings", 30000, function (isCurrent) {
+    return Promise.all([dashSettingsLoadAll(isCurrent), dashPkSetLoad(isCurrent)]);
+});
+
+// ===========================================================================
+// Passkeys: the signed-in admin's list (Account page, Copy token and Copy key),
+// a check with one of them before a sensitive step, and the Account page
+// ===========================================================================
+
+var dashPk = { data: null, failed: "", pending: null, at: 0, seq: 0, drawn: "", bound: false };
+
+// GET /admin/api/passkeys, kept 25 seconds; force reads it again
+function dashPkLoad(force) {
+    if (dashPk.pending && !force) return dashPk.pending;
+    if (!force && dashPk.data && Date.now() - dashPk.at < 25000) return Promise.resolve(dashPk.data);
+    var seq = ++dashPk.seq;
+    var mark = uiMutationMark();
+    var p = api("GET", "/admin/api/passkeys").then(function (res) {
+        if (dashPk.pending === p) dashPk.pending = null;
+        if (seq !== dashPk.seq || uiStaleSince(mark)) return dashPk.data;
+        if (res.ok && res.data && res.data.address && Array.isArray(res.data.passkeys)) {
+            dashPk.data = res.data;
+            dashPk.at = Date.now();
+            dashPk.failed = "";
+        } else {
+            dashPk.failed = apiError(res, "Failed");
+        }
+        return dashPk.data;
+    });
+    dashPk.pending = p;
+    return p;
+}
+
+// The admin has a passkey made for the current passkey address
+function dashPkUsable() {
+    var list = dashPk.data && dashPk.data.passkeys;
+    return !!list && list.some(function (p) { return p.usable; });
+}
+
+// Confirm with one of the admin's own passkeys. Resolves { passkey, ceremony } for
+// the request that needs it, or { error } with the words to show ("" when the
+// admin closed the browser's window).
+function dashPkStepUp() {
+    return api("POST", "/admin/api/passkeys/stepup/options").then(function (res) {
+        if (!res.ok) {
+            if (res.status === 409) dashPk.at = 0; // the list changed: read it again next time
+            return { error: res.status === 401 ? "" : apiError(res, "Could not start the passkey check. Try again.") };
+        }
+        var publicKey;
+        try {
+            publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(res.data.publicKey);
+        } catch (e) {
+            return { error: "This browser could not read the passkey request. Use your authenticator code." };
+        }
+        return navigator.credentials.get({ publicKey: publicKey }).then(function (credential) {
+            if (!credential) return { error: "" };
+            return { passkey: credential.toJSON(), ceremony: res.data.ceremony };
+        }, function (err) {
+            return { error: uiPasskeyErrorText(err, false) };
+        });
+    });
+}
+
+// The Account page's notes: the passkey address, and what this browser cannot do
+function dashPkInfoHtml(data, blocked, here) {
+    var alerts = [];
+    var add = function (tone, title, sub) {
+        alerts.push('<div class="ui-alert' + tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub +
+            "</small></div><span></span></div>");
+    };
+    var settings = '<a data-go="settings" href="' + esc(basePath() + PAGES.settings.path) + '">Settings</a>';
+    if (blocked === "insecure") {
+        add(" is-warn", UI_PASSKEY_INSECURE, "Open the service over HTTPS to add or use a passkey. Your password and authenticator code keep working.");
+    } else if (blocked === "browser") {
+        add(" is-warn", UI_PASSKEY_OLD_BROWSER, "Use a current browser to add or use a passkey. Your password and authenticator code keep working.");
+    }
+    var a = data && data.address;
+    if (!a) return alerts.join("");
+    if (!a.origin) {
+        add("", "No passkey address yet", "Your first passkey ties passkeys to <code>" + esc(here) +
+            "</code>, the address this page is open at. You can see it later on " + settings + ".");
+    } else if (a.origin !== here) {
+        add(" is-warn", "This page is open at another address", "Passkeys work at <code>" + esc(a.origin) + "</code>, and this page is open at <code>" +
+            esc(here) + "</code>. Open the service at <code>" + esc(a.origin) + "</code> to add or use a passkey.");
+    } else {
+        add("", "Passkey address", "Passkeys work at <code>" + esc(a.origin) + "</code>." +
+            (a.locked ? " The <code>" + esc(a.envName || "PASSKEY_ORIGIN") + "</code> environment variable sets it." : " You can change it on " + settings + "."));
+    }
+    return alerts.join("");
+}
+
+function dashPkRowHtml(p) {
+    var tags = [];
+    if (!p.usable) tags.push(dashTag("Not usable at this address (made for " + p.rpId + ")", "warn"));
+    tags.push(p.backedUp ? dashTag("Synced", "ok") : dashTag("Not backed up", ""));
+    return '<div class="ui-tr" role="row" data-key="' + esc(p.id) + '" aria-label="' + esc(p.name) + '">' +
+        '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(p.name) + "</span></div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">Created </span>' + uiTime(p.createdAt) + "</div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">Last used </span>' + (p.lastUsedAt ? uiTime(p.lastUsedAt) : '<span class="ui-muted">Never</span>') + "</div>" +
+        '<div class="ui-td ui-td-full ui-td-wrap" role="cell"><div class="ui-tags">' + tags.join("") + "</div></div>" +
+        '<div class="ui-td ui-td-end" role="cell">' + dashMenuButton(p.name) + "</div></div>";
+}
+
+function dashPkDraw(quiet) {
+    if (!dashPk.bound) return;
+    var rowsEl = document.getElementById("pk-rows");
+    var info = document.getElementById("pk-info");
+    var blocked = uiPasskeyBlocked(window, true);
+    var data = dashPk.data;
+    var infoHtml = dashPkInfoHtml(data, blocked, window.location.origin);
+    if (info.innerHTML !== infoHtml && !uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = infoHtml; });
+    // Shown only where this browser can add one; the notes above say why not
+    var add = document.getElementById("pk-add");
+    add.classList.toggle("hidden", !!blocked);
+    add.disabled = !!blocked || !data;
+    if (quiet && uiAreaHeld(rowsEl)) return;
+    var html;
+    if (!data) {
+        html = dashPk.failed ? dashFailed("Could not load your passkeys", dashPk.failed, "data-pk-retry") : dashLoading("Loading passkeys...");
+        document.getElementById("pk-count").textContent = "";
+    } else {
+        document.getElementById("pk-count").textContent = uiCountLabel(data.passkeys.length, "passkey", "passkeys");
+        html = data.passkeys.length
+            ? data.passkeys.map(dashPkRowHtml).join("")
+            : dashEmpty("No passkeys yet", "Add one to sign in with your fingerprint, face or screen lock instead of your password and code.");
+    }
+    if (html === dashPk.drawn) return;
+    dashPk.drawn = html;
+    uiKeepFocus(rowsEl, function () { rowsEl.innerHTML = html; });
+}
+
+function dashPkFind(id) {
+    var list = (dashPk.data && dashPk.data.passkeys) || [];
+    return list.filter(function (p) { return p.id === id; })[0] || null;
+}
+
+function dashPkReload(quiet) {
+    return dashPkLoad(true).then(function () { dashPkDraw(quiet); });
+}
+
+function dashPkBind() {
+    if (dashPk.bound) return;
+    dashPk.bound = true;
+    var add = document.getElementById("pk-add");
+    add.addEventListener("click", function () {
+        add.disabled = true;
+        dashPkLoad(true).then(function (data) {
+            dashPkDraw(false);
+            if (!data) {
+                showToast("Could not load your passkeys: " + (dashPk.failed || "Failed") + ". Try again in a moment.", "error");
+                return;
+            }
+            dashPkAddDialog(data);
+        });
+    });
+    document.getElementById("pk-rows").addEventListener("click", function (event) {
+        if (event.target.closest("[data-pk-retry]")) {
+            dashPk.failed = "";
+            dashPkDraw(false);
+            dashPkReload(false);
+            return;
+        }
+        var menuBtn = event.target.closest("[data-row-menu]");
+        var row = event.target.closest("[data-key]");
+        if (!menuBtn || !row) return;
+        var p = dashPkFind(row.getAttribute("data-key"));
+        if (!p) return;
+        uiMenu(menuBtn, [
+            { label: "Rename", action: "passkey-rename", run: function () { dashPkRenameDialog(p); } },
+            { label: "Delete", action: "passkey-delete", danger: true, run: function () { dashPkDelete(p); } },
+        ], "Actions for " + p.name);
+    });
+}
+
+// Add a passkey, in one dialog: 1. the name, and the authenticator code or another
+// passkey; 2. the browser creates the passkey (its own button press, since the
+// browser may require one); 3. it is saved, or the name is fixed and saved again.
+function dashPkAddDialog(data) {
+    var d = null;
+    var closed = false;
+    var close = function () {
+        closed = true;
+        if (d) d.backdrop.remove();
+    };
+    var live = function () { return !closed && !!d && d.backdrop.isConnected; };
+    var here = window.location.origin;
+    var a = data.address || {};
+    var withPasskey = dashPkUsable();
+    var notice = "";
+    if (!a.origin) {
+        notice = '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>This passkey sets the passkey address</p><small>' +
+            "Passkeys will work at <code>" + esc(here) + "</code>. If the service moves to another address later, passkeys made here stop working.</small></div><span></span></div>";
+    } else if (a.origin !== here) {
+        notice = '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>This page is open at another address</p><small>' +
+            "Passkeys work at <code>" + esc(a.origin) + "</code>, so the browser will likely refuse here. Open the service at <code>" +
+            esc(a.origin) + "</code> to add a passkey.</small></div><span></span></div>";
+    }
+    var formId = "pk-add-form";
+    d = uiDialog({
+        title: "Add a passkey", size: "sm", close: close,
+        body: '<div class="ui-form">' +
+            '<p class="ui-hint" id="pk-step" aria-live="polite"></p>' + notice +
+            '<div class="ui-field"><label class="ui-label" for="pk-name">Name</label>' +
+            '<input id="pk-name" class="ui-input" required dir="auto" autocomplete="off" aria-describedby="pk-name-hint" data-inventory="account.passkey.name">' +
+            '<span class="ui-hint" id="pk-name-hint">So you can tell your passkeys apart, for example by device.</span></div>' +
+            '<div class="ui-form" id="pk-s1">' +
+            (withPasskey ? '<div class="ui-field"><button type="button" class="ui-btn ui-btn-block" id="pk-confirm-pk">Confirm with a passkey</button>' +
+                '<span class="ui-hint">Or enter your 6-digit code below.</span></div>' : "") +
+            '<div class="ui-field"><label class="ui-label" for="pk-code">6-digit code</label>' +
+            '<input id="pk-code" class="ui-input ui-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="000000" data-inventory="account.passkey.code"></div></div>' +
+            '<p class="hidden" id="pk-s2">Press Create passkey, then follow your browser. It asks for your fingerprint, face, screen lock or security key.</p>' +
+            "</div>",
+        foot: '<p class="ui-error hidden" id="pk-err" role="alert"></p><button type="button" class="ui-btn" data-cancel>Cancel</button>' +
+            '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '" id="pk-go">Continue</button>',
+        form: { id: formId, onSubmit: function () { next(); } },
+    });
+    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    d.backdrop.addEventListener("ui-drop", function () { closed = true; });
+    var nameEl = d.body.querySelector("#pk-name");
+    var codeEl = d.body.querySelector("#pk-code");
+    var pkBtn = d.body.querySelector("#pk-confirm-pk");
+    var go = d.foot.querySelector("#pk-go");
+    var cancel = d.foot.querySelector("[data-cancel]");
+    var err = d.foot.querySelector("#pk-err");
+    var st = { step: 1, busy: false, publicKey: null, ceremony: "", credential: null };
+    nameEl.value = uiPasskeyDefaultName(window.navigator);
+
+    var fail = function (text, field) {
+        if (!text) return;
+        err.textContent = text;
+        err.classList.remove("hidden");
+        if (field) {
+            field.setAttribute("aria-invalid", "true");
+            field.focus();
+        }
+    };
+    var clearFail = function () {
+        err.classList.add("hidden");
+        nameEl.removeAttribute("aria-invalid");
+        codeEl.removeAttribute("aria-invalid");
+    };
+    var setBusy = function (on) {
+        st.busy = on;
+        go.disabled = on;
+        if (pkBtn) pkBtn.disabled = on;
+    };
+    var show = function (step) {
+        st.step = step;
+        d.body.querySelector("#pk-step").textContent = step === 1 ? "Step 1 of 2: confirm it is you."
+            : step === 2 ? "Step 2 of 2: create the passkey." : "Almost done: save the passkey.";
+        d.body.querySelector("#pk-s1").classList.toggle("hidden", step !== 1);
+        d.body.querySelector("#pk-s2").classList.toggle("hidden", step !== 2);
+        nameEl.disabled = step === 2;
+        go.textContent = step === 1 ? "Continue" : step === 2 ? "Create passkey" : "Save";
+        go.classList.remove("hidden");
+        cancel.textContent = "Cancel";
+    };
+    var restart = function (text) {
+        st.publicKey = null;
+        st.ceremony = "";
+        st.credential = null;
+        codeEl.value = "";
+        show(1);
+        fail(text);
+    };
+    var nameOk = function () {
+        var problem = uiPasskeyNameProblem(nameEl.value);
+        if (problem) fail(problem, nameEl);
+        return !problem;
+    };
+
+    // Step 1: the code or a passkey, then the options to create one
+    var askOptions = function (body) {
+        body.proposedOrigin = here;
+        api("POST", "/admin/api/passkeys/options", body).then(function (res) {
+            if (!live()) return;
+            setBusy(false);
+            if (!res.ok) {
+                if (res.status === 401) return;
+                fail(apiError(res, "Could not start adding the passkey. Try again."), "code" in body ? codeEl : null);
+                if ("code" in body) codeEl.select();
+                return;
+            }
+            try {
+                st.publicKey = PublicKeyCredential.parseCreationOptionsFromJSON(res.data.publicKey);
+            } catch (e) {
+                fail("This browser could not read the passkey request. Try another browser.");
+                return;
+            }
+            st.ceremony = res.data.ceremony;
+            codeEl.value = "";
+            show(2);
+            go.focus({ preventScroll: true });
+        });
+    };
+    if (pkBtn) {
+        pkBtn.addEventListener("click", function () {
+            if (st.busy || st.step !== 1) return;
+            clearFail();
+            if (!nameOk()) return;
+            setBusy(true);
+            dashPkStepUp().then(function (r) {
+                if (!live()) return;
+                if (!r.passkey) {
+                    setBusy(false);
+                    fail(r.error);
+                    return;
+                }
+                askOptions({ passkey: r.passkey, ceremony: r.ceremony });
+            });
+        });
+    }
+
+    // Step 2: the browser creates the passkey
+    var create = function () {
+        setBusy(true);
+        navigator.credentials.create({ publicKey: st.publicKey }).then(function (credential) {
+            if (!live()) return;
+            if (!credential) { setBusy(false); return; }
+            st.credential = credential.toJSON();
+            save();
+        }, function (e) {
+            if (!live()) return;
+            setBusy(false);
+            fail(uiPasskeyErrorText(e, true));
+            if (e && e.name === "InvalidStateError") {
+                // Nothing more to do here: this device already has one
+                go.classList.add("hidden");
+                cancel.textContent = "Close";
+            }
+        });
+    };
+
+    // Step 3: save it under its name
+    var save = function () {
+        if (!nameOk()) { setBusy(false); show(3); return; }
+        setBusy(true);
+        uiMutated();
+        api("POST", "/admin/api/passkeys", { name: uiPasskeyName(nameEl.value), credential: st.credential, ceremony: st.ceremony }).then(function (res) {
+            if (!live()) {
+                if (res.ok) dashPkReload(true);
+                return;
+            }
+            setBusy(false);
+            if (res.ok) {
+                close();
+                uiMutated();
+                showToast("Passkey added. You can now sign in with it.", "success");
+                dashPkReload(false);
+                return;
+            }
+            if (res.status === 401) return;
+            if (res.status === 422 || res.status === 0 || res.status === 413) {
+                // The browser made the passkey: fix the name or try again, then save it
+                show(3);
+                fail(apiError(res, "The passkey was not saved. Try again."), res.status === 422 ? nameEl : null);
+                return;
+            }
+            restart(apiError(res, "The passkey was not saved. Start again."));
+        });
+    };
+
+    function next() {
+        if (st.busy) return;
+        clearFail();
+        if (st.step === 1) {
+            if (!nameOk()) return;
+            var value = codeEl.value.trim();
+            if (!value) {
+                fail(withPasskey ? "Enter the code from your authenticator app, or confirm with a passkey." : "Enter the code from your authenticator app.", codeEl);
+                return;
+            }
+            setBusy(true);
+            askOptions({ code: value });
+        } else if (st.step === 2) {
+            create();
+        } else {
+            save();
+        }
+    }
+    show(1);
+}
+
+function dashPkRenameDialog(p) {
+    var d = null;
+    var close = function () { if (d) d.backdrop.remove(); };
+    var guardedClose = function () { uiCloseGuarded(d, close); };
+    var formId = "pk-rename-form";
+    d = uiDialog({
+        title: "Rename passkey", size: "sm", close: guardedClose,
+        body: '<div class="ui-form"><div class="ui-field"><label class="ui-label" for="pk-rename">Name</label>' +
+            '<input id="pk-rename" class="ui-input" required dir="auto" autocomplete="off" data-inventory="account.passkey.rename"></div></div>',
+        foot: '<p class="ui-error hidden" id="pk-rename-err" role="alert"></p><button type="button" class="ui-btn" data-cancel>Cancel</button>' +
+            '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '">Save</button>',
+        form: { id: formId, onSubmit: function () { submit(); } },
+    });
+    var nameEl = d.body.querySelector("#pk-rename");
+    var err = d.foot.querySelector("#pk-rename-err");
+    nameEl.value = p.name || "";
+    uiGuardDialog(d);
+    d.foot.querySelector("[data-cancel]").addEventListener("click", guardedClose);
+    var busy = false;
+    function submit() {
+        if (busy) return;
+        err.classList.add("hidden");
+        nameEl.removeAttribute("aria-invalid");
+        var problem = uiPasskeyNameProblem(nameEl.value);
+        if (problem) {
+            err.textContent = problem;
+            err.classList.remove("hidden");
+            nameEl.setAttribute("aria-invalid", "true");
+            nameEl.focus();
+            return;
+        }
+        busy = true;
+        var btn = d.foot.querySelector("[type=submit]");
+        btn.disabled = true;
+        uiMutated();
+        api("PATCH", "/admin/api/passkeys/" + encodeURIComponent(p.id), { name: uiPasskeyName(nameEl.value) }).then(function (res) {
+            busy = false;
+            btn.disabled = false;
+            if (!res.ok) {
+                if (res.status === 401) return;
+                err.textContent = res.status === 404 ? "This passkey no longer exists. Close this window to see the current list." : apiError(res, "Save failed");
+                err.classList.remove("hidden");
+                if (res.status === 404) dashPkReload(true);
+                return;
+            }
+            close();
+            uiMutated();
+            showToast("Passkey renamed", "success");
+            dashPkReload(false);
+        });
+    }
+}
+
+function dashPkDelete(p) {
+    uiConfirm({
+        title: "Delete passkey",
+        message: "Delete the passkey \"" + p.name + "\"? You can still sign in with your password and authenticator code. " +
+            "Also remove it from your device or password manager, or it will keep offering it.",
+        confirmText: "Delete", danger: true,
+    }).then(function (ok) {
+        if (!ok) return;
+        uiMutated();
+        api("DELETE", "/admin/api/passkeys/" + encodeURIComponent(p.id)).then(function (res) {
+            if (!res.ok && res.status !== 404) {
+                if (res.status !== 401) showToast("Could not delete the passkey: " + apiError(res, "Failed"), "error");
+                return;
+            }
+            showToast(p.name + " deleted", "success");
+            uiMutated();
+            dashPkReload(false);
+        });
+    });
+}
+
+DASH_PAGE_IMPL.account = function () {
+    dashPkBind();
+    dashPk.drawn = "";
+    dashPkDraw(false);
+    dashPkReload(false).then(function () { uiRefreshLoaded("account"); });
+};
+
+registerPageRefresh("account", 30000, function (isCurrent) {
+    return dashPkLoad(true).then(function () { if (!isCurrent || isCurrent()) dashPkDraw(true); });
+});
 
 var DASH_SEARCH_ICON ='<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
 

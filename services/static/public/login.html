@@ -35,6 +35,11 @@
           <p class="ui-error hidden" id="err" role="alert"></p>
           <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Continue</button>
         </form>
+        <div class="ui-form hidden" id="pk-login">
+          <p class="ui-hint">Have a passkey? Sign in with your fingerprint, face or screen lock instead.</p>
+          <button type="button" class="ui-btn ui-btn-block" id="pk-signin" data-inventory="login.passkey">Sign in with a passkey</button>
+        </div>
+        <p class="ui-hint hidden" id="pk-note" role="note"></p>
       </div>
     </main>
     <script src="/js/common.js"></script>

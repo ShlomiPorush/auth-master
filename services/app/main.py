@@ -16,7 +16,7 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from app.config import get_settings
 from app.datetime_utils import is_expired
 from app.db import create_database, open_settings_database
-from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage
+from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage, admin_passkeys
 from app.schema import ensure_database_schema
 from app import general_settings, login_limit, rate_limit_settings, redis_settings, usage_rollup
 from app.logger import init_purged_before, purge_old_logs
@@ -229,6 +229,7 @@ app.include_router(admin_logs.router)
 app.include_router(admin_rate_limit.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_usage.router)
+app.include_router(admin_passkeys.router)
 
 
 def _safe_static_file(rel: str) -> Path:
@@ -377,6 +378,7 @@ async def page_login_mfa():
 @app.get("/admin/logs/access")
 @app.get("/admin/usage")
 @app.get("/admin/settings")
+@app.get("/admin/account")
 async def page_dashboard():
     return _serve_html("index.html")
 

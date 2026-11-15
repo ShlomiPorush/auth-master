@@ -1621,6 +1621,73 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
 }
 
 // ===========================================================================
+// Passkeys (WebAuthn): what this browser can do, its errors in words, and the
+// name a new passkey gets. The pages use only the browser's own JSON helpers
+// (parseRequestOptionsFromJSON, parseCreationOptionsFromJSON, toJSON()).
+// ===========================================================================
+
+var UI_PASSKEY_INSECURE = "Passkeys need HTTPS (or localhost).";
+var UI_PASSKEY_OLD_BROWSER = "This browser cannot use passkeys here.";
+var UI_PASSKEY_NAME_MAX = 64;
+
+// Why this page cannot use passkeys: "" when it can, "insecure" outside a secure
+// context, "browser" without WebAuthn or its JSON helpers. create: also adding one.
+// win is the window, or a stand-in in the unit tests.
+function uiPasskeyBlocked(win, create) {
+    if (!win || !win.isSecureContext) return "insecure";
+    var pkc = win.PublicKeyCredential;
+    if (!pkc || typeof pkc.parseRequestOptionsFromJSON !== "function") return "browser";
+    if (!pkc.prototype || typeof pkc.prototype.toJSON !== "function") return "browser";
+    if (create && typeof pkc.parseCreationOptionsFromJSON !== "function") return "browser";
+    if (!win.navigator || !win.navigator.credentials) return "browser";
+    return "";
+}
+
+// The words for a browser passkey call that failed; "" when the person closed the
+// browser's window or it timed out, which needs no message. create: adding one.
+function uiPasskeyErrorText(err, create) {
+    var name = err && err.name;
+    if (name === "NotAllowedError" || name === "AbortError") return "";
+    if (name === "InvalidStateError" && create) return "This device already has a passkey here. You can already use it to sign in.";
+    if (name === "SecurityError") return "The browser refused a passkey for this address. Open the service at its passkey address and try again.";
+    if (name === "NotSupportedError") {
+        return create ? "This device cannot create this kind of passkey. Try another device or password manager."
+            : "This device cannot use this kind of passkey. Try another device.";
+    }
+    return create ? "The passkey could not be created. Try again." : "The passkey could not be used. Try again.";
+}
+
+// A passkey name as the server keeps it: runs of spaces become one, ends trimmed
+function uiPasskeyName(text) {
+    return String(text === null || text === undefined ? "" : text).split(/\s+/).filter(Boolean).join(" ");
+}
+
+// What is wrong with a name, or ""
+function uiPasskeyNameProblem(text) {
+    var name = uiPasskeyName(text);
+    if (!name) return "Give the passkey a name.";
+    if (Array.from(name).length > UI_PASSKEY_NAME_MAX) return "The name can have at most " + UI_PASSKEY_NAME_MAX + " characters.";
+    return "";
+}
+
+// The name proposed for a new passkey: "Passkey on <system>" when the browser says which
+function uiPasskeyDefaultName(nav) {
+    var platform = String((nav && nav.userAgentData && nav.userAgentData.platform) || "");
+    var ua = String((nav && nav.userAgent) || "");
+    var hint = platform === "macOS" ? "Mac" : platform;
+    if (!hint) {
+        if (/iPhone/.test(ua)) hint = "iPhone";
+        else if (/iPad/.test(ua)) hint = "iPad";
+        else if (/Android/.test(ua)) hint = "Android";
+        else if (/CrOS/.test(ua)) hint = "ChromeOS";
+        else if (/Macintosh|Mac OS X/.test(ua)) hint = "Mac";
+        else if (/Windows/.test(ua)) hint = "Windows";
+        else if (/Linux/.test(ua)) hint = "Linux";
+    }
+    return hint ? uiPasskeyName("Passkey on " + hint) : "Passkey";
+}
+
+// ===========================================================================
 // Page-wide listeners, installed once by the page
 // ===========================================================================
 

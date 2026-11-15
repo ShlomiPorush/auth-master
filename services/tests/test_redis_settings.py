@@ -631,7 +631,7 @@ def _user_url(user: str, pw: str) -> str:
 
 
 # The key prefixes and commands the service uses (README "Use an external Redis").
-APP_KEYS = ("~auth:sess:*", "~auth:totp_pending:*", "~auth:login:addr:*", "~auth:mfa-fail:*", "~auth:totp-used:*")
+APP_KEYS = ("~auth:sess:*", "~auth:totp_pending:*", "~auth:login:addr:*", "~auth:mfa-fail:*", "~auth:totp-used:*", "~auth:webauthn-used:*")
 APP_COMMANDS = ("+ping", "+setex", "+get", "+del", "+set", "+incrby", "+ttl", "+expire", "+multi", "+exec")
 # The check fails either way; redis-py does not report a refused MULTI or EXEC as a
 # permission error, so the page shows the general message.
@@ -646,6 +646,7 @@ EXACT_PER_PREFIX = (
     "(~auth:login:addr:* +set +incrby +ttl +expire)",
     "(~auth:mfa-fail:* +set +incrby +ttl +expire +del)",
     "(~auth:totp-used:* +set)",
+    "(~auth:webauthn-used:* +set)",
 )
 
 
@@ -681,7 +682,7 @@ def test_real_check_passes_and_leaves_no_probe_keys():
         assert asyncio.run(rs.check(REDIS_URL)) is None
         # Like the service, the check lets the address counter and the used-code marker expire.
         for key in set(client.scan_iter(match="auth:*")) - before:
-            assert key.startswith((b"auth:login:addr:", b"auth:totp-used:")), key
+            assert key.startswith((b"auth:login:addr:", b"auth:totp-used:", b"auth:webauthn-used:")), key
             assert 0 < client.ttl(key) <= rs.PROBE_TTL_SEC
     finally:
         client.close()
@@ -706,6 +707,7 @@ def test_real_wrong_password_is_auth():
     (("~auth:sess:*", "+@all"), "no_write"),  # one of the prefixes only
     ((*(k for k in APP_KEYS if k != "~auth:login:addr:*"), "+@all"), "no_write"),
     ((*(k for k in APP_KEYS if k != "~auth:totp-used:*"), "+@all"), "no_write"),
+    ((*(k for k in APP_KEYS if k != "~auth:webauthn-used:*"), "+@all"), "no_write"),
     ((*APP_KEYS, *APP_COMMANDS), None),  # exactly what the app uses
     # Exactly the commands the app sends for each key prefix (Redis 7 ACL selectors).
     (EXACT_PER_PREFIX, None),
