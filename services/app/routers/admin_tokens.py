@@ -9,10 +9,9 @@ from pydantic import BaseModel
 
 from app.admin_deps import FullSession, csrf_check
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, generate_raw_token, sha256_hex
-from app.crypto_totp import decrypt_totp_secret
 from app.db import UniqueViolationError
 from app.grants import canonical_grants, parse_grants
-from app.totp_guard import check_totp_code, log_totp_failure, totp_error
+from app.step_up import StepUpBody, verify_step_up
 from app.zones import allowed_area_names, grant_write_transaction
 from app.logger import log_activity, get_actor
 
@@ -36,8 +35,7 @@ class TokenPatch(BaseModel):
     expiresAt: str | None = None
 
 
-class RevealBody(BaseModel):
-    code: str
+RevealBody = StepUpBody
 
 
 async def _normalize_grants(db: Any, raw: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -300,14 +298,7 @@ async def admin_reveal_token(
     token_enc = token_row["token_enc"]
     if not token_enc:
         raise HTTPException(409, "Token cannot be revealed (created before encrypted storage support)")
-    try:
-        secret = decrypt_totp_secret(admin_row["totp_secret_enc"])
-    except Exception as e:
-        raise HTTPException(500, "decrypt failed") from e
-    check = await check_totp_code(request.app.state.redis, admin_id, secret, body.code.replace(" ", ""))
-    if not check.ok:
-        await log_totp_failure(request, admin_id, "token_reveal", check)
-        raise totp_error(check, at_login=False)
+    method = await verify_step_up(request, str(admin_id), admin_row, body, "token_reveal")
     try:
         token_value = decrypt_token_value(token_enc)
     except Exception as e:
@@ -322,6 +313,7 @@ async def admin_reveal_token(
         entity_type="token",
         entity_id=str(token_uuid),
         entity_name=token_row["name"],
+        details={"method": method},
         ip_address=ip,
     )
 

@@ -184,6 +184,35 @@ async def _ensure_pg(db: "Database") -> None:
         )
     """)
 
+    # Passkeys (app.passkeys): one row per WebAuthn credential of an admin.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS passkeys (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            admin_id UUID NOT NULL REFERENCES admin_users (id) ON DELETE CASCADE,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key TEXT NOT NULL,
+            sign_count BIGINT NOT NULL DEFAULT 0,
+            transports TEXT NOT NULL DEFAULT '[]',
+            backed_up BOOLEAN NOT NULL DEFAULT false,
+            rp_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_used_at TIMESTAMPTZ NULL
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_passkeys_admin_id ON passkeys (admin_id)")
+    # The passkey address from the Settings page: one row per saved version, never updated
+    # or deleted (app.passkey_settings).  A NULL origin is a version that removed the address.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS passkey_settings (
+            version INTEGER PRIMARY KEY CHECK (version > 0),
+            origin TEXT NULL,
+            actor TEXT NOT NULL,
+            ip_address TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+
 
 async def _ensure_sqlite(db: "Database") -> None:
     await db.execute("""
@@ -314,5 +343,32 @@ async def _ensure_sqlite(db: "Database") -> None:
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )
+    """)
+
+    # See _ensure_pg.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS passkeys (
+            id TEXT PRIMARY KEY,
+            admin_id TEXT NOT NULL REFERENCES admin_users (id) ON DELETE CASCADE,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key TEXT NOT NULL,
+            sign_count INTEGER NOT NULL DEFAULT 0,
+            transports TEXT NOT NULL DEFAULT '[]',
+            backed_up INTEGER NOT NULL DEFAULT 0,
+            rp_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at TEXT NULL
+        )
+    """)
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_passkeys_admin_id ON passkeys (admin_id)")
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS passkey_settings (
+            version INTEGER PRIMARY KEY CHECK (version > 0),
+            origin TEXT NULL,
+            actor TEXT NOT NULL,
+            ip_address TEXT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)

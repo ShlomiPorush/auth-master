@@ -775,7 +775,7 @@ class _Refs(HTMLParser):
 
 
 PAGES_SERVED = ["/login", "/login-mfa", "/setup", "/setup-mfa", "/admin/tokens", "/admin/zones", "/admin/api-keys",
-                "/admin/logs/activity", "/admin/logs/access"]
+                "/admin/logs/activity", "/admin/logs/access", "/admin/settings", "/admin/account"]
 
 
 def test_assets_are_local_and_served(served):

@@ -7,6 +7,8 @@ from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 
+from app.passkey_origin import InvalidOrigin, canonical_origin
+
 # Every value below was published in this repository, as a default, an example
 # or a documentation placeholder. They are public and are never accepted as a
 # secret or password, in any setting.
@@ -127,6 +129,8 @@ class Settings(BaseSettings):
     rate_limit_max_req: int = Field(default=120, validation_alias="RATE_LIMIT_MAX_REQ")
     activity_log_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="ACTIVITY_LOG_RETENTION_DAYS")
     access_log_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="ACCESS_LOG_RETENTION_DAYS")
+    # The passkey address (app.passkey_settings). Empty: not set here; the Settings page manages it.
+    passkey_origin: str = Field(default="", validation_alias="PASSKEY_ORIGIN")
 
     @field_validator("cookie_secure", mode="before")
     @classmethod
@@ -179,9 +183,20 @@ class Settings(BaseSettings):
                     "password on the PostgreSQL server, then update PGPASSWORD."
                 )
 
+        if self.passkey_origin.strip():
+            try:
+                canonical_origin(self.passkey_origin)
+            except InvalidOrigin as e:
+                problems.append(f"PASSKEY_ORIGIN: {e} Or remove it to set the address on the Settings page.")
+
         if problems:
             raise PydanticCustomError("insecure_settings", "\n".join(problems))
         return self
+
+    @property
+    def passkey_origin_env(self) -> str | None:
+        """The canonical PASSKEY_ORIGIN, or None when it is unset or empty."""
+        return canonical_origin(self.passkey_origin) if self.passkey_origin.strip() else None
 
     @property
     def allowed_areas_list(self) -> list[str]:

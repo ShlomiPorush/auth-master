@@ -9,13 +9,12 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.crypto_tokens import decrypt_token_value, encrypt_token_value, sha256_hex
-from app.crypto_totp import decrypt_totp_secret
 from app.datetime_utils import fmt_datetime
 from app.db import UniqueViolationError
 from app.deps import ALL_SCOPES
 from app.admin_deps import FullSession, csrf_check
 from app.logger import log_activity, get_actor
-from app.totp_guard import check_totp_code, log_totp_failure, totp_error
+from app.step_up import StepUpBody, verify_step_up
 
 router = APIRouter(prefix="/admin/api/api-keys", tags=["admin-api-keys"])
 
@@ -30,8 +29,7 @@ class ApiKeyPatch(BaseModel):
     scopes: list[str] | None = None
 
 
-class RevealBody(BaseModel):
-    code: str
+RevealBody = StepUpBody
 
 
 
@@ -207,14 +205,7 @@ async def reveal_api_key(
         raise HTTPException(404, "Not found")
     if not row["key_enc"]:
         raise HTTPException(409, "Key cannot be revealed (created before encrypted storage support)")
-    try:
-        secret = decrypt_totp_secret(admin_row["totp_secret_enc"])
-    except Exception as e:
-        raise HTTPException(500, "decrypt failed") from e
-    check = await check_totp_code(request.app.state.redis, admin_id, secret, body.code.replace(" ", ""))
-    if not check.ok:
-        await log_totp_failure(request, admin_id, "api_key_reveal", check)
-        raise totp_error(check, at_login=False)
+    method = await verify_step_up(request, str(admin_id), admin_row, body, "api_key_reveal")
 
     try:
         raw_key = decrypt_token_value(row["key_enc"])
@@ -230,6 +221,7 @@ async def reveal_api_key(
         entity_type="api_key",
         entity_id=key_id,
         entity_name=row["name"],
+        details={"method": method},
         ip_address=ip,
     )
 

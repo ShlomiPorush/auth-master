@@ -482,6 +482,7 @@ body.ui-app { overflow: hidden; }
 #key-table { --ui-cols: minmax(140px, 1fr) minmax(0, 1.8fr) 150px 40px; }
 #activity-table { --ui-cols: 130px minmax(100px, .8fr) 130px 110px minmax(100px, .9fr) minmax(0, 2fr) 140px; --ui-table-min: 1040px; }
 #access-table { --ui-cols: 130px minmax(120px, 1fr) minmax(90px, .8fr) 110px 90px 150px; --ui-table-min: 780px; }
+#pk-table { --ui-cols: minmax(140px, 1.2fr) 130px 130px minmax(0, 1.6fr) 40px; --ui-table-min: 700px; }
 .ui-table-body.is-dim { opacity: .6; transition: opacity .15s; }
 
 /* Header sort (TB-1): the label is a button; the arrow follows aria-sort */

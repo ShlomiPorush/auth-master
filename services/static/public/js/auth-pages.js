@@ -108,6 +108,86 @@ function authLogin() {
             window.location.href = basePath() + "/login-mfa" + (next ? "?next=" + encodeURIComponent(next) : "");
         });
     });
+    authPasskeyOffer();
+}
+
+// --- passkey sign-in (login) ----------------------------------------------
+
+var AUTH_PASSKEY_BROWSER = UI_PASSKEY_OLD_BROWSER + " Use your password and authenticator code.";
+var authPasskeyRunning = false;
+
+// The passkey button hides when the service has no passkey address: the probe
+// answers 409. It stores nothing; a click asks for new options and reports any
+// other failure then.
+function authPasskeyOffer() {
+    var box = document.getElementById("pk-login");
+    var note = document.getElementById("pk-note");
+    if (!box || !note) return;
+    document.getElementById("pk-signin").addEventListener("click", authPasskeySignIn);
+    authPost(adminApi("/admin/api/login/passkey/options", { method: "POST" })).then(function (res) {
+        if (res.status === 409) return;
+        var blocked = uiPasskeyBlocked(window, false);
+        if (blocked) {
+            note.textContent = blocked === "insecure" ? UI_PASSKEY_INSECURE : AUTH_PASSKEY_BROWSER;
+            note.classList.remove("hidden");
+            return;
+        }
+        box.classList.remove("hidden");
+    });
+}
+
+// Tell the password manager that the server does not know this passkey (sign-in only)
+function authPasskeyForget(rpId, credentialId) {
+    var pkc = window.PublicKeyCredential;
+    if (!pkc || typeof pkc.signalUnknownCredential !== "function" || !rpId || !credentialId) return;
+    try {
+        Promise.resolve(pkc.signalUnknownCredential({ rpId: rpId, credentialId: credentialId })).catch(function () {});
+    } catch (e) { /* a hint to the password manager only */ }
+}
+
+function authPasskeySignIn() {
+    if (authPasskeyRunning) return;
+    var button = document.getElementById("pk-signin");
+    authHideError();
+    authPasskeyRunning = true;
+    authBusy(button, true, "Waiting for your passkey...");
+    var done = function (text) {
+        authPasskeyRunning = false;
+        authBusy(button, false);
+        if (text) authShowError(text);
+    };
+    // New options on every click: a new challenge each time
+    authPost(adminApi("/admin/api/login/passkey/options", { method: "POST" })).then(function (opt) {
+        if (!opt.ok) {
+            if (opt.status === 409) document.getElementById("pk-login").classList.add("hidden");
+            done(authErrorText(opt, "Could not start the passkey sign-in. Try again."));
+            return;
+        }
+        var json = opt.data.publicKey || {};
+        var publicKey;
+        try {
+            publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(json);
+        } catch (e) {
+            done("This browser could not read the passkey request. Use your password and authenticator code.");
+            return;
+        }
+        navigator.credentials.get({ publicKey: publicKey }).then(function (credential) {
+            if (!credential) { done(""); return; }
+            var encoded = credential.toJSON();
+            authPost(adminApi("/admin/api/login/passkey", { method: "POST", body: { credential: encoded, ceremony: opt.data.ceremony } })).then(function (res) {
+                if (res.ok) {
+                    writeCsrf(res.data.csrf || "");
+                    window.location.href = basePath() + (safeNext() || "/");
+                    return;
+                }
+                // The server has no such passkey: the password manager may drop it
+                if (res.status === 404) authPasskeyForget(json.rpId, encoded.id);
+                done(authErrorText(res, "Could not sign in with the passkey. Try again."));
+            });
+        }, function (err) {
+            done(uiPasskeyErrorText(err, false));
+        });
+    });
 }
 
 // --- login-mfa ----------------------------------------------------------
