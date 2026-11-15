@@ -161,13 +161,26 @@ async def _ensure_pg(db: "Database") -> None:
 
     # Rate limit settings from the admin Settings page: one row per saved version, never
     # updated or deleted, so it is also the history of who changed what (app.rate_limit_settings).
+    # The same shape for the general settings (app.general_settings) and the Redis
+    # connection (app.redis_settings).  Each is its own table, so an older image that
+    # does not know them still starts.
+    for table in ("rate_limit_settings", "app_settings", "redis_settings"):
+        await db.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                version INTEGER PRIMARY KEY CHECK (version > 0),
+                value TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                ip_address TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+
+    # Internal state that is not a setting: markers of one-time steps and the access log
+    # purge boundary.
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS rate_limit_settings (
-            version INTEGER PRIMARY KEY CHECK (version > 0),
-            value TEXT NOT NULL,
-            actor TEXT NOT NULL,
-            ip_address TEXT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        CREATE TABLE IF NOT EXISTS app_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
     """)
 
@@ -286,12 +299,20 @@ async def _ensure_sqlite(db: "Database") -> None:
     await db.execute("INSERT INTO access_log_rollup_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
 
     # See _ensure_pg.
+    for table in ("rate_limit_settings", "app_settings", "redis_settings"):
+        await db.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table} (
+                version INTEGER PRIMARY KEY CHECK (version > 0),
+                value TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                ip_address TEXT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS rate_limit_settings (
-            version INTEGER PRIMARY KEY CHECK (version > 0),
-            value TEXT NOT NULL,
-            actor TEXT NOT NULL,
-            ip_address TEXT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        CREATE TABLE IF NOT EXISTS app_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
     """)

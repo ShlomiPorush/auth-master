@@ -315,7 +315,7 @@ body.ui-app { overflow: hidden; }
 .ui-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--ui-sp-6); align-items: end; }
 .ui-error { padding: var(--ui-sp-4) var(--ui-sp-6); border-radius: var(--ui-radius-sm); background: color-mix(in srgb, var(--ui-fail) 12%, transparent);
     color: var(--ui-fail); font-weight: 600; overflow-wrap: anywhere; }
-.ui-check { width: 16px; height: 16px; margin: 0; accent-color: var(--ui-accent); cursor: pointer; }
+.ui-check { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--ui-accent); cursor: pointer; }
 .ui-check-label { display: inline-flex; align-items: center; gap: var(--ui-sp-3); min-height: 28px; cursor: pointer; }
 
 /* Search field: the whole box focuses its input (FS-1) */
@@ -402,6 +402,14 @@ body.ui-app { overflow: hidden; }
 .ui-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-4); }
 .ui-settings-info { display: grid; }
 .ui-settings-info > .ui-alert:first-child { border-top: 0; }
+/* Confirmations the server asked for, inside a settings form */
+.ui-settings-asks { display: grid; gap: var(--ui-sp-4); }
+.ui-settings-asks:empty { display: none; }
+.ui-settings-asks .ui-check-label { margin-top: var(--ui-sp-3); }
+/* Masked URLs, zone names and paths wrap on a phone instead of widening the page */
+.ui-settings-fields code, .ui-settings-info code { overflow-wrap: anywhere; }
+.ui-locked-note svg { flex: none; }
+.ui-locked-note > span { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- Filter bar and count line ---------- */
 

@@ -12,10 +12,7 @@ refused.  The admin session ID and CSRF value come from app.sessions per test.  
 an in-memory fake.  Each test opens this run's own database: a temporary SQLite file, or
 the PostgreSQL database in ``TEST_DATABASE_URL`` when that is set (a throwaway database:
 the tests drop and recreate the zone name index).  The tests create and delete only
-their own zones and tokens (names starting with ``znc-``), except the ALLOWED_AREAS tests,
-which run only while the zones table is empty and remove what they created.  They skip
-when it is not, except in CI, where every database is new and a zone there was left by
-another test: they fail there.
+their own zones and tokens (names starting with ``znc-``).
 
 Requires pytest and httpx.
 """
@@ -42,11 +39,6 @@ _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 _DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DIR.name}/zones.db"
 _EXPECT_PG = not _DB_URL.startswith("sqlite")
 
-
-def _skip_or_fail_in_ci(reason: str) -> None:
-    # GitHub Actions sets CI.  Its databases are new for each run, so a zone this test did
-    # not create was leaked by another test, and a skip would hide that.
-    (pytest.fail if os.environ.get("CI") else pytest.skip)(reason)
 
 # Generated for this run, never taken from the environment the tests run in.  They take
 # effect when this module is the first to load the settings; the tests read the values
@@ -440,24 +432,6 @@ def test_grant_write_refusals():
     _run(run)
 
 
-def test_allowed_areas_fallback_takes_the_listed_spelling():
-    async def run():
-        from app.config import get_settings
-
-        async with _env() as e:
-            if await e.db.fetchval("SELECT count(*) FROM zones"):
-                _skip_or_fail_in_ci("the zones table is not empty, so ALLOWED_AREAS does not apply")
-            listed = [a for a in get_settings().allowed_areas_list if a.upper() != a]
-            if not listed:
-                pytest.skip("no ALLOWED_AREAS entry with lower-case letters")
-            resp, _ = await e.api_token("fb", [{"area": listed[0].upper(), "level": "read"}])
-            assert resp.status_code == 201, resp.text
-            tid = await e.db.fetchval("SELECT id FROM tokens WHERE name = $1", e.area("fb"))
-            assert await e.grants_of(str(tid)) == [{"area": listed[0], "level": "read"}]
-
-    _run(run)
-
-
 # ---------------------------------------------------------------------------
 # 3. Rename and delete reach every grant /validate matches to the zone
 # ---------------------------------------------------------------------------
@@ -488,33 +462,6 @@ def test_grants_in_another_spelling_follow_the_zone(op):
                     assert await e.grants_of(tid) == [{"area": e.area("lock"), "level": "read"}]
                     assert await e.validate(raw, e.area("lock")) is True
                     assert await e.validate(raw, e.area("key")) is False
-
-    _run(run)
-
-
-def test_allowed_areas_grant_is_removed_with_its_zone():
-    """A grant from the ALLOWED_AREAS era, then the zone created in another case."""
-    async def run():
-        from app.config import get_settings
-
-        async with _env() as e:
-            if await e.db.fetchval("SELECT count(*) FROM zones"):
-                _skip_or_fail_in_ci("the zones table is not empty, so ALLOWED_AREAS does not apply")
-            listed = [
-                a for a in get_settings().allowed_areas_list if a.upper() != a and _ZONE_NAME_RE.match(a.upper())
-            ]
-            if not listed:
-                pytest.skip("no ALLOWED_AREAS entry that can be a zone name in upper case")
-            area = listed[0]
-            resp, raw = await e.api_token("fb", [{"area": area, "level": "read"}])
-            assert resp.status_code == 201, resp.text
-            e.extra_zones.append(area.upper())
-            resp = await e.client.post("/admin/api/zones", headers=e.admin, json={"name": area.upper()})
-            assert resp.status_code == 201, resp.text
-            assert await e.validate(raw, area.upper()) is True
-            assert (await e.delete(resp.json()["id"])).status_code == 200
-            assert await e.validate(raw, area.upper()) is False
-            assert await e.validate(raw, area) is False
 
     _run(run)
 

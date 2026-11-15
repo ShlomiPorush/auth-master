@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The Settings page has a **General** panel for the time zone, the activity log and
+  access log retention, and the Secure session cookie. Each save is a new version in
+  the table `app_settings` and an entry in the Activity Log. A lower retention first
+  shows how many entries it will delete and asks you to confirm. Turning on the Secure
+  cookie from a page opened over plain HTTP asks you to confirm too. The panel also shows
+  `ROOT_PATH` read-only.
+- The Settings page has a **Redis connection** panel. A new URL is saved only after the
+  server connects with it and runs the commands the service uses on test keys under each of
+  its key prefixes; it takes effect when every instance of the service restarts. The page never shows the password. The saved
+  URL is stored encrypted in the table `redis_settings`.
+- The MFA step of the first setup has a **Name in authenticator apps** field
+  (`TOTP_ISSUER`, default `AuthService`). A new name updates the QR code.
+- The API Keys page shows a master key set by `ADMIN_API_KEY` as a locked row.
+- The Usage report names its hours and days in the time zone it was counted in. When an
+  earlier, shorter retention deleted part of the period, the page says so.
+
 ### Changed
 
 - The Usage page reads a summary of the access log instead of every row, so it
@@ -17,14 +35,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first start of this version summarises the rows already in the log in the
   background, newest first; until that ends, which takes a few minutes for a few
   million rows, the 30-day view can be slower than before.
+- `TZ`, `COOKIE_SECURE`, `ACTIVITY_LOG_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
+  `REDIS_URL` and `TOTP_ISSUER` now only override a field on the Settings page or the setup
+  page, which then shows it locked. At each start, `TZ`, `COOKIE_SECURE` and the retention
+  values set in the environment are saved on the Settings page, so removing them later keeps
+  their last value. `REDIS_URL` is saved once a check against it passes.
+- `ADMIN_API_KEY` is optional. Empty or unset means no master key. `docker-compose.yml` no
+  longer requires it, and `tools/generate-env.sh` and `tools/generate-env.ps1` no longer
+  create it. A set value keeps working, and a publicly known value is still refused.
+- `docker-compose.yml` no longer sets `TZ` or `ALLOWED_AREAS`, and it sets
+  `REDIS_DEFAULT_URL` to the bundled Redis instead of `REDIS_URL`. A value in `.env` still
+  reaches the service. When `COOKIE_SECURE` is not set, it passes it empty instead of
+  `false`, so the Secure session cookie field is not locked. An empty `COOKIE_SECURE` counts
+  as not set; `true` or `false` still locks the field.
+- `ALLOWED_AREAS` is deprecated. On the first start, an empty zones table gets its zones
+  once (`orders,billing,webhooks` when it was not set); entries that differ only in case
+  become one zone, with the first spelling. Zones then come only from the zones table, and
+  the Zones page shows them. After the last zone is deleted, `ALLOWED_AREAS` no longer
+  applies: a grant needs a zone.
+- An `ACTIVITY_LOG_RETENTION_DAYS` or `ACCESS_LOG_RETENTION_DAYS` below 1 or above 3650 now
+  stops the start. Before, `0` or a negative value deleted every log entry.
+- A server process deletes old log entries only when its retention equals the saved one.
+  Otherwise it skips the cleanup, and the Settings page shows why.
 
 ### Removed
 
+- `ENVIRONMENT`. The service never read it.
 - The `BOOTSTRAP_TOKEN` setting and the `X-Bootstrap-Token` header. The first
   person who completes the setup on `/setup`, including MFA, becomes the admin,
   and the setup page no longer has a bootstrap token field. A `BOOTSTRAP_TOKEN`
   that is still set is ignored. Complete the setup before the service can be
   reached from other machines.
+
+### Upgrade notes
+
+- An existing `docker-compose.yml` still sets `TZ` and `COOKIE_SECURE`, so those fields
+  stay locked until you change it. Remove the `TZ` and `ALLOWED_AREAS` lines, replace the
+  `COOKIE_SECURE` line with `COOKIE_SECURE: ${COOKIE_SECURE-}`, replace the `REDIS_URL` line
+  with `REDIS_DEFAULT_URL: redis://:${REDIS_PASSWORD:?...}@redis:6379`, and replace the
+  `ADMIN_API_KEY` line with `ADMIN_API_KEY: ${ADMIN_API_KEY:-}`. README.md has the exact
+  lines.
+- After a Redis URL is saved on the Settings page, changing `REDIS_PASSWORD` alone breaks the
+  connection. README.md, "Changing secrets", has the steps.
+- Changing `SESSION_SECRET` or `APP_ENCRYPTION_KEY` also makes the saved Redis URL
+  unreadable. Set `REDIS_URL` in the environment, start, and save the URL again.
+- To roll back to 2.1.x, first put the retention values, `TZ` and `COOKIE_SECURE` from the
+  Settings page into `.env`, use the `docker-compose.yml` of 2.1.x (or set `REDIS_URL` and
+  `COOKIE_SECURE` in `.env`, because 2.1.x does not start without `REDIS_URL` and refuses
+  an empty `COOKIE_SECURE`), and set `ADMIN_API_KEY`. Without the retention values, 2.1.x
+  uses 30 days and deletes older log entries within a minute. README.md, "Roll back to
+  2.1.x", has the steps.
 
 ## [2.1.0] - 2026-11-15
 

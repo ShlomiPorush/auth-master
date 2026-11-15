@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
@@ -30,11 +31,13 @@ class ZoneRenameConflict(Exception):
         self.token_names = token_names
 
 
+# app_state key of the one-time copy of ALLOWED_AREAS into the zones table.
+COPY_MARKER = "zones_from_allowed_areas"
+
+
 async def allowed_area_names(db: "Database") -> list[str]:
     rows = await db.fetch("SELECT name FROM zones ORDER BY name")
-    if rows:
-        return [r["name"] for r in rows]
-    return get_settings().allowed_areas_list
+    return [r["name"] for r in rows]
 
 
 @asynccontextmanager
@@ -46,7 +49,7 @@ async def grant_write_transaction(db: "Database"):
     fail, and one that starts after it waits for this transaction and then rewrites the
     grants it wrote.  SQLite: write_transaction already excludes every other writer.
     PostgreSQL: SHARE mode conflicts with INSERT, UPDATE and DELETE on zones (also when
-    the table is empty and ALLOWED_AREAS applies), not with reads or other grant writes.
+    the table is empty), not with reads or other grant writes.
     """
     async with write_transaction(db) as tx:
         if tx.is_pg:
@@ -202,3 +205,49 @@ async def ensure_zone_name_index(db: "Database") -> None:
             # A zone that differs only in case was added since the scan (an older version).
             groups = await duplicate_zone_groups(db)
     _warn_duplicates(groups)
+
+
+async def copy_allowed_areas_once(db: "Database") -> list[str] | None:
+    """Fill an empty zones table, once per database, with the areas that older versions
+    used when the table was empty: ALLOWED_AREAS, or its default.  This is the only reader
+    of ALLOWED_AREAS.
+
+    One zone change transaction (zone_change_transaction): the marker first (a concurrent
+    start waits for the zones lock, then fails on the marker key and skips), then the zones.
+    Names that differ only in case are one zone, as /validate compares them; the first
+    spelling is kept.  An interruption rolls everything back, so the next start repeats the
+    step.  Returns the zones added ([] when zones existed), or None when the step had
+    already run.  Deleting every zone later is not undone."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for area in get_settings().allowed_areas_list:
+        if fold_area(area) not in seen:
+            seen.add(fold_area(area))
+            names.append(area)
+    added: list[tuple[str, str]] = []
+    try:
+        async with zone_change_transaction(db) as tx:
+            await tx.execute(
+                "INSERT INTO app_state (key, value) VALUES ($1, $2)",
+                COPY_MARKER, datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+            if not await tx.fetchval("SELECT COUNT(*) FROM zones"):
+                for name in names:
+                    zid = str(uuid.uuid4())
+                    await tx.execute("INSERT INTO zones (id, name, description) VALUES ($1::uuid, $2, $3)", zid, name, "")
+                    added.append((zid, name))
+    except UniqueViolationError:
+        return None
+
+    from app.logger import log_activity
+
+    source = "ALLOWED_AREAS" if "allowed_areas" in get_settings().model_fields_set else "default"
+    for zid, name in added:
+        try:
+            await log_activity(
+                db, actor="environment", action="zone_create", entity_type="zone", entity_id=zid,
+                entity_name=name, details={"description": "", "source": source},
+            )
+        except Exception as e:
+            print(f"Zone {name} added from {source}, but the activity log entry failed ({type(e).__name__})")
+    return [name for _zid, name in added]

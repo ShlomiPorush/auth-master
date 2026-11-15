@@ -522,7 +522,8 @@ def test_save_applies_records_and_exempts(admin):
 
     rows = _db(admin, "SELECT version, actor, ip_address FROM rate_limit_settings")
     assert [(r["version"], r["ip_address"]) for r in rows] == [(1, "10.9.9.9")]
-    acts = _db(admin, "SELECT actor, details FROM activity_logs WHERE action = 'settings.update'")
+    # Startup may also record values copied from the environment (general, redis).
+    acts = _db(admin, "SELECT actor, details FROM activity_logs WHERE action = 'settings.update' AND entity_name = 'rate_limit'")
     assert len(acts) == 1 and json.loads(acts[0]["details"])["to"]["exempt"] == ["10.0.0.7"]
 
     # The exempt address is never limited; another one is.

@@ -81,7 +81,7 @@
     {"key": "mfa.submit", "kind": "action", "old": "'Verify & copy' / Cancel", "expect": ["Verify &amp; copy"]},
     {"key": "mfa.failed", "kind": "message", "old": "error j.detail || 'Verification failed'", "expect": ["Verification failed"]},
     {"key": "mfa.apikey.copied", "kind": "message", "old": "toast 'API key copied to clipboard' / 'Failed to copy'", "expect": ["API key copied to clipboard", "Failed to copy"]},
-    {"key": "zones.description", "kind": "message", "old": "'Zones define allowed API areas for new tokens. If the list is empty, ALLOWED_AREAS from the environment is used.'", "expect": ["Zones define allowed API areas for new tokens.", "ALLOWED_AREAS"]},
+    {"key": "zones.description", "kind": "message", "old": "'Zones define allowed API areas for new tokens. If the list is empty, ALLOWED_AREAS from the environment is used.'", "expect": ["Zones define allowed API areas for new tokens.", "Tokens can be granted only the zones listed here."], "changed": "The ALLOWED_AREAS fallback was removed: its list is copied once into the zones table, so the page names the zones table as the only source."},
     {"key": "zones.add.name", "kind": "field", "old": "form#zoneAdd name (required) 'Zone name', placeholder 'e.g. orders'", "expect": ["data-inventory=\"zones.add.name\"", "Zone name", "e.g. orders"]},
     {"key": "zones.add.description", "kind": "field", "old": "description 'Description (optional)', placeholder 'What this zone controls'", "expect": ["data-inventory=\"zones.add.description\"", "What this zone controls"]},
     {"key": "zones.add.submit", "kind": "action", "old": "button 'Add' -> POST /admin/api/zones", "expect": ["data-inventory=\"zones.add.submit\"", "api(\"POST\", \"/admin/api/zones\""]},

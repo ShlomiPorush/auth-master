@@ -81,8 +81,9 @@ def resolved_env(project: Path, extra: dict[str, str] | None = None, *args: str)
 
 
 def test_defaults_when_not_set(project):
-    # uvicorn 0.54's own default for FORWARDED_ALLOW_IPS, and the app's for COOKIE_SECURE
-    assert resolved_env(project) == {"FORWARDED_ALLOW_IPS": "127.0.0.1,::1", "COOKIE_SECURE": "false"}
+    # uvicorn 0.54's own default for FORWARDED_ALLOW_IPS. COOKIE_SECURE is passed empty,
+    # which the app reads as not set: the Settings page value applies, unlocked.
+    assert resolved_env(project) == {"FORWARDED_ALLOW_IPS": "127.0.0.1,::1", "COOKIE_SECURE": ""}
 
 
 def test_stack_variables_reach_the_container(project):
@@ -92,8 +93,8 @@ def test_stack_variables_reach_the_container(project):
 
 
 def test_empty_values_are_passed_as_they_are(project):
-    # Empty FORWARDED_ALLOW_IPS means "trust no proxy" to uvicorn; empty COOKIE_SECURE
-    # is refused by the app's settings. Neither turns into the default.
+    # Empty FORWARDED_ALLOW_IPS means "trust no proxy" to uvicorn; it does not turn into
+    # the default. Empty COOKIE_SECURE is what the app reads as not set.
     got = resolved_env(project, {"FORWARDED_ALLOW_IPS": "", "COOKIE_SECURE": ""})
     assert got == {"FORWARDED_ALLOW_IPS": "", "COOKIE_SECURE": ""}
 
@@ -105,8 +106,8 @@ def test_values_in_project_env_file_are_used(project):
 
 def test_other_env_file_replaces_project_env_file(project):
     # Documented precedence: with --env-file, Compose does not read the project's .env
-    # for these values, and the passed default wins over env_file: .env.
+    # for these values, and the passed value wins over env_file: .env.
     (project / ".env").write_text("FORWARDED_ALLOW_IPS=172.18.0.0/16\nCOOKIE_SECURE=true\n", encoding="utf-8")
     (project / "other.env").write_text("TZ=UTC\n", encoding="utf-8")
     got = resolved_env(project, None, "--env-file", "other.env")
-    assert got == {"FORWARDED_ALLOW_IPS": "127.0.0.1,::1", "COOKIE_SECURE": "false"}
+    assert got == {"FORWARDED_ALLOW_IPS": "127.0.0.1,::1", "COOKIE_SECURE": ""}

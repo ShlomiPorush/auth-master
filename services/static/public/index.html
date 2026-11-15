@@ -157,7 +157,7 @@
           <div class="ui-page-head">
             <div>
               <h1 class="ui-h1" id="h-zones">Zones</h1>
-              <p>Zones define allowed API areas for new tokens. If the list is empty, <code>ALLOWED_AREAS</code> from the environment is used.</p>
+              <p>Zones define allowed API areas for new tokens. Tokens can be granted only the zones listed here.</p>
             </div>
           </div>
 
@@ -345,13 +345,23 @@
           <div class="ui-page-head">
             <div>
               <h1 class="ui-h1" id="h-settings">Settings</h1>
-              <p>The rate limit on <code>/validate</code> and <code>/validate/grants</code>, and the addresses it never applies to.</p>
+              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, and the Redis connection.</p>
             </div>
+          </div>
+          <div class="ui-panel" id="general-panel">
+            <div class="ui-panel-head">General</div>
+            <div class="ui-settings-info" id="general-info" aria-live="polite"></div>
+            <div class="ui-panel-body" id="general-body"></div>
           </div>
           <div class="ui-panel" id="settings-panel">
             <div class="ui-panel-head">Rate limit</div>
             <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
             <div class="ui-panel-body" id="settings-body"></div>
+          </div>
+          <div class="ui-panel" id="redis-panel">
+            <div class="ui-panel-head">Redis connection</div>
+            <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
+            <div class="ui-panel-body" id="redis-body"></div>
           </div>
         </section>
       </main>

@@ -12,9 +12,13 @@ Definitions (the same everywhere in this module):
 - An area is grouped like validation compares it (grants.grant_covers): the logged text,
   stripped and lower-cased by Python. SQL groups by the exact text and Python merges.
 - Every query reads rows from the same start: the first bucket of the period, or the
-  retention cutoff (now - ACCESS_LOG_RETENTION_DAYS) when that is later. Rows older than
-  the cutoff that the purge has not deleted yet are never counted.
-- Periods are calendar buckets in the app time zone (TZ): the last 24 local hours, or the
+  data cutoff when that is later. The cutoff is now minus the access log retention, or the
+  purge boundary (app_state access_logs.purged_before) when that is later: rows before it
+  may have been deleted under an earlier, shorter retention. Rows older than the cutoff
+  that the purge has not deleted yet are never counted, nor is a row that the database
+  wrote with a time before the cutoff (its clock a day or more behind the service).
+- Periods are calendar buckets in the app time zone (the time zone setting), returned as
+  timeZone with the report: the last 24 local hours, or the
   last 7 or 30 local days including today. SQL counts calls in 15-minute UTC slots, and
   every UTC offset in use is a multiple of 15 minutes, so each slot falls in exactly one
   local hour or day, also on daylight saving days.
@@ -34,11 +38,12 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from app import general_settings
 from app.admin_deps import FullSession
-from app.config import get_settings
 from app.datetime_utils import fmt_datetime, get_tz_name, is_expired
 from app.db import report_database
-from app.usage_rollup import bind_time, ceil_slot, floor_slot, summary_valid_from, unrolled
+from app.logger import read_purged_before
+from app.usage_rollup import PurgeMark, bind_time, ceil_slot, floor_slot, summary_valid_from, unrolled
 
 router = APIRouter(prefix="/admin/api/usage", tags=["admin-usage"])
 
@@ -172,13 +177,27 @@ def _source(db, p: "_Period", params: _Params, token: Any = _ANY) -> str:
 
 
 class _Period:
-    def __init__(self, range_: str, now: datetime | None = None, tz: ZoneInfo | None = None, retention_days: int | None = None) -> None:
+    def __init__(
+        self,
+        range_: str,
+        now: datetime | None = None,
+        tz: ZoneInfo | None = None,
+        retention_days: int | None = None,
+        purged_before: PurgeMark | None = None,
+    ) -> None:
         now = now or datetime.now(timezone.utc)
         self.range = range_
         self.tz = tz or ZoneInfo(get_tz_name())
         self.buckets = _buckets(range_, now, self.tz)
-        self.retention_days = get_settings().access_log_retention_days if retention_days is None else retention_days
-        self.cutoff = now - timedelta(days=self.retention_days)
+        if retention_days is None:
+            retention_days = general_settings.current().access_log_retention_days
+        self.retention_days = retention_days
+        retention_cutoff = now - timedelta(days=self.retention_days)
+        # The later of the two limits: rows before the purge boundary may have been deleted.
+        self.purge_limited = purged_before is not None and purged_before > (retention_cutoff, False)
+        self.cutoff = purged_before.at if self.purge_limited else retention_cutoff
+        # Some rows of the cutoff time itself were deleted too (app.usage_rollup.PurgeMark).
+        self.cutoff_too = self.purge_limited and purged_before.at_too
         self.first = self.buckets[0][0]
         self.start = max(self.first, self.cutoff)
         self.now = now
@@ -188,7 +207,7 @@ class _Period:
     def coverage(self, start: datetime, end: datetime) -> str:
         if end <= self.cutoff:
             return "none"
-        if start < self.cutoff:
+        if start < self.cutoff or (start == self.cutoff and self.cutoff_too):
             return "partial"
         return "full"
 
@@ -199,7 +218,9 @@ class _Period:
             "to": fmt_datetime(self.now),
             "dataFrom": fmt_datetime(self.start),
             "retentionDays": self.retention_days,
-            "partial": self.cutoff > self.first,
+            "partial": self.cutoff > self.first or (self.cutoff == self.first and self.cutoff_too),
+            "timeZone": self.tz.key,
+            "dataFromReason": "purge" if self.purge_limited else "retention",
         }
 
     def series(self, slots: list[Any]) -> list[dict[str, Any]]:
@@ -352,7 +373,7 @@ async def _newest_names(db, p: "_Period", token_ids: list[str]) -> dict[str, str
 async def usage_overview(request: Request, _sess: FullSession, range_: Range = Query(default="7d", alias="range")):
     """Calls per token in the period, with the top areas and the calls over time."""
     async with report_database(request.app.state.db) as db:
-        return await _overview(db, _Period(range_))
+        return await _overview(db, _Period(range_, purged_before=await read_purged_before(db)))
 
 
 async def _overview(db, p: "_Period") -> dict[str, Any]:
@@ -442,7 +463,7 @@ async def usage_token(request: Request, token_id: str, _sess: FullSession, range
         if tid != token_id:
             raise HTTPException(404, "Token not found")
     async with report_database(request.app.state.db) as db:
-        return await _token_usage(db, _Period(range_), tid)
+        return await _token_usage(db, _Period(range_, purged_before=await read_purged_before(db)), tid)
 
 
 async def _token_usage(db, p: "_Period", tid: str | None) -> dict[str, Any]:

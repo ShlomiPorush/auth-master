@@ -16,7 +16,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "tools" / "generate-env.sh"
-NAMES = ("ADMIN_API_KEY", "SESSION_SECRET", "APP_ENCRYPTION_KEY", "REDIS_PASSWORD")
+NAMES = ("SESSION_SECRET", "APP_ENCRYPTION_KEY", "REDIS_PASSWORD")
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32" or shutil.which("sh") is None, reason="needs a POSIX sh"
@@ -52,7 +52,7 @@ def shim(directory: Path, body: str) -> Path:
     return bin_dir
 
 
-def test_creates_private_env_with_four_fresh_values(tmp_path):
+def test_creates_private_env_with_three_fresh_values(tmp_path):
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
     env_file = tmp_path / ".env"
@@ -62,7 +62,7 @@ def test_creates_private_env_with_four_fresh_values(tmp_path):
     )
     assert sorted(pairs) == sorted(NAMES)
     assert all(re.fullmatch(r"[0-9a-f]{64}", v) for v in pairs.values())
-    assert len(set(pairs.values())) == 4
+    assert len(set(pairs.values())) == len(NAMES)
     assert leftovers(tmp_path) == []
     for value in pairs.values():
         assert value not in result.stdout + result.stderr

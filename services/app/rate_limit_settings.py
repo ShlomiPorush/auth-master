@@ -11,11 +11,11 @@ exist only here.
 
 Settings are read and written on the database handle from db.open_settings_database(),
 where every statement commits on its own.  Each process loads them at startup and again
-every RELOAD_INTERVAL_SEC seconds; app.rate_limit.apply() only moves to newer versions.
+every RELOAD_INTERVAL_SEC seconds (app.main.settings_reload_loop); app.rate_limit.apply() only
+moves to newer versions.
 """
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import json
 import time
@@ -263,9 +263,3 @@ async def reload_once(db: Database) -> None:
     rate_limit.apply(effective(stored))
     status.last_ok_ms = time.time() * 1000
     status.last_error = None
-
-
-async def reload_loop(db: Database) -> None:
-    while True:
-        await asyncio.sleep(RELOAD_INTERVAL_SEC)
-        await reload_once(db)

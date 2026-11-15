@@ -1,7 +1,8 @@
 """GET /admin/api/me reports the time zone the server formats dates in.
 
-``timeZone`` is the IANA name from TZ, or "UTC" when TZ is not a valid zone,
-the same fallback the server's date formatting uses.
+``timeZone`` is the time zone setting in effect: TZ when the environment sets it (or
+"UTC" when TZ is empty or not a valid zone, the same fallback the server's date
+formatting uses), else the zone saved on the Settings page, else UTC.
 
 Every secret the app reads is generated per run with ``secrets``; the app opens
 this run's own temporary SQLite database and Redis is an in-memory fake.
@@ -14,7 +15,10 @@ import secrets
 import sys
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
+
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -68,33 +72,51 @@ class FakeRedis:
         pass
 
 
+
+
+_UNSET = object()
+
+
 @pytest.fixture()
-def client(monkeypatch):
+def start(monkeypatch, tmp_path):
+    """start(tz) starts the app with TZ set to `tz` (unset by default) on a new database,
+    signed in as an admin; returns the client.  The app's settings come from a Settings
+    object built here, because the cached one was fixed by the first module that loaded it."""
+    from contextlib import ExitStack
+
     from fastapi.testclient import TestClient
 
     import app.main as main_mod
-    from app.config import get_settings
+    from app import general_settings
     from app.sessions import COOKIE_NAME, session_record
 
-    s = get_settings()
-    for field in _SECRET_FIELDS:
-        if getattr(s, field) in _PLACEHOLDERS:
-            raise RuntimeError(f"{field} is empty or a placeholder")
-    create_database = main_mod.create_database
-    monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(_DATABASE_URL))
-    fake = FakeRedis()
-    monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
+    stack = ExitStack()
 
-    async def _no_cleanup(*_a, **_k):
-        return None
+    def run(tz=_UNSET):
+        if tz is _UNSET:
+            monkeypatch.delenv("TZ", raising=False)
+        else:
+            monkeypatch.setenv("TZ", tz)
+        s = Settings(_env_file=None)
+        for field in _SECRET_FIELDS:
+            if getattr(s, field) in _PLACEHOLDERS:
+                raise RuntimeError(f"{field} is empty or a placeholder")
+        monkeypatch.setattr(general_settings, "get_settings", lambda: s)
+        url = f"sqlite:///{tmp_path}/me.db"
+        create_database = main_mod.create_database
+        monkeypatch.setattr(main_mod, "create_database", lambda _url: create_database(url))
+        fake = FakeRedis()
+        monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: fake)
 
-    monkeypatch.setattr(main_mod, "cleanup_expired_tokens", _no_cleanup)
-    with TestClient(main_mod.app) as c:
-        db = main_mod.app.state.db
+        async def _no_cleanup(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(main_mod, "cleanup_expired_tokens", _no_cleanup)
+        c = stack.enter_context(TestClient(main_mod.app))
         admin_id = str(uuid.uuid4())
         # The hash is never checked: the session below is created directly.
         c.portal.call(
-            db.execute,
+            main_mod.app.state.db.execute,
             "INSERT INTO admin_users (id, username, password_hash, totp_enabled) VALUES ($1, $2, $3, $4)",
             admin_id, "tz-admin", "unused", True,
         )
@@ -102,30 +124,60 @@ def client(monkeypatch):
         key, value = session_record(sid, {"kind": "full", "adminId": admin_id, "csrf": secrets.token_hex(24)})
         fake.data[key] = value
         c.cookies.set(COOKIE_NAME, sid)
-        try:
-            yield c
-        finally:
-            c.portal.call(db.execute, "DELETE FROM admin_users WHERE id = $1", admin_id)
+        c.settings_db = main_mod.app.state.settings_db
+        return c
+
+    with stack:
+        yield run
+    general_settings.reset_state()
+
+
+def _save_zone(c, zone):
+    """Save `zone` as another process would, then reload as the 15-second loop does."""
+    from app import general_settings as gs
+
+    async def save():
+        stored = await gs.read_current(c.settings_db)
+        values = {**stored.values, "timeZone": zone}
+        assert await gs.insert_version(c.settings_db, stored.version + 1, gs.dump_value(values), "test", None)
+        await gs.reload_once(c.settings_db)
+
+    c.portal.call(save)
 
 
 @pytest.mark.parametrize("tz", ["Asia/Jerusalem", "UTC", "Asia/Kolkata", "America/New_York"])
-def test_me_reports_configured_zone(client, monkeypatch, tz):
-    monkeypatch.setenv("TZ", tz)
-    res = client.get("/admin/api/me")
+def test_me_and_dates_follow_the_saved_zone(start, tz):
+    from app.datetime_utils import fmt_datetime
+
+    c = start()
+    _save_zone(c, tz)
+    res = c.get("/admin/api/me")
     assert res.status_code == 200
     body = res.json()
     assert body["user"] == {"username": "tz-admin"}
     assert body["timeZone"] == tz
+    instant = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
+    expected = instant.astimezone(ZoneInfo(tz)).isoformat()
+    assert fmt_datetime(instant) == expected
+    assert fmt_datetime("2026-07-01 12:00:00") == expected
+
+
+@pytest.mark.parametrize("tz", ["Asia/Jerusalem", "Asia/Kolkata"])
+def test_environment_zone_wins_over_the_saved_one(start, tz):
+    c = start(tz)
+    assert c.get("/admin/api/me").json()["timeZone"] == tz
+    _save_zone(c, "America/New_York")
+    assert c.get("/admin/api/me").json()["timeZone"] == tz
 
 
 @pytest.mark.parametrize("tz", ["Not/AZone", "", "   ", "../../etc/passwd"])
-def test_me_falls_back_to_utc_for_an_invalid_zone(client, monkeypatch, tz):
-    monkeypatch.setenv("TZ", tz)
-    res = client.get("/admin/api/me")
-    assert res.status_code == 200
-    assert res.json()["timeZone"] == "UTC"
+def test_me_falls_back_to_utc_for_an_invalid_zone(start, tz):
+    c = start(tz)
+    assert c.get("/admin/api/me").json()["timeZone"] == "UTC"
+    # An invalid TZ still locks the field: a saved zone is not used.
+    _save_zone(c, "Asia/Jerusalem")
+    assert c.get("/admin/api/me").json()["timeZone"] == "UTC"
 
 
-def test_me_falls_back_to_utc_when_tz_is_unset(client, monkeypatch):
-    monkeypatch.delenv("TZ", raising=False)
-    assert client.get("/admin/api/me").json()["timeZone"] == "UTC"
+def test_me_falls_back_to_utc_when_nothing_is_set(start):
+    assert start().get("/admin/api/me").json()["timeZone"] == "UTC"

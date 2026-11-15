@@ -22,8 +22,9 @@ async def _resolve_api_key(request: Request, authorization: str | None = Header(
     if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # ENV key = full access
-    if token == get_settings().admin_api_key:
+    # ENV key = full access (only when one is set: an empty ADMIN_API_KEY means no master key)
+    master = get_settings().admin_api_key
+    if master.strip() and token == master:
         request.state.actor = "master_api_key"
         return list(ALL_SCOPES)
 

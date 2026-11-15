@@ -279,9 +279,12 @@ def test_hourly_and_monthly_periods(env):
 
 
 def test_rows_older_than_retention_are_not_counted(env, monkeypatch):
-    from app.config import get_settings
+    from dataclasses import replace
 
-    monkeypatch.setattr(get_settings(), "access_log_retention_days", 2)
+    from app import general_settings
+
+    # The access log retention in effect (environment, saved value, or default).
+    monkeypatch.setattr(general_settings, "_current", replace(general_settings.current(), access_log_retention_days=2))
     a = env.token("alpha")
     env.log(a, "alpha", "orders", "read", True)
     # Not purged yet, but older than the retention period.
@@ -472,9 +475,43 @@ def test_coverage_marks_the_retention_edge():
     assert p.start == now - timedelta(days=1)
 
 
+def test_a_purge_that_stopped_inside_the_first_moment_of_a_day_marks_it_partial():
+    """Also when the retention cutoff is exactly that moment: rows of it were deleted."""
+    from app.routers.admin_usage import _Period
+    from app.usage_rollup import PurgeMark
+
+    tz = ZoneInfo("UTC")
+    now = datetime(2026, 11, 13, 0, 0, tzinfo=timezone.utc)
+    day = now - timedelta(days=1)
+    for retention in (1, 3):  # the retention cutoff at the boundary, or before it
+        p = _Period("7d", now=now, tz=tz, retention_days=retention, purged_before=PurgeMark(day, at_too=True))
+        assert p.coverage(day, now) == "partial"
+        assert p.coverage(day - timedelta(days=1), day) == "none"
+        assert p.start == day
+        assert p.head()["dataFromReason"] == "purge"
+    # Without at_too, a boundary equal to the retention cutoff changes nothing.
+    p = _Period("7d", now=now, tz=tz, retention_days=1, purged_before=PurgeMark(now - timedelta(days=1)))
+    assert p.coverage(now - timedelta(days=1), now) == "full" and p.head()["dataFromReason"] == "retention"
+
+
 # ---------------------------------------------------------------------------
 # Summary of the access log (app.usage_rollup)
 # ---------------------------------------------------------------------------
+
+
+def _retention(monkeypatch, days):
+    """The access log retention in effect (environment, saved value, or default)."""
+    from dataclasses import replace
+
+    from app import general_settings
+
+    monkeypatch.setattr(general_settings, "_current", replace(general_settings.current(), access_log_retention_days=days))
+
+
+def _days():
+    from app import general_settings
+
+    return general_settings.current().access_log_retention_days
 
 
 def _report(env, now, tz):
@@ -506,10 +543,9 @@ def _raw_report(env, now, tz):
 
 def _roll(env, now, **kw):
     from app import usage_rollup
-    from app.config import get_settings
 
     async def run():
-        return await usage_rollup.roll_up(env.db, get_settings().access_log_retention_days, now, pause=0, **kw)
+        return await usage_rollup.roll_up(env.db, _days(), now, pause=0, **kw)
 
     return env.run(run)
 
@@ -646,12 +682,11 @@ def test_concurrent_and_cancelled_summaries(env):
     import asyncio
 
     from app import usage_rollup
-    from app.config import get_settings
 
     tz = ZoneInfo("UTC")
     _fill(env, _NOW)
     before = _report(env, _NOW, tz)
-    days = get_settings().access_log_retention_days
+    days = _days()
 
     async def cancelled():
         task = asyncio.create_task(usage_rollup.roll_up(env.db, days, _NOW, chunk_rows=3, pause=0.01))
@@ -684,13 +719,8 @@ def test_concurrent_and_cancelled_summaries(env):
 
 
 def test_purge_drops_the_summary_of_deleted_rows(env, monkeypatch):
-    from app.config import get_settings
-    from app.logger import purge_old_logs
-    from app.usage_rollup import floor_slot
-
-    import app.logger as logger_mod
     from app import usage_rollup
-    from app.usage_rollup import bind_time
+    from app.usage_rollup import bind_time, floor_slot
 
     tz = ZoneInfo("UTC")
     a = env.token("alpha")
@@ -698,12 +728,9 @@ def test_purge_drops_the_summary_of_deleted_rows(env, monkeypatch):
     now = floor_slot(datetime.now(timezone.utc)) - timedelta(minutes=8)
     cutoff = now - timedelta(days=2)
 
-    class Clock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return now
+    def purge(days):
+        env.run(usage_rollup.purge_access_logs, env.db, now - timedelta(days=days))
 
-    monkeypatch.setattr(logger_mod, "datetime", Clock)
     t = now - timedelta(days=4)
     while t < now:
         env.log(a, "alpha", "orders", "read", True, at=t, n=2)
@@ -715,8 +742,8 @@ def test_purge_drops_the_summary_of_deleted_rows(env, monkeypatch):
     _roll(env, now)
     _consistent(env)
 
-    monkeypatch.setattr(get_settings(), "access_log_retention_days", 2)
-    env.run(purge_old_logs, env.db, 30, 2)
+    _retention(monkeypatch, 2)
+    purge(2)
     _consistent(env)
     kept = _scalar(env, "SELECT MIN(slot) FROM access_log_rollup")
     kept_at = kept if isinstance(kept, datetime) else datetime.strptime(kept, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -731,19 +758,19 @@ def test_purge_drops_the_summary_of_deleted_rows(env, monkeypatch):
     )
     assert left >= 10
     # A purge with a longer retention (or an earlier clock) never moves valid_from back.
-    env.run(purge_old_logs, env.db, 30, 5)
+    purge(5)
     assert env.run(usage_rollup.summary_valid_from, env.db) == floor_slot(cutoff) + timedelta(minutes=15)
     # Nor does deleting a row written late with an old time (a clock that was behind).
     env.log(a, "alpha", "orders", "read", True, at=cutoff - timedelta(hours=5))
-    env.run(purge_old_logs, env.db, 30, 2)
+    purge(2)
     assert env.run(usage_rollup.summary_valid_from, env.db) == floor_slot(cutoff) + timedelta(minutes=15)
-    monkeypatch.setattr(get_settings(), "access_log_retention_days", 5)
+    _retention(monkeypatch, 5)
     assert _report(env, now, tz) == _raw_report(env, now, tz)
     _roll(env, now)
 
     # A longer retention after the purge shows exactly the rows that are left.
     for days in (2, 5):
-        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        _retention(monkeypatch, days)
         later = datetime.now(timezone.utc)
         summarised = _report(env, later, tz)
         assert summarised == _raw_report(env, later, tz)
@@ -759,7 +786,6 @@ def test_purge_in_chunks_with_a_stale_summary_run(env, monkeypatch, stop_after):
     import asyncio
 
     from app import usage_rollup
-    from app.config import get_settings
 
     tz = ZoneInfo("UTC")
     a = env.token("alpha")
@@ -796,7 +822,7 @@ def test_purge_in_chunks_with_a_stale_summary_run(env, monkeypatch, stop_after):
     assert calls["sleeps"] >= (stop_after or 2)
     _consistent(env)
     for days in (2, 5):
-        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        _retention(monkeypatch, days)
         assert _report(env, now, tz) == _raw_report(env, now, tz)
         _roll(env, now - timedelta(days=1))
         _consistent(env)
@@ -808,7 +834,6 @@ def test_a_stopped_purge_keeps_the_summary_in_use(env, monkeypatch):
     import asyncio
 
     from app import usage_rollup
-    from app.config import get_settings
 
     tz = ZoneInfo("UTC")
     a = env.token("alpha")
@@ -834,14 +859,13 @@ def test_a_stopped_purge_keeps_the_summary_in_use(env, monkeypatch):
     valid_from = env.run(usage_rollup.summary_valid_from, env.db)
     assert first + timedelta(hours=4) <= valid_from <= first + timedelta(hours=5, minutes=15)
     _consistent(env)
-    monkeypatch.setattr(get_settings(), "access_log_retention_days", 5)
+    _retention(monkeypatch, 5)
     summarised = _report(env, now, tz)
     assert summarised == _raw_report(env, now, tz)
     assert summarised[("7d", "overview")]["totals"]["calls"] == 4 * 144 - 30
 
 
 def test_periods_without_a_whole_slot(env, monkeypatch):
-    from app.config import get_settings
 
     tz = ZoneInfo("UTC")
     a = env.token("alpha")
@@ -850,10 +874,10 @@ def test_periods_without_a_whole_slot(env, monkeypatch):
     env.log(a, "alpha", "orders", "read", True, at=_NOW)
     _roll(env, _NOW)
     for days in (0, 1):
-        monkeypatch.setattr(get_settings(), "access_log_retention_days", days)
+        _retention(monkeypatch, days)
         assert _report(env, _NOW, tz) == _raw_report(env, _NOW, tz)
         _roll(env, _NOW)
-    monkeypatch.setattr(get_settings(), "access_log_retention_days", 0)
+    _retention(monkeypatch, 0)
     r = _report(env, _NOW, tz)
     assert r[("24h", "overview")]["totals"]["calls"] == 1
     res = env.get("/admin/api/usage/tokens", range="24h")
@@ -873,7 +897,7 @@ def test_shutdown_stops_the_first_cleanup(monkeypatch):
     monkeypatch.setattr(main_mod.redis, "from_url", lambda *a, **k: FakeRedis())
     events: list[str] = []
 
-    async def slow_cleanup(_db):
+    async def slow_cleanup(*_args):
         events.append("started")
         try:
             await asyncio.sleep(3600)

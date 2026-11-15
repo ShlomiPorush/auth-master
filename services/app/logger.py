@@ -1,9 +1,10 @@
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
+from typing import Any
 from fastapi import Request
 from app.db import Database
-from app.usage_rollup import purge_access_logs
+from app.usage_rollup import PURGED_BEFORE_KEY, PurgeMark, purge_access_logs
 
 # Longest area, in characters, that /validate accepts and the access log stores.
 # Zone names are at most 63 characters; the rest leaves room for surrounding spaces.
@@ -74,17 +75,73 @@ async def log_access(
         )
 
 
-async def purge_old_logs(db: Database, activity_days: int, access_days: int) -> None:
-    """Delete logs older than retention settings."""
-    now_utc = datetime.now(timezone.utc)
-    activity_cutoff = now_utc - timedelta(days=activity_days)
-    access_cutoff = now_utc - timedelta(days=access_days)
+_LOGS = (
+    ("activity", "activity_logs", "activityLogRetentionDays"),
+    ("access", "access_logs", "accessLogRetentionDays"),
+)
 
-    if db.is_sqlite:
-        # SQLite uses "YYYY-MM-DD HH:MM:SS" (UTC) format
-        act_str = activity_cutoff.strftime("%Y-%m-%d %H:%M:%S")
-        await db.execute("DELETE FROM activity_logs WHERE created_at < $1", act_str)
-    else:
-        await db.execute("DELETE FROM activity_logs WHERE created_at < $1", activity_cutoff)
-    # Together with the Usage summary rows that count the deleted rows (app.usage_rollup).
-    await purge_access_logs(db, access_cutoff)
+# Only while no settings version was saved since the purge read the settings.
+_VERSION_UNCHANGED = "(SELECT COALESCE(MAX(version), 0) FROM app_settings) = $2"
+
+
+def _bind_time(db: Database, value: datetime):
+    # SQLite stores created_at as "YYYY-MM-DD HH:MM:SS" in UTC.
+    return value.strftime("%Y-%m-%d %H:%M:%S") if db.is_sqlite else value
+
+
+async def init_purged_before(db: Database, retention_days: int) -> None:
+    """Once per database: installs that ran an older version kept only the access log rows
+    of the last `retention_days` days, so data before that start is not claimed."""
+    start = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    await db.execute(
+        "INSERT INTO app_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING",
+        PURGED_BEFORE_KEY, PurgeMark(start).encode(),
+    )
+
+
+async def read_purged_before(db: Any) -> PurgeMark | None:
+    value = await db.fetchval("SELECT value FROM app_state WHERE key = $1", PURGED_BEFORE_KEY)
+    try:
+        return PurgeMark.decode(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+async def purge_old_logs(db: Database, settings_db: Database) -> None:
+    """Delete log rows older than their retention, only while this process uses the
+    retention that is saved (app.general_settings.purge_mismatch).
+
+    Each DELETE also requires that no settings version was saved since the read, so a save
+    in between stops it until the next round.  Access log rows go in chunks, each with the
+    Usage summary state and the purge boundary in its transaction (app.usage_rollup)."""
+    from app import general_settings as gs
+
+    try:
+        stored = await gs.read_current(settings_db)
+    except Exception as e:
+        reason = e.message if isinstance(e, gs.InvalidSettings) else f"Could not read the saved settings ({type(e).__name__})."
+        for kind, _table, _name in _LOGS:
+            gs.record_purge(kind, "skipped", reason)
+        return
+
+    eff = gs.current()
+    now = datetime.now(timezone.utc)
+    for kind, table, name in _LOGS:
+        days = eff.value(name)
+        problem = gs.purge_mismatch(name, days, stored)
+        if problem:
+            gs.record_purge(kind, "skipped", problem)
+            continue
+        cutoff = now - timedelta(days=days)
+        try:
+            if kind == "access":
+                await purge_access_logs(db, cutoff, settings_version=stored.version)
+            else:
+                await db.execute(
+                    f"DELETE FROM {table} WHERE created_at < $1 AND {_VERSION_UNCHANGED}",
+                    _bind_time(db, cutoff), stored.version,
+                )
+        except Exception as e:
+            gs.record_purge(kind, "skipped", f"The purge failed ({type(e).__name__}); it runs again within a minute.")
+            continue
+        gs.record_purge(kind, "ok", None)

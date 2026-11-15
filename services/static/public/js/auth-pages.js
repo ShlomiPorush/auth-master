@@ -178,6 +178,61 @@ function authSetupExpired(reason) {
     document.getElementById("start-over").setAttribute("href", basePath() + "/setup");
 }
 
+// The QR code, the secret and the issuer name from an enrollment answer
+function authSetupMfaShow(data) {
+    var secret = data.secretBase32 || "";
+    document.getElementById("sec").innerHTML = uiCopyable(secret);
+    document.getElementById("qr").innerHTML = "";
+    new QRCode(document.getElementById("qr"), { width: 180, height: 180, text: data.otpauthUrl });
+    var input = document.getElementById("issuer");
+    var locked = document.getElementById("issuer-locked");
+    var issuer = data.issuer || "";
+    input.value = issuer;
+    input.setAttribute("data-saved", issuer);
+    if (data.issuerMaxLength) input.maxLength = data.issuerMaxLength;
+    input.classList.toggle("hidden", !!data.issuerLocked);
+    document.getElementById("issuer-hint").classList.toggle("hidden", !!data.issuerLocked);
+    locked.classList.toggle("hidden", !data.issuerLocked);
+    locked.innerHTML = data.issuerLocked
+        ? UI_LOCK_ICON + "<span>Set by the <code>" + esc(data.issuerEnvName || "TOTP_ISSUER") + "</code> environment variable (" + esc(issuer) +
+          "). Remove it there to change the name here.</span>"
+        : "";
+}
+
+// A new issuer name: the server keeps it for this setup only and answers with a new QR code
+var authIssuerPending = null;
+function authIssuerSave() {
+    var input = document.getElementById("issuer");
+    var err = document.getElementById("issuer-err");
+    var name = input.value.trim();
+    if (authIssuerPending || input.classList.contains("hidden") || name === input.getAttribute("data-saved")) return authIssuerPending;
+    err.classList.add("hidden");
+    input.removeAttribute("aria-invalid");
+    if (!name) {
+        input.setAttribute("aria-invalid", "true");
+        err.textContent = "Name in authenticator apps: enter a name.";
+        err.classList.remove("hidden");
+        return null;
+    }
+    input.disabled = true;
+    authIssuerPending = authPost(adminApi("/admin/api/bootstrap/issuer", { method: "POST", body: { issuer: name }, csrf: readCsrf() })).then(function (res) {
+        authIssuerPending = null;
+        input.disabled = false;
+        if (res.status === 401 || res.status === 400) {
+            authSetupExpired(authErrorText(res, ""));
+            return;
+        }
+        if (!res.ok || !res.data || !res.data.otpauthUrl) {
+            if (res.status === 422) input.setAttribute("aria-invalid", "true");
+            err.textContent = authErrorText(res, "Could not change the name. Try again.");
+            err.classList.remove("hidden");
+            return;
+        }
+        authSetupMfaShow(res.data);
+    });
+    return authIssuerPending;
+}
+
 function authSetupMfa() {
     var form = document.getElementById("f");
     var code = form.querySelector('[name="code"]');
@@ -186,16 +241,24 @@ function authSetupMfa() {
             authSetupExpired(res.error ? AUTH_NETWORK_TEXT : authErrorText(res, ""));
             return;
         }
-        var secret = res.data.secretBase32 || "";
-        document.getElementById("sec").innerHTML = uiCopyable(secret);
-        document.getElementById("qr").innerHTML = "";
-        new QRCode(document.getElementById("qr"), { width: 180, height: 180, text: res.data.otpauthUrl });
+        authSetupMfaShow(res.data);
         document.getElementById("setup-mfa-loading").classList.add("hidden");
         document.getElementById("setup-mfa-ready").classList.remove("hidden");
         code.focus();
     });
+    document.getElementById("issuer").addEventListener("change", authIssuerSave);
+    document.getElementById("issuer-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        authIssuerSave();
+    });
     form.addEventListener("submit", function (event) {
         event.preventDefault();
+        // A name change still on its way (the field lost focus to this button) finishes first
+        var pending = authIssuerPending;
+        if (pending) {
+            pending.then(function () { if (document.getElementById("f")) form.requestSubmit(); });
+            return;
+        }
         authHideError();
         code.removeAttribute("aria-invalid");
         if (!code.value.trim()) { authFieldError(code, "Enter the code from your authenticator app."); return; }
