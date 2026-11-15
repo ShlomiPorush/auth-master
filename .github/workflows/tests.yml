@@ -41,6 +41,70 @@ jobs:
           fi
           node --test "${files[@]}"
 
+  pytest-postgres:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install -r services/requirements.txt -r services/requirements-dev.txt
+
+      # A new server for each run, with a password generated here and masked in the log.
+      # Not a job service container: its password would have to be written in this file.
+      # Readiness is checked over TCP, which the image's temporary setup server does not open.
+      - name: Start PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          pw="$(openssl rand -hex 32)"
+          echo "::add-mask::$pw"
+          docker run -d --name pg -p 127.0.0.1:5432:5432 \
+            -e POSTGRES_USER=auth -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=postgres \
+            postgres:16-alpine > /dev/null
+          ready=0
+          for _ in $(seq 60); do
+            if docker exec pg pg_isready -q -h 127.0.0.1 -U auth -d postgres; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "PostgreSQL did not become ready in 60 seconds." >&2
+            docker logs pg >&2
+            exit 1
+          fi
+          for db in authtest expiry_test usage_test logs_test; do
+            docker exec pg psql -q -v ON_ERROR_STOP=1 -U auth -d postgres -c "CREATE DATABASE $db"
+          done
+          base="postgres://auth:$pw@127.0.0.1:5432"
+          {
+            echo "TEST_DATABASE_URL=$base/authtest"
+            echo "EXPIRY_TEST_DATABASE_URL=$base/expiry_test"
+            echo "USAGE_TEST_DATABASE_URL=$base/usage_test"
+            echo "AUTH_TEST_POSTGRES_URL=$base/logs_test"
+          } >> "$GITHUB_ENV"
+
+      # Without these the PostgreSQL cases would skip, and the job would pass without them.
+      - name: Run Python tests on PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in TEST_DATABASE_URL EXPIRY_TEST_DATABASE_URL USAGE_TEST_DATABASE_URL AUTH_TEST_POSTGRES_URL; do
+            case "${!name:-}" in
+              postgres://*) ;;
+              *) echo "$name does not point to PostgreSQL." >&2; exit 1 ;;
+            esac
+          done
+          python -m pytest services/tests -q -rs
+
   docker-build:
     runs-on: ubuntu-latest
 

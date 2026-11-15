@@ -19,6 +19,8 @@ Every secret the app reads is generated per run with ``secrets``; a placeholder 
 Redis is an in-memory fake.  Each test opens this run's own database: a temporary SQLite
 file, or the PostgreSQL database in ``TEST_DATABASE_URL`` when that is set.  The tests
 create and delete only their own zones and tokens (names starting with ``zgc-``).
+A test that needs a zones table without other zones skips when it finds one, except in
+CI, where every database is new and such a zone was left by another test: it fails there.
 
 Requires pytest and httpx.
 """
@@ -43,6 +45,12 @@ _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 _DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DIR.name}/zones.db"
 # As create_database() decides: anything that is not a sqlite URL goes to asyncpg.
 _EXPECT_PG = not _DB_URL.startswith("sqlite")
+
+
+def _skip_or_fail_in_ci(reason: str) -> None:
+    # GitHub Actions sets CI.  Its databases are new for each run, so a zone this test did
+    # not create was leaked by another test, and a skip would hide that.
+    (pytest.fail if os.environ.get("CI") else pytest.skip)(reason)
 
 # Generated for this run, never taken from the environment the tests run in.  They take
 # effect when this module is the first to load the settings; the tests read the API key
@@ -462,7 +470,7 @@ def test_fallback_grant_write_is_refused_after_the_first_zone_is_created(route, 
     async def run():
         async with _env() as e:
             if await e.zone_names():
-                pytest.skip("the zones table of this database is not empty")
+                _skip_or_fail_in_ci("the zones table of this database is not empty")
             area = e.area("env")
             monkeypatch.setattr(get_settings(), "allowed_areas", area)
             token = None
@@ -623,7 +631,7 @@ def test_fallback_grant_write_waits_for_an_uncommitted_first_zone(route, monkeyp
     async def run():
         async with _env() as e:
             if await e.zone_names():
-                pytest.skip("the zones table of this database is not empty")
+                _skip_or_fail_in_ci("the zones table of this database is not empty")
             area = e.area("env")
             monkeypatch.setattr(get_settings(), "allowed_areas", area)
             token = await e.token("t", [{"area": area, "level": "read"}]) if route.endswith("_patch") else None
@@ -806,7 +814,7 @@ def test_grant_write_refused_when_the_last_zone_is_deleted(route, how, monkeypat
     async def run():
         async with _env() as e:
             if await e.zone_names():
-                pytest.skip("the zones table of this database is not empty")
+                _skip_or_fail_in_ci("the zones table of this database is not empty")
             monkeypatch.setattr(get_settings(), "allowed_areas", "")
             steps = range(1, 2) if how == "uncommitted" else range(1, _MAX_STEPS + 1)
             for step in steps:
@@ -945,7 +953,7 @@ def test_zone_rename_does_not_turn_a_non_string_area_into_a_grant():
             number = str(10**11 + secrets.randbelow(10**11))
             cases = [(number, int(number)), ("true", True)]
             if "true" in await e.zone_names():
-                pytest.skip("this database already has a zone named true")
+                _skip_or_fail_in_ci("this database already has a zone named true")
             created = []
             try:
                 for text, stored_area in cases:
