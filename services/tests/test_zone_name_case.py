@@ -13,7 +13,9 @@ an in-memory fake.  Each test opens this run's own database: a temporary SQLite 
 the PostgreSQL database in ``TEST_DATABASE_URL`` when that is set (a throwaway database:
 the tests drop and recreate the zone name index).  The tests create and delete only
 their own zones and tokens (names starting with ``znc-``), except the ALLOWED_AREAS tests,
-which run only while the zones table is empty and remove what they created.
+which run only while the zones table is empty and remove what they created.  They skip
+when it is not, except in CI, where every database is new and a zone there was left by
+another test: they fail there.
 
 Requires pytest and httpx.
 """
@@ -39,6 +41,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 _DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DIR.name}/zones.db"
 _EXPECT_PG = not _DB_URL.startswith("sqlite")
+
+
+def _skip_or_fail_in_ci(reason: str) -> None:
+    # GitHub Actions sets CI.  Its databases are new for each run, so a zone this test did
+    # not create was leaked by another test, and a skip would hide that.
+    (pytest.fail if os.environ.get("CI") else pytest.skip)(reason)
 
 # Generated for this run, never taken from the environment the tests run in.  They take
 # effect when this module is the first to load the settings; the tests read the values
@@ -438,7 +446,7 @@ def test_allowed_areas_fallback_takes_the_listed_spelling():
 
         async with _env() as e:
             if await e.db.fetchval("SELECT count(*) FROM zones"):
-                pytest.skip("the zones table is not empty, so ALLOWED_AREAS does not apply")
+                _skip_or_fail_in_ci("the zones table is not empty, so ALLOWED_AREAS does not apply")
             listed = [a for a in get_settings().allowed_areas_list if a.upper() != a]
             if not listed:
                 pytest.skip("no ALLOWED_AREAS entry with lower-case letters")
@@ -491,7 +499,7 @@ def test_allowed_areas_grant_is_removed_with_its_zone():
 
         async with _env() as e:
             if await e.db.fetchval("SELECT count(*) FROM zones"):
-                pytest.skip("the zones table is not empty, so ALLOWED_AREAS does not apply")
+                _skip_or_fail_in_ci("the zones table is not empty, so ALLOWED_AREAS does not apply")
             listed = [
                 a for a in get_settings().allowed_areas_list if a.upper() != a and _ZONE_NAME_RE.match(a.upper())
             ]
