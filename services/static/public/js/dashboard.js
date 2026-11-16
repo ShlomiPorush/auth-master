@@ -2896,6 +2896,85 @@ DASH_PAGE_IMPL.usage = function () {
 registerPageRefresh("usage", 60000, function (isCurrent) { return dashUseLoad(isCurrent); });
 
 // ===========================================================================
+// WP4: the database in use changed (WP2 dispatches ui:db-changed after a switch,
+// or after a recovery that may have changed it). The lists and Usage drop what
+// they hold, answers to reads that started before are ignored, and the page
+// shown reads its data again from the database now in use (P27).
+// ===========================================================================
+
+function dashListsDbChanged() {
+    // Token, zone, API key and passkey reads under way publish nothing
+    uiMutated();
+    var store = dashTokenStore;
+    store.rows = null;
+    store.at = 0;
+    store.pending = null;
+    store.pendingMark = -1;
+    store.failed = "";
+    dash.zones = [];
+    dash.areas = [];
+    dash.zonesLoaded = false;
+    dash.zonesFailed = "";
+    dashTok.drawn = "";
+    dashZones.loaded = false;
+    dashZones.at = 0;
+    dashZones.drawn = "";
+    dashKeys.rows = null;
+    dashKeys.master = null;
+    dashKeys.failed = "";
+    dashKeys.at = 0;
+    dashKeys.drawn = "";
+    Object.keys(dashLogs).forEach(function (k) {
+        var s = dashLogs[k];
+        // A first load, a next page or a refresh under way is of the old list
+        s.gen += 1;
+        s.loadSeq += 1;
+        s.loading = false;
+        dashLogDim(s, false);
+        s.rows = null;
+        s.rowsFor = null;
+        s.heads = {};
+        s.nexts = {};
+        s.pending = [];
+        s.total = 0;
+        s.hasMore = false;
+        s.capped = false;
+        s.failed = "";
+        s.refreshFailed = "";
+        s.moreFailed = "";
+        s.at = 0;
+        s.drawn = "";
+    });
+    dashUse.seq += 1;
+    dashUse.data = null;
+    dashUse.dataFor = "";
+    dashUse.notFound = false;
+    dashUse.failed = "";
+    dashUse.at = 0;
+    dashUse.sel = -1;
+    dashUse.drawn = "";
+    dashUse.shown = null;
+    dashLimit.seq += 1;
+    dashLimit.data = null;
+    dashLimit.failed = "";
+    dashLimit.at = 0;
+    dashLimit.drawn = "";
+    dashPk.seq += 1;
+    dashPk.data = null;
+    dashPk.failed = "";
+    dashPk.pending = null;
+    dashPk.at = 0;
+    dashPk.drawn = "";
+    // The page shown reads again; Needs attention counts from the new token list
+    if (DASH_DB_LISTS.indexOf(uiPageCurrent) !== -1 && DASH_PAGE_IMPL[uiPageCurrent]) DASH_PAGE_IMPL[uiPageCurrent]({ fresh: true });
+    uiRefreshNow("attention");
+}
+
+var DASH_DB_LISTS = ["tokens", "zones", "apikeys", "activity", "access", "usage", "account"];
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") window.addEventListener("ui:db-changed", dashListsDbChanged);
+
+// ===========================================================================
 // Settings: three panels, each with its own saved versions and Save. General
 // (time zone, log retention, the session cookie), the rate limit and the
 // addresses exempt from it, and the Redis connection. Each form edits a draft
