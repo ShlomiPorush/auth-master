@@ -137,13 +137,14 @@ def _refuse_problems(result: CheckResult) -> None:
         )
 
 
-async def _create_postgres_installation(db: Any, installation_id: str) -> None:
+async def _create_postgres_installation(db: Any, installation_id: str, migration_id: str | None = None) -> None:
     """Schema and installation row in one transaction (an empty database, or adoption of
-    an older installation, whose missing tables and columns are added)."""
+    an older installation, whose missing tables and columns are added).  `migration_id`:
+    the installation moved from SQLite earlier, which the new row keeps recording."""
     async with db.transaction() as tx:
         await ensure_database_schema(tx)
         if await installation.read(tx) is None:
-            await installation.create(tx, installation_id)
+            await installation.create(tx, installation_id, migration_id=migration_id)
 
 
 async def _adopt_sqlite(db: Any, installation_id: str) -> None:
@@ -326,7 +327,8 @@ async def run_edit(rt: Runtime, app: Any, job: Job, params: PgParams, confirm_co
         if result.state == db_inspect.OLDER:
             if not confirm_copy:
                 raise OperationError("confirm_copy", COPY_TEXT_OLDER, identity="older")
-            await _create_postgres_installation(new_db, cfg.installation_id)
+            await _create_postgres_installation(new_db, cfg.installation_id, cfg.migration_id)
+            result.migration_id = cfg.migration_id
             action = "database.adopted"
         else:
             same = await db_inspect.same_live_database(rt.db, new_db)
@@ -414,7 +416,9 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
         if result.state == db_inspect.OLDER:
             iid = expected or installation.new_id()
             if new_db.is_pg:
-                await _create_postgres_installation(new_db, iid)
+                moved = rt.config.migration_id if rt.config is not None and rt.config.installation_id == iid else None
+                await _create_postgres_installation(new_db, iid, moved)
+                result.migration_id = moved
             else:
                 await _adopt_sqlite(new_db, iid)
             action = "database.adopted"
@@ -455,6 +459,10 @@ def _pg_config(iid: str, params: PgParams, migration_id: str | None, current: Co
     """A PostgreSQL configuration that keeps the record of a move from SQLite: the
     installation row keeps the move's id for good, so every later save (a connection change,
     a recovery) writes it again, and the recovery page keeps refusing the old SQLite file."""
+    if not migration_id and current is not None and current.installation_id == iid:
+        # A row without the move's id (an adopted older database): the current
+        # configuration still knows the installation moved.
+        migration_id = current.migration_id
     if not migration_id:
         return Config(db_config.POSTGRES, iid, pg=params)
     moved = (current.moved_from_sqlite if current is not None and current.migration_id == migration_id

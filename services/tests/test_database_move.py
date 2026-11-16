@@ -434,9 +434,10 @@ def test_the_move_copies_everything_and_switches(workdir, monkeypatch, capsys):
 def test_the_move_under_load_loses_no_acknowledged_write(workdir, monkeypatch):
     """Requests and admin writes run through the whole move; every one succeeds and every
     acknowledged write is in PostgreSQL."""
-    from app import rate_limit
+    from app.routers import validate as validate_route
 
-    monkeypatch.setattr(rate_limit, "allow_validate", lambda ip: True)
+    # The route holds its own reference to the limiter.
+    monkeypatch.setattr(validate_route, "allow_validate", lambda ip: True)
 
     async def go():
         async with pg_database() as pg:
@@ -445,6 +446,12 @@ def test_the_move_under_load_loses_no_acknowledged_write(workdir, monkeypatch):
                 seeded = await _seed(svc, c)
                 token = seeded["tokens"][0]["token"]
                 statuses: list[int] = []
+                unexpected: list[tuple] = []
+
+                def note(path, res):
+                    statuses.append(res.status_code)
+                    if res.status_code not in (200, 201, 204):
+                        unexpected.append((path, res.status_code, res.text[:200], svc.runtime.mode))
                 live: dict[str, str] = {}  # token id -> last acknowledged description
                 deleted: set[str] = set()
                 validated = 0
@@ -458,18 +465,18 @@ def test_the_move_under_load_loses_no_acknowledged_write(workdir, monkeypatch):
                         res = await w.post("/admin/api/tokens", json={
                             "name": f"load{i}", "grants": [{"area": "alpha", "level": "read"}], "description": "new",
                         })
-                        statuses.append(res.status_code)
+                        note("create", res)
                         if res.status_code != 201:
                             continue
                         tid = res.json()["id"]
                         live[tid] = "new"
                         res = await w.patch(f"/admin/api/tokens/{tid}", json={"description": f"edited{i}"})
-                        statuses.append(res.status_code)
+                        note("patch", res)
                         if res.status_code == 200:
                             live[tid] = f"edited{i}"
                         if i % 3 == 0:
                             res = await w.delete(f"/admin/api/tokens/{tid}")
-                            statuses.append(res.status_code)
+                            note("delete", res)
                             if res.status_code in (200, 204):
                                 live.pop(tid)
                                 deleted.add(tid)
@@ -479,14 +486,14 @@ def test_the_move_under_load_loses_no_acknowledged_write(workdir, monkeypatch):
                     v = svc.client()
                     while not stop.is_set():
                         res = await v.post("/validate", json={"token": token, "area": "alpha", "level": "read"})
-                        statuses.append(res.status_code)
+                        note("validate", res)
                         if res.status_code == 200:
                             validated += 1
 
                 async def health():
                     h = svc.client()
                     while not stop.is_set():
-                        statuses.append((await h.get("/health")).status_code)
+                        note("health", await h.get("/health"))
                         await asyncio.sleep(0)
 
                 logs_before = _sqlite_counts(workdir / "data" / "auth.db")["access_logs"]
@@ -499,7 +506,7 @@ def test_the_move_under_load_loses_no_acknowledged_write(workdir, monkeypatch):
                     stop.set()
                     await asyncio.gather(*workers)
                 assert job["state"] == "done", job
-                assert set(statuses) <= {200, 201, 204}, sorted(set(statuses))
+                assert not unexpected, unexpected[:5]
                 assert validated > 10 and len(live) + len(deleted) > 3
                 db = svc.app.state.db
                 assert db.is_pg
@@ -1007,5 +1014,42 @@ def test_a_failed_stop_of_background_work_starts_it_again(workdir, monkeypatch):
                     await asyncio.sleep(0.05)
                 assert rt.tasks and any(not t.done() for t in rt.tasks), "background work runs again"
                 assert svc.app.state.db.is_sqlite
+
+    run(go())
+
+
+@needs_pg
+def test_adopting_an_older_postgres_database_after_a_move_keeps_its_record(workdir, monkeypatch):
+    """A backup without the installation table, adopted from Settings after a move, still
+    records the move (installation row and data/database.json)."""
+    async def go():
+        from urllib.parse import quote
+
+        from app.db import create_database
+        from app.schema import ensure_database_schema
+
+        async with pg_database() as pg:
+            older = await pg.add_database()
+            db = await create_database(f"postgres://{pg.user}:{quote(pg.password)}@{pg.host}:{pg.port}/{older}")
+            try:
+                await ensure_database_schema(db)
+                await db.execute("DROP TABLE installation")
+            finally:
+                await db.close()
+            async with service(monkeypatch) as svc:
+                _admin, totp, c = await _signed_in_sqlite(svc)
+                job = await _move(c, pg, totp)
+                assert job["state"] == "done", job
+                migration_id = svc.config()["migrationId"]
+                res = await c.put("/admin/api/settings/database",
+                                  json={"postgres": pg.body(database=older), "code": fresh_code(totp), "confirmCopy": True})
+                assert res.status_code == 202, res.text
+                # Read from the runtime: the adopted copy has no admin, so this session ends.
+                job = svc.runtime.jobs.get(res.json()["job"]["id"])
+                while job.state == "running":
+                    await asyncio.sleep(0.05)
+                assert job.state == "done" and job.result["action"] == "database.adopted", job.view()
+                assert svc.config()["migrationId"] == migration_id
+                assert await svc.app.state.db.fetchval("SELECT migration_id FROM installation") == migration_id
 
     run(go())
