@@ -861,6 +861,11 @@ def catalog_problems(sources: dict[str, str]) -> list[str]:
         used |= {k for k in keys if k.startswith(prefix)}
     for key in sorted(keys - used):
         problems.append(f"UI_TEXT {key!r} is used nowhere")
+    # Every value is written by the writer before it ships: an empty one shows nothing
+    for key, value in sorted(catalog.items()):
+        forms = value.values() if isinstance(value, dict) else [value]
+        if any(not isinstance(v, str) or not v.strip() for v in forms):
+            problems.append(f"UI_TEXT {key!r} has no text")
     return problems
 
 
@@ -1263,6 +1268,12 @@ def test_catalog_guard_catches_unused_and_repeated_keys():
     problems = catalog_problems(copy)
     assert any("'tokens.never-used' is used nowhere" in p for p in problems)
     assert any("repeats the key 'tokens.name'" in p for p in problems)
+
+
+def test_catalog_guard_catches_an_empty_value():
+    copy = dict(SOURCES)
+    copy[TEXT_JS] = re.sub(r'("tokens\.name": )"[^"\n]*"', r'\1""', copy[TEXT_JS], count=1)
+    assert any("'tokens.name' has no text" in p for p in catalog_problems(copy))
 
 
 # ---------------------------------------------------------------------------
