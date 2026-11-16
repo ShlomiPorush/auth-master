@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer read.
 - Each Settings section has its own address, such as `/admin/settings/database`.
 
+### Changed
+
+- The dashboard follows the v3 design throughout:
+  - A top bar on wide screens holds the page title, its help button, a search of the whole portal (press `/`) and the page's actions. The sidebar folds into an icon rail, and the browser remembers that choice.
+  - Every page has a help button beside its title.
+  - Settings is split into sections with one save bar for all of them. Each change is marked, and a field can be reset to its default. Stored secrets show as stored, with Replace. Questions about risky changes come up in a dialog before saving.
+  - The logs load more rows as you scroll and offer new entries at the top.
+  - The Usage chart zooms, and an overview strip shows the whole period.
+  - A list that could not be updated says so and keeps its rows.
+- Every word the dashboard shows comes from one text catalog, `services/static/public/js/text.js`, and the wording was rewritten throughout.
+
 ### Fixed
 
 - A database connection change whose answer was lost no longer reads as "nothing running"
