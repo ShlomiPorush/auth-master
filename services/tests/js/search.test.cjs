@@ -154,7 +154,10 @@ test("hostile and long names are escaped, marked and kept whole", () => {
 
 test("Settings results come from SETTINGS_INDEX, by name first, then by field id, and lead to their address", () => {
     const ctx = load();
-    assert.equal(ctx.dashSearchResults("zone").settings.count, 0, "no index yet: no Settings results and no error");
+    const index = ctx.SETTINGS_INDEX;
+    ctx.SETTINGS_INDEX = undefined;
+    assert.equal(ctx.dashSearchResults("zone").settings.count, 0, "no index: no Settings results and no error");
+    ctx.SETTINGS_INDEX = index;
     ctx.UI_TEXT["test.general"] = "General";
     ctx.UI_TEXT["test.tz"] = "Time zone";
     ctx.UI_TEXT["test.retention"] = "Keep logs for";

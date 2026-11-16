@@ -264,9 +264,13 @@ var UI_TEXT = {
     "dates.12-hour": "12-hour",
     "dates.24-hour": "24-hour",
     "dates.am": "{time} AM",
+    // brief: option of the Time Format choice in Settings > General: times use the browser's own clock (12- or 24-hour by the browser's language), max 2 words
+    "dates.browser-clock": "",
     "dates.browser-order": "Browser order",
     "dates.d-ago": "{n} d ago",
     "dates.dd-mm-yyyy": "DD/MM/YYYY",
+    // brief: option of the Date Format picker in Settings > General: day, month, year with dots between them (the format DD.MM.YYYY), max 12 characters, written as the pattern like the other options
+    "dates.dd-mm-yyyy-dot": "",
     "dates.h-ago": "{n} h ago",
     "dates.just-now": "just now",
     "dates.min-ago": "{n} min ago",
@@ -371,8 +375,11 @@ var UI_TEXT = {
     "login.continue": "Continue",
     "login.could-not-sign-in-with-the": "Could not sign in with the passkey. Try again.",
     "login.could-not-start-the-passkey-sign": "Could not start the passkey sign-in. Try again.",
-    "login.failed": "Failed",
     "login.have-a-passkey-sign-in-with": "Have a passkey? Sign in with your fingerprint, face or screen lock instead.",
+    // brief: error banner on the sign-in page (password or passkey) when no answer came from the server; must say the server could not be reached and to check the connection and try again, max 12 words
+    "login.no-network": "",
+    // brief: error banner on the sign-in page when the server refused the user name and password without saying why; must say signing in did not work and to try again, max 10 words
+    "login.no-reason": "",
     "login.passkey-old-browser": "This browser cannot use passkeys here. Use your password and authenticator code.",
     "login.password": "Password",
     "login.password-enter-your-password": "Password: enter your password",
@@ -394,7 +401,10 @@ var UI_TEXT = {
     "loginmfa.enter-the-code-from-your-authenticator": "Enter the code from your authenticator app.",
     "loginmfa.enter-your-6-digit-code-to": "Enter your 6-digit code to continue",
     "loginmfa.enter-your-authenticator-code-to-sign": "Enter your authenticator code to sign in",
-    "loginmfa.failed": "Failed",
+    // brief: error banner on the authenticator code step of sign-in when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "loginmfa.no-network": "",
+    // brief: error banner on the authenticator code step of sign-in when the server refused the code without saying why; must say the code was not accepted and to try a new one, max 12 words
+    "loginmfa.no-reason": "",
     "loginmfa.sign-in": "Sign In",
     "loginmfa.signing-in": "Signing in...",
 
@@ -648,7 +658,23 @@ var UI_TEXT = {
     // brief: line under the results shown in the global search while tokens, zones or API keys are still being read; max 3 words
     "search.still-searching": "",
 
+    // brief: note under the Redis URL field that failed the check: it must be a URL starting with redis:// or rediss://, max 12 words
+    "settings.check.a-redis-url": "",
+    // brief: note under the passkey address field that failed the check: it must be a whole address starting with https:// (or http://localhost), max 12 words
+    "settings.check.an-address": "",
+    // brief: error message when a field fails the check before saving; {label} is the field's label, {problem} what is wrong with it, max 2 words besides the placeholders
+    "settings.check.field-problem": "",
+    // brief: error message when several fields fail the check before saving; {n} is the number of fields, {label} the label of the first one; must say they need a valid value and name the first, one and other forms, max 10 words besides the placeholders
+    "settings.check.fields-problem": { "one": "", "other": "" },
+    // brief: note under the exempt addresses field that failed the check: more lines than allowed; {max} is the limit, max 8 words besides {max}
+    "settings.check.too-many-lines": "",
+    // brief: note under a number field that failed the check before saving: it must be a whole number from {min} to {max}, max 8 words besides the placeholders
+    "settings.check.whole-number-from": "",
     "settings.checked": "This server process enforces version {version}, checked {time}.",
+    // brief: confirm button (red) of the question before a shorter log retention is saved: the older log entries are deleted and the change saved, max 3 words
+    "settings.confirm.delete-and-save": "",
+    // brief: confirm button of the question before a new Redis connection is saved: save it, the admin restarts every instance of the service afterwards, max 4 words
+    "settings.confirm.save-and-restart-later": "",
     "settings.could-not-load-the-general-settings": "Could not load the general settings",
     "settings.could-not-load-the-redis-connection": "Could not load the Redis connection",
     "settings.could-not-load-the-settings": "Could not load the settings",
@@ -658,6 +684,10 @@ var UI_TEXT = {
     "settings.database.6-digit-code": "6-digit code",
     "settings.database.adopt-this-database-changes-made-after": "Adopt this database. Changes made after it was taken are lost.",
     "settings.database.cancel": "Cancel",
+    // brief: primary button of the Database section that checks the new connection, asks for the second factor and changes the connection; it is separate from the save bar, max 3 words
+    "settings.database.change-connection": "",
+    // brief: line with a spinner in the Database section while the connection change runs or its state is read again; every Settings field is locked meanwhile, max 14 words
+    "settings.database.change-in-progress": "",
     "settings.database.change-it-for-a-new-password": "Change it for a new password, user, host or TLS setting of the same database, or to use a restored copy of it. The service checks the new connection first; requests wait a few seconds while it switches.",
     "settings.database.check-connection": "Check connection",
     "settings.database.checking": "Checking...",
@@ -671,30 +701,91 @@ var UI_TEXT = {
     "settings.database.enter-the-code-from-your-authenticator": "Enter the code from your authenticator app.",
     "settings.database.enter-your-6-digit-authenticator-code": "Enter your 6-digit authenticator code to save the database connection.",
     "settings.database.loading-the-database-connection": "Loading the database connection...",
+    // brief: error line in the Database section when nothing was saved because the database belongs to another installation of this service, max 12 words
+    "settings.database.nothing-saved-another-installation": "",
+    // brief: error line in the Database section when the check of the new connection failed and nothing was saved, max 10 words
+    "settings.database.nothing-saved-check-failed": "",
+    // brief: error line in the Database section when nothing was saved because the new connection could not be opened (the check shows why above), max 12 words
+    "settings.database.nothing-saved-connection-failed": "",
+    // brief: error line in the Database section when nothing was saved because the database holds tables of something else, max 12 words
+    "settings.database.nothing-saved-other-data": "",
+    // brief: error line in the Database section when nothing was saved because the database lacks some of this service's tables (a partial restore), max 14 words
+    "settings.database.nothing-saved-tables-missing": "",
+    // brief: error line in the Database section when nothing was saved because the database holds a copy that was not finished, max 12 words
+    "settings.database.nothing-saved-unfinished-copy": "",
+    // brief: error line in the Database section when nothing was saved because the database user lacks what the service needs (the check lists it above), max 14 words
+    "settings.database.nothing-saved-user-unusable": "",
     "settings.database.nothing-was-changed": "Nothing was changed: {reason}",
-    "settings.database.nothing-was-saved": "Nothing was saved: {reason}.",
     "settings.database.or-enter-your-6-digit-code": "Or enter your 6-digit code below.",
     "settings.database.passwords-are-never-shown": "{summary} Passwords are never shown.",
     "settings.database.postgresql": "PostgreSQL {where}.",
     "settings.database.postgresql-2": "PostgreSQL",
-    "settings.database.save": "Save",
+    // brief: button in that warning that reloads the page, max 3 words
+    "settings.database.reload-the-page": "",
+    // brief: warning text under that title: the connection shown is what the server reports now; a change of password only cannot be seen there; Settings stay locked until the page is reloaded; nothing was sent again, max 40 words
+    "settings.database.result-unknown": "",
+    // brief: warning title in the Database section when the answer to the connection change was lost and the server shows no running change: it is not known whether the connection changed, max 10 words
+    "settings.database.result-unknown-title": "",
+    // brief: note under the Database change button while other Settings sections hold unsaved changes: save or discard them first (the change may switch to a database with other settings), max 18 words
+    "settings.database.save-other-changes-first": "",
     "settings.database.saving": "Saving...",
     "settings.database.sqlite": "SQLite",
+    // brief: error text under that title; {reason} is the server's reason or a network message; must say only the state is read again by Try again and the change is never sent again, max 25 words besides {reason}
+    "settings.database.status-unread": "",
+    // brief: error title in the Database section when the state of the connection change could not be read; Settings stay locked, max 10 words
+    "settings.database.status-unread-title": "",
     "settings.database.the-check-failed": "The check failed.",
-    "settings.database.the-check-failed-2": "the check failed",
     "settings.database.the-server-did-not-answer": "The server did not answer.",
     "settings.database.the-sqlite-file": "The SQLite file {path}.",
     "settings.database.tick-the-box-to-confirm-then": "Tick the box to confirm, then save.",
     "settings.database.tls": "PostgreSQL {where}, TLS {mode}.",
+    // brief: button in that error that reads the state of the change again (not the change itself), max 2 words
+    "settings.database.try-again": "",
     "settings.database.use-a-passkey": "Use a passkey",
     "settings.database.use-a-passkey-or-your-6": "Use a passkey or your 6-digit authenticator code to save the database connection.",
     "settings.database.use-it-anyway-changes-made-after": "Use it anyway. Changes made after it was taken are lost.",
     "settings.database.use-this-copy-changes-made-after": "Use this copy. Changes made after it was taken are lost.",
     "settings.database.verification-failed": "Verification failed",
     "settings.database.verify-save": "Verify & save",
+    // brief: note under the Database change button while the save bar is saving other settings: the change can start when that save ends, max 12 words
+    "settings.database.wait-for-the-save": "",
     "settings.database.with-a-ca-certificate": "PostgreSQL {where}, TLS {mode} with a CA certificate.",
     "settings.default-value": "Default value.",
     "settings.discard-my-changes": "Discard my changes",
+    // brief: panel title in Settings > General above Date Format and Time Format, and the name of this part in the save result message (for example the list of what was saved), max 3 words
+    "settings.display": "",
+    // brief: text of that note; {saved} is a sentence naming the version, who saved it and when (or that nothing was saved yet), {applied} a sentence naming the version this server process uses; must add that a save applies to this tab at once and to other open tabs when they are reloaded, max 25 words besides the placeholders
+    "settings.display.changes-apply": "",
+    // brief: bold title in the Date and time panel when the formats could not be read the first time (a Try again button follows), max 7 words
+    "settings.display.could-not-load": "",
+    // brief: error line under the Date and time panel when saving the formats failed and the server gave no reason; the change is kept, max 8 words
+    "settings.display.could-not-save": "",
+    // brief: tooltip value of the lock mark on Date Format or Time Format when the environment variable holds a value that is not one of the choices; {value} is the default format used instead, max 8 words besides {value}
+    "settings.display.env-invalid": "",
+    // brief: warning text under that title: {env} is the variable as code, {value} the default format used instead; must say the field stays locked, what is used, and to set the variable to one of the listed choices or remove it to choose here, max 35 words
+    "settings.display.env-not-a-choice": "",
+    // brief: warning title in the Date and time panel: the environment variable {env} (DATE_FORMAT or TIME_FORMAT) is set to a value that is not one of the choices, max 8 words besides {env}
+    "settings.display.env-not-a-choice-title": "",
+    // brief: loading line in the Date and time panel of Settings > General while the formats are read, max 6 words
+    "settings.display.loading": "",
+    // brief: title of the note in the Date and time panel about the saved version of the formats, max 3 words
+    "settings.display.saved-formats": "",
+    // brief: part of the conflict note in the Date and time panel: what another admin saved; {date} is the date format, {time} the time format, max 8 words besides the placeholders
+    "settings.display.saved-now": "",
+    // brief: warning text under that title: the defaults (Browser order, 24-hour) are used until the formats are saved again here, max 25 words
+    "settings.display.stored-invalid": "",
+    // brief: warning title in the Date and time panel when the saved formats in the database could not be read, max 8 words
+    "settings.display.stored-invalid-title": "",
+    // brief: browser tab title on a Settings section; {section} is the section name, {app} the app name; names the page Settings, the section and the app, max 6 words besides the placeholders
+    "settings.document-title": "",
+    // brief: small blue pill beside a setting's label when its value differs from the default, max 1 word
+    "settings.field.changed": "",
+    // brief: tooltip of that pill: the value differs from the default, max 5 words
+    "settings.field.changed-title": "",
+    // brief: text button under a changed setting that puts its default back; {value} is the default value; must name the action and the default, max 4 words besides {value}
+    "settings.field.reset-to-default": "",
+    // brief: small lock pill beside the label of a setting that an environment variable sets; {env} is the variable name; must say the environment variable sets it, max 3 words besides {env}
+    "settings.field.set-by-env": "",
     "settings.general": "General",
     "settings.general.about": "about {count}",
     "settings.general.access-log": "access log",
@@ -708,8 +799,6 @@ var UI_TEXT = {
     "settings.general.count-activity-log-entries": { "one": "{n} activity log entry", "other": "{n} activity log entries" },
     "settings.general.count-days": { "one": "{n} day", "other": "{n} days" },
     "settings.general.dates-on-every-page-and-the": "{source} Dates on every page and the Usage report use it. Other open tabs show the previous time zone until they are reloaded.",
-    "settings.general.delete-them-when-i-save": "Delete them when I save",
-    "settings.general.discard-changes": "Discard changes",
     "settings.general.environment-variable": "Set by the {env} environment variable: {value}. It must match the route of your reverse proxy, so it is set in the environment only.",
     "settings.general.environment-variable-is-empty-or-not": "The {env} environment variable is empty or not a time zone name, so dates use UTC. Set it to a name such as {example}, or remove it to choose the time zone here.",
     "settings.general.europe-london": "Europe/London",
@@ -722,13 +811,10 @@ var UI_TEXT = {
     "settings.general.old": "Old {log} entries were not deleted",
     "settings.general.older-than-the-new-limit": "{detail} Older than the new limit: {parts}.",
     "settings.general.on": "on",
-    "settings.general.retention-must-be-a-whole-number": "Retention must be a whole number of days.",
-    "settings.general.save": "Save",
     "settings.general.saved-now-time-zone": "Saved now: time zone {zone}; activity log {activity}; access log {access}; Secure cookie {cookie}.",
     "settings.general.saved-settings": "Saved settings",
     "settings.general.secure-session-cookie": "Secure session cookie",
     "settings.general.send-the-session-cookie-over-https": "Send the session cookie over HTTPS only",
-    "settings.general.settings-saved": "Settings saved",
     "settings.general.the-cleanup-runs-again-every-minute": "{reason} The cleanup runs again every minute.",
     "settings.general.this-page-was-opened-over-plain": "This page was opened over plain HTTP",
     "settings.general.this-server-process-skipped-the-cleanup": "This server process skipped the cleanup.",
@@ -747,40 +833,48 @@ var UI_TEXT = {
     "settings.loading-settings": "Loading settings...",
     "settings.loading-the-general-settings": "Loading the general settings...",
     "settings.loading-the-redis-connection": "Loading the Redis connection...",
+    // brief: small uppercase group heading in the Settings section list above Database and Redis (connections to other servers), max 2 words
+    "settings.nav.group-connections": "",
+    // brief: small uppercase group heading in the Settings section list above General, Rate limit and Passkeys (settings of the service itself), max 2 words
+    "settings.nav.group-service": "",
+    // brief: accessible name of the Settings section list (sidebar beside the fields), it names the list of Settings sections, max 3 words
+    "settings.nav.label": "",
+    // brief: hidden label read by screen readers for the narrow-screen drop-down that picks a Settings section, max 3 words
+    "settings.nav.picker-label": "",
+    // brief: option text of the narrow-screen section picker for a section that holds unsaved changes; {section} is the section name; must say the section has unsaved changes, max 5 words besides {section}
+    "settings.nav.section-changed": "",
     "settings.passkeys": "Passkeys",
     "settings.passkeys.a-new-host-name-or-no": "A new host name, or no address, makes the passkeys made for the old one unusable until it is set back. Passwords and authenticator codes keep working.",
     "settings.passkeys.change": "Change",
     "settings.passkeys.change-the-passkey-address": "Change the passkey address?",
     "settings.passkeys.could-not-load-the-passkey-address": "Could not load the passkey address",
-    "settings.passkeys.could-not-refresh-the-passkey-address": "Could not refresh the passkey address: {reason}",
     "settings.passkeys.could-not-save-the-passkey-address": "Could not save the passkey address.",
-    "settings.passkeys.discard-changes": "Discard changes",
     "settings.passkeys.loading-the-passkey-address": "Loading the passkey address...",
     "settings.passkeys.no-passkey-works-until-an-address": "No passkey works until an address is set again. Passwords and authenticator codes keep working.",
     "settings.passkeys.not-set-yet-the-first-passkey": "The address admins open this service at, such as {here}. Passkeys work only there. HTTPS is required, except on localhost. Not set yet: the first passkey added on the Account page sets it to the address used then.",
     "settings.passkeys.passkey-address": "Passkey address",
-    "settings.passkeys.passkey-address-removed": "Passkey address removed",
-    "settings.passkeys.passkey-address-saved": "Passkey address saved",
     "settings.passkeys.passkeys-made-for": "Passkeys made for {address} stop working at the new address. Passwords and authenticator codes keep working.",
     "settings.passkeys.passkeys-made-for-another-address-stop": "Passkeys made for another address stop working",
-    "settings.passkeys.reload": "Reload",
     "settings.passkeys.remove": "Remove",
     "settings.passkeys.remove-the-passkey-address": "Remove the passkey address?",
-    "settings.passkeys.save": "Save",
     "settings.passkeys.saved-by": "The address admins open this service at, such as {here}. Passkeys work only there. HTTPS is required, except on localhost. Saved by {user} {time}.",
-    "settings.passkeys.saving": "Saving...",
+    // brief: part of the conflict note of the passkey address: the address another admin saved, {address} as code, max 4 words besides {address}
+    "settings.passkeys.saved-now": "",
+    // brief: the same part when another admin removed the passkey address: no address is saved now, max 6 words
+    "settings.passkeys.saved-now-none": "",
     "settings.passkeys.the-address-admins-open-this-service": "The address admins open this service at, such as {here}. Passkeys work only there. HTTPS is required, except on localhost.",
-    "settings.passkeys.the-server-did-not-answer": "The server did not answer.",
     "settings.rate-limit": "Rate limit",
     "settings.ratelimit.203-0-113-10-172-18": "203.0.113.10\n172.18.0.0/16",
     "settings.ratelimit.an-exempt-address-is-not-limited": "An exempt address is not limited at all",
     "settings.ratelimit.an-ipv6-64-network-counts-as": "An IPv6 /64 network counts as one address.",
     "settings.ratelimit.changes-apply-at-once-in-this": "{saved} {applied} Changes apply at once in this server process and within about 15 seconds in any other.",
+    // brief: confirm button (red) of that question: exempt the address anyway and save, max 3 words
+    "settings.ratelimit.confirm-own-button": "",
+    // brief: title of the question when the exempt list would exempt the admin's own address {own} (where this request came from); asks whether to exempt it, max 8 words besides {own}
+    "settings.ratelimit.confirm-own-title": "",
     "settings.ratelimit.could-not-save-the-settings": "Could not save the settings.",
     "settings.ratelimit.count-requests": { "one": "{n} request", "other": "{n} requests" },
-    "settings.ratelimit.discard-changes": "Discard changes",
     "settings.ratelimit.environment-variable-to-an-empty-value": "Set by the {env} environment variable to an empty value, so uvicorn trusts {header} from no address: every caller has the address of the connection it arrives on.",
-    "settings.ratelimit.exempt": "Exempt {own}, the address my own request came from, anyway",
     "settings.ratelimit.exempt-addresses-and-networks": "Exempt addresses and networks",
     "settings.ratelimit.forwarded-allow-ips": "FORWARDED_ALLOW_IPS",
     "settings.ratelimit.from-1-to": "{source} From 1 to {max}. {scope}",
@@ -793,13 +887,9 @@ var UI_TEXT = {
     "settings.ratelimit.nothing-saved-here-yet-the-values": "Nothing saved here yet. The values come from the defaults and the environment.",
     "settings.ratelimit.one-per-line-up-to": "(one per line, up to {max})",
     "settings.ratelimit.requests-per-window-from-one-address": "Requests per window, from one address",
-    "settings.ratelimit.requests-per-window-must-be-a": "Requests per window must be a whole number.",
     "settings.ratelimit.reverse-proxy-addresses": "Reverse proxy addresses",
-    "settings.ratelimit.save": "Save",
     "settings.ratelimit.saved-now": "Saved now: {requests} per {seconds} s; exempt: {exempt}.",
     "settings.ratelimit.saved-settings": "Saved settings",
-    "settings.ratelimit.settings-saved": "Settings saved",
-    "settings.ratelimit.the-window-must-be-a-whole": "The window must be a whole number of seconds.",
     "settings.ratelimit.uvicorn-takes-the-caller-s-address": "Set by the {env} environment variable: {value}. uvicorn takes the caller's address from {header} on connections from these addresses, unless its start command sets another value.",
     "settings.ratelimit.whole-seconds-from-1-to": "{source} Whole seconds, from 1 to {max}.",
     "settings.ratelimit.window-in-seconds": "Window, in seconds",
@@ -810,22 +900,17 @@ var UI_TEXT = {
     "settings.redis.could-not-connect-to-this-redis": "Could not connect to this Redis. Check the host, the port and that the server runs, then try again.",
     "settings.redis.could-not-save-the-redis-connection": "Could not save the Redis connection.",
     "settings.redis.current-connection": "Current connection",
-    "settings.redis.discard-changes": "Discard changes",
     "settings.redis.docker-compose-restart-auth-service": "docker compose restart auth-service",
-    "settings.redis.enter-the-new-connection-url": "Enter the new connection URL.",
     "settings.redis.new-connection-url": "New connection URL",
     "settings.redis.nothing": "nothing",
     "settings.redis.nothing-saved-here-yet": "Nothing saved here yet.",
     "settings.redis.nothing-was-saved": "{reason} Nothing was saved.",
-    "settings.redis.redis-connection-saved-restart-the-service": "Redis connection saved. Restart the service to use it.",
     "settings.redis.redis-default-url": "REDIS_DEFAULT_URL",
     "settings.redis.redis-password-host-6379-0": "redis://:<password>@host:6379/0",
     "settings.redis.redis-refused-the-user-name-or": "Redis refused the user name or password. Check them and try again.",
     "settings.redis.redis-url": "REDIS_URL",
     "settings.redis.rediss": "rediss://",
     "settings.redis.restart-the-service-to-use-the": "Restart the service to use the saved connection",
-    "settings.redis.save": "Save",
-    "settings.redis.save-it-i-will-restart-every": "Save it; I will restart every instance of the service",
     "settings.redis.saved-connection": "Saved connection",
     "settings.redis.saved-here": "This server process uses {connected}. Saved here: {saved}. The service takes the connection from {source}. Passwords are never shown.",
     "settings.redis.saved-now": "Saved now: {url}.",
@@ -840,9 +925,50 @@ var UI_TEXT = {
     "settings.redis.this-connection-cannot-write-the-keys": "This connection cannot write the keys the service uses. Check the user's permissions, and that the server is not a read-only replica.",
     "settings.redis.this-server-process-still-uses": "This server process still uses {connected}. Restart every instance of the service together, for example with {command}; with several replicas, stop them all, then start them. Every admin then signs in again.",
     "settings.redis.this-server-process-uses": "This server process uses {connected}. The service takes the connection from {source}. Passwords are never shown.",
-    "settings.save": "Save",
+    // brief: error line under one Settings part when its save got no answer: it may or may not be saved, the saved values are read again, the change is kept and nothing is sent again by itself, max 25 words
+    "settings.save.result-unknown": "",
+    // brief: count in the floating save bar of the Settings page: {n} is the number of settings changed and not saved yet, one and other forms, max 3 words besides {n}
+    "settings.savebar.count": { "one": "", "other": "" },
+    // brief: button in the save bar that drops every unsaved change on every Settings section, max 1 word
+    "settings.savebar.discard": "",
+    // brief: accessible name of the floating save bar of the Settings page, which holds the count of unsaved changes, Discard and Save changes, max 2 words
+    "settings.savebar.label": "",
+    // brief: text in the save bar in place of the count while a database connection change runs or its result is unknown; saving is not possible now, max 8 words
+    "settings.savebar.locked": "",
+    // brief: error message after Save changes when nothing was saved; {parts} is the list of parts that failed; must say they were not saved and that the reason is shown in each part, with the changes kept, max 14 words besides {parts}
+    "settings.savebar.not-saved": "",
+    // brief: error message after Save changes when the server did not answer for {parts} (list of parts): it is not known whether they were saved; they are read again and nothing was sent twice, max 18 words besides {parts}
+    "settings.savebar.result-unknown": "",
+    // brief: primary button in the save bar that saves every unsaved change on every Settings section, max 2 words
+    "settings.savebar.save": "",
+    // brief: success message after Save changes; {parts} is the list of the parts saved (for example General, Rate limit); must say they were saved, max 5 words besides {parts}
+    "settings.savebar.saved": "",
+    // brief: error message after Save changes when some parts were saved and others not; {saved} and {failed} are lists of parts; must name both and say the unsaved changes are still in the form, max 14 words besides the placeholders
+    "settings.savebar.saved-and-failed": "",
     "settings.saved-here": "Saved here.",
     "settings.saving": "Saving...",
+    // brief: small button that undoes Replace or Remove of a saved secret, so the saved value stays as it is, max 2 words
+    "settings.secret.keep": "",
+    // brief: placeholder of the field that opens on Replace for a saved database password: the new value goes here, max 2 words
+    "settings.secret.new-value": "",
+    // brief: small button beside the saved CA certificate that marks it to be removed when the change is saved, max 1 word
+    "settings.secret.remove": "",
+    // brief: state of a saved CA certificate marked for removal: it is removed when the connection change is saved, max 4 words
+    "settings.secret.removed-when-saved": "",
+    // brief: small button beside that state that opens a field to type a new value for the secret, max 1 word
+    "settings.secret.replace": "",
+    // brief: state shown instead of a field for a saved secret (database password, CA certificate, Redis URL, a token's value): a value is saved and is never shown, max 1 word
+    "settings.secret.stored": "",
+    // brief: one-paragraph explanation under the Database section title: the database the service uses; a PostgreSQL connection chosen in setup can be changed here, it is checked first and needs the authenticator code or a passkey, and it is saved with its own button, not the save bar, max 40 words
+    "settings.section.database-intro": "",
+    // brief: one-paragraph explanation under the General section title: what this section holds (time zone of every date, how long the activity and access logs are kept, the Secure session cookie, the URL path prefix shown read-only, and the date and time formats of every page), max 35 words
+    "settings.section.general-intro": "",
+    // brief: one-paragraph explanation under the Passkeys section title: the one address (origin) where passkeys for dashboard sign-in work, and that passkeys made for another address stop working, max 35 words
+    "settings.section.passkeys-intro": "",
+    // brief: one-paragraph explanation under the Rate limit section title: the limit on calls to /validate and /validate/grants per client address, the window it counts in, and the addresses never limited; changes apply at once, max 35 words
+    "settings.section.rate-limit-intro": "",
+    // brief: one-paragraph explanation under the Redis section title: Redis holds sessions and counters; a new connection is checked before it is saved and takes effect after the service restarts, max 35 words
+    "settings.section.redis-intro": "",
     "settings.set-by-the": "Set by the {env} environment variable ({value}). Remove it there to change the value here.",
     "settings.settings": "Settings",
     "settings.someone-else-saved-these-settings-after": "Someone else saved these settings after you opened the page",
@@ -870,10 +996,13 @@ var UI_TEXT = {
     "setup.could-not-start-the-setup": "Could not start the setup.",
     "setup.create-the-first-administrator-account": "Create the first administrator account",
     "setup.creating-the-account": "Creating the account...",
-    "setup.failed": "Failed",
     "setup.initial-setup": "Initial Setup",
     "setup.initial-setup-auth-service": "Initial Setup · Auth Service",
     "setup.loading": "Loading...",
+    // brief: error banner on the first-setup page when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "setup.no-network": "",
+    // brief: error banner on the first-setup page (database and first admin) when the server refused without saying why; must say setup did not continue and to try again, max 12 words
+    "setup.no-reason": "",
     "setup.password-min-8-characters": "Password (min 8 characters)",
     "setup.password-use-at-least-8-characters": "Password: use at least 8 characters",
     "setup.password-use-at-most-72-bytes": "Password: use at most 72 bytes. Letters outside English, such as Hebrew, and emoji take 2 to 4 bytes each",
@@ -893,12 +1022,15 @@ var UI_TEXT = {
     "setupmfa.checking": "Checking...",
     "setupmfa.could-not-change-the-name-try": "Could not change the name. Try again.",
     "setupmfa.enter-the-code-from-your-authenticator": "Enter the code from your authenticator app.",
-    "setupmfa.failed": "Failed",
     "setupmfa.issuer-locked": "Set by the {env} environment variable ({value}). Remove it there to change the name here.",
     "setupmfa.manual-entry-secret": "Manual entry secret:",
     "setupmfa.mfa-setup-auth-service": "MFA Setup · Auth Service",
     "setupmfa.name-in-authenticator-apps": "Name in authenticator apps",
     "setupmfa.name-in-authenticator-apps-enter-a": "Name in authenticator apps: enter a name.",
+    // brief: error banner on the authenticator setup step when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "setupmfa.no-network": "",
+    // brief: error banner on the authenticator setup step of first setup when the server refused the code without saying why; must say the code was not accepted and to try a new one, max 12 words
+    "setupmfa.no-reason": "",
     "setupmfa.preparing-your-authenticator-code": "Preparing your authenticator code...",
     "setupmfa.qr-code-for-your-authenticator-app": "QR code for your authenticator app",
     "setupmfa.scan-the-qr-code-with-your": "Scan the QR code with your authenticator app",
@@ -924,6 +1056,8 @@ var UI_TEXT = {
     "shell.dark": "Dark",
     "shell.database": "Database",
     "shell.date-format": "Date Format",
+    // brief: link in the Preferences dialog that opens Settings > General, where the date and time formats of every page are set for all admins, max 8 words
+    "shell.date-formats-in-settings": "",
     "shell.example": "Example: {time}",
     // brief: name and tooltip of the toggle beside the brand in the top bar while the sidebar is folded into icons; opens it with names again; max 2 words
     "shell.expand-menu": "",
@@ -1032,6 +1166,8 @@ var UI_TEXT = {
     "tokens.flag.delete": "Delete",
     "tokens.flag.read": "Read",
     "tokens.flag.write": "Write",
+    // brief: small button in the Edit Token dialog beside the stored token state that opens the field for a new token value, max 2 words
+    "tokens.form.replace-token": "",
     "tokens.grants": "Grants",
     "tokens.in": "In {zone}. Leave empty for a token that does not expire. {clear}",
     "tokens.is-disabled": "{name} is disabled",

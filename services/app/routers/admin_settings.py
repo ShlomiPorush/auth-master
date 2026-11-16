@@ -1,5 +1,6 @@
 """Admin Settings page: the /validate rate limit and the addresses exempt from it, the
-general settings (time zone, Secure session cookie, log retention), and the Redis connection."""
+general settings (time zone, Secure session cookie, log retention), the Redis connection, and
+how dates and times are written (display)."""
 from __future__ import annotations
 
 import os
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import general_settings as gs, rate_limit, rate_limit_settings as rls, redis_settings as rs
+from app import display_settings as ds, general_settings as gs, rate_limit, rate_limit_settings as rls, redis_settings as rs
 from app.admin_deps import FullSession, csrf_check
 from app.config import _redis_url_problem, get_settings
 from app.datetime_utils import fmt_datetime
@@ -42,11 +43,12 @@ def _view(stored: rls.Stored, request: Request) -> dict[str, Any]:
         "fields": {
             "maxReq": {
                 "value": eff.max_req, "source": source("maxReq", stored.max_req), "locked": locked["maxReq"],
-                "envName": rls.ENV_FIELDS["maxReq"][1], "min": 1, "max": rls.MAX_REQ_LIMIT,
+                "envName": rls.ENV_FIELDS["maxReq"][1], "min": 1, "max": rls.MAX_REQ_LIMIT, "default": rls.DEFAULT_MAX_REQ,
             },
             "windowMs": {
                 "value": eff.window_ms, "source": source("windowMs", stored.window_ms), "locked": locked["windowMs"],
                 "envName": rls.ENV_FIELDS["windowMs"][1], "minSeconds": 1, "maxSeconds": rls.WINDOW_SECONDS_LIMIT,
+                "default": rls.DEFAULT_WINDOW_MS,
             },
             "exempt": {
                 "value": list(stored.exempt), "source": "stored" if stored.exempt else "default", "locked": False,
@@ -201,7 +203,8 @@ def _general_view(stored: gs.Stored) -> dict[str, Any]:
             source = "env"
         else:
             source = "stored" if stored.values[name] is not None else "default"
-        return {"value": eff.value(name), "source": source, "locked": locked[name], "envName": gs.ENV_FIELDS[name][1]}
+        return {"value": eff.value(name), "source": source, "locked": locked[name], "envName": gs.ENV_FIELDS[name][1],
+                "default": gs.DEFAULTS[name]}
 
     retention = {"min": gs.RETENTION_MIN, "max": gs.RETENTION_MAX}
     s = get_settings()
@@ -485,6 +488,114 @@ async def put_redis_settings(
         print(f"Redis URL version {stored.version + 1} saved, but the activity log entry failed ({type(e).__name__})")
         warning = _ACTIVITY_WARNING
     view = _redis_view(await rs.read_current(settings_db))
+    if warning:
+        view["warning"] = warning
+    return view
+
+
+# ── Display: how dates and times are written ────────────────────
+
+def _display_view(stored: ds.Stored) -> dict[str, Any]:
+    eff = ds.effective(stored)
+    locked = ds.locked_fields()
+
+    def item(name: str) -> dict[str, Any]:
+        if locked[name]:
+            source = "env"
+        else:
+            source = "stored" if stored.values[name] is not None else "default"
+        return {
+            "value": eff.value(name), "source": source, "locked": locked[name], "envName": ds.ENV_FIELDS[name][1],
+            "envInvalid": ds.env_invalid(name), "default": ds.DEFAULTS[name], "options": list(ds.OPTIONS[name]),
+        }
+
+    return {
+        "version": stored.version,
+        "savedBy": stored.actor,
+        "savedAt": stored.saved_at,
+        "fields": {name: item(name) for name in ds.FIELDS},
+        # The stored value could not be read: the defaults apply until the next save.
+        "storedInvalid": stored.invalid is not None,
+        "applied": ds.status_view(),
+    }
+
+
+async def _read_display(request: Request) -> ds.Stored:
+    return await ds.read_current(request.app.state.settings_db)
+
+
+@router.get("/display")
+async def get_display_settings(request: Request, _sess: FullSession):
+    return _display_view(await _read_display(request))
+
+
+class DisplaySettingsBody(BaseModel):
+    """Only the fields being changed; a field the environment sets must be left out."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseVersion: StrictInt = Field(ge=0, description="The settings version the form was loaded from.")
+    dateFormat: StrictStr | None = None
+    timeFormat: StrictStr | None = None
+
+
+@router.put("/display")
+async def put_display_settings(
+    request: Request,
+    body: DisplaySettingsBody,
+    sess: FullSession,
+    x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csrf_check(sess, x_csrf_token)
+    sent = body.model_fields_set & set(ds.FIELDS)
+    locked = ds.locked_fields()
+    for name in ds.FIELDS:
+        if name in sent and locked[name]:
+            env = ds.ENV_FIELDS[name][1]
+            return _error(409, "locked", f"The {env} environment variable sets this value, so it cannot be changed here.", field=name)
+    for name in ds.FIELDS:
+        if name in sent and getattr(body, name) is None:
+            return _error(422, "invalid", "Leave a field out to keep its value; it cannot be empty.", field=name)
+
+    stored = await _read_display(request)
+    if stored.version != body.baseVersion:
+        return _error(409, "conflict", _CONFLICT, current=_display_view(stored))
+
+    values = dict(stored.values)
+    try:
+        for name in ds.FIELDS:
+            if name in sent:
+                values[name] = ds.check(name, getattr(body, name))
+    except ds.InvalidSettings as e:
+        return _error(422, "invalid", e.message, field=e.field)
+
+    if values == stored.values and not stored.invalid:
+        return _display_view(stored)
+
+    before = {name: ds.effective(stored).value(name) for name in ds.FIELDS}
+    filled = {name: values[name] if values[name] is not None else ds.DEFAULTS[name] for name in ds.FIELDS}
+    actor = await get_actor(request, sess)
+    version = stored.version + 1
+    value = ds.dump_value(version, filled, actor, ds.now_iso())
+    try:
+        saved = await ds.save(request.app.state.db, stored, value)
+    except ds.WriteRefused as e:
+        if e.busy:
+            return _error(503, "busy", _BUSY)
+        return _error(503, "write_refused", "The database did not accept the change. Nothing was saved.")
+    if not saved:
+        return _error(409, "conflict", _CONFLICT, current=_display_view(await _read_display(request)))
+
+    new = ds.Stored(version, filled, actor, None, raw=value)
+    ds.apply(ds.effective(new))
+    warning = None
+    try:
+        await ds.log_change(request.app.state.db, actor, version, before, filled,
+                            request.client.host if request.client else None)
+    except Exception as e:
+        print(f"Display settings version {version} saved, but the activity log entry failed ({type(e).__name__})")
+        warning = _ACTIVITY_WARNING
+    view = _display_view(await _read_display(request))
     if warning:
         view["warning"] = warning
     return view

@@ -182,10 +182,46 @@ test("hostile catalog and server values never become markup: settings, database,
     clean(ctx.dashSetSavedLine({ version: 2, savedBy: EVIL, savedFrom: EVIL, savedAt: iso(NOW) }, ""), "dashSetSavedLine");
     clean(ctx.dashSettingsConflictText({ fields: { maxReq: { value: 3 }, windowMs: { value: 60000 }, exempt: { value: [EVIL] } } }), "dashSettingsConflictText");
     clean(ctx.dashSettingsConflictText({ fields: { maxReq: { value: 1 }, windowMs: { value: 1000 }, exempt: { value: [] } } }), "dashSettingsConflictText");
-    ctx.dashGen.askPurge = { detail: EVIL, estimate: { activityLogs: 3, accessLogs: null }, fields: {} };
-    ctx.dashGen.askCookie = { detail: EVIL };
-    ctx.dashGenLowered = () => true;
-    clean(ctx.dashGenAsksHtml(), "dashGenAsksHtml");
+    clean(ctx.dashSetLockPill({ envName: EVIL }, EVIL), "dashSetLockPill");
+    clean(ctx.dashSetMarks(EVIL, true, EVIL), "dashSetMarks");
+    clean(ctx.dashSetRow({ id: "x", forId: "x", label: EVIL, control: "<input>", hint: ctx.esc(EVIL), marks: "" }), "dashSetRow");
+    clean(ctx.dashDispConflictText({ fields: { dateFormat: { value: EVIL }, timeFormat: { value: EVIL } } }), "dashDispConflictText");
+    clean(ctx.dashPkSetConflictText({ origin: EVIL }), "dashPkSetConflictText");
+    for (const lock of ["running", "unknown", "read-failed"]) {
+        ctx.dashSettings.lock = lock;
+        ctx.dashDb.error = EVIL;
+        clean(ctx.dashDbLockHtml(), "dashDbLockHtml " + lock);
+    }
+    ctx.dashSettings.lock = "";
+    clean(ctx.uiDbFieldsHtml("dbs-", { host: EVIL, port: 1, database: EVIL, user: EVIL, sslmode: "verify-full", caSaved: true }, true, true), "uiDbFieldsHtml on demand");
+    // The forms, drawn with hostile server values into stand-in containers
+    const bodies = {};
+    const doc = ctx.document;
+    ctx.document = { ...doc, getElementById: (id) => (/-body$/.test(id) ? (bodies[id] = bodies[id] || { innerHTML: "" }) : null),
+        querySelectorAll: () => [], querySelector: () => null };
+    const g = { version: 1, savedBy: EVIL, savedAt: iso(NOW), savedFrom: EVIL, timeZones: [EVIL, "UTC"], rootPath: { envName: EVIL, value: EVIL },
+        fields: { timeZone: { value: EVIL, locked: false, envName: EVIL, default: "UTC" }, cookieSecure: { value: true, locked: true, envName: EVIL, default: false },
+            activityLogRetentionDays: { value: 3, locked: false, envName: EVIL, min: 1, max: 9, default: 30 },
+            accessLogRetentionDays: { value: 3, locked: true, envName: EVIL, min: 1, max: 9, default: 30 } } };
+    ctx.dashGen.snap = ctx.dashGen.baseSnap = g;
+    ctx.dashGen.draft = ctx.dashGenDraftFrom(g);
+    ctx.dashGenDrawForm();
+    clean(bodies["general-body"].innerHTML, "dashGenDrawForm");
+    const dv = { version: 1, savedBy: EVIL, fields: { dateFormat: { value: EVIL, locked: true, envName: EVIL, envInvalid: true, default: "browser" },
+        timeFormat: { value: "24h", locked: false, envName: EVIL, default: "24h" } } };
+    ctx.dashDisp.snap = ctx.dashDisp.baseSnap = dv;
+    ctx.dashDisp.draft = ctx.dashDispDraftFrom(dv);
+    ctx.dashDispDrawForm();
+    clean(bodies["display-body"].innerHTML, "dashDispDrawForm");
+    const alerts = [];
+    ctx.dashDispAlerts({ version: 1, savedBy: EVIL, savedAt: iso(NOW), storedInvalid: true, applied: { version: 1, lastReloadError: EVIL },
+        fields: dv.fields }, alerts);
+    clean(alerts.join(""), "dashDispAlerts");
+    ctx.dashRedis.snap = ctx.dashRedis.baseSnap = { version: 1, url: { connected: EVIL, saved: EVIL, source: EVIL, locked: false, envName: EVIL } };
+    ctx.dashRedis.draft = { url: "" };
+    ctx.dashRedisDrawForm();
+    clean(bodies["redis-body"].innerHTML, "dashRedisDrawForm");
+    ctx.document = doc;
     clean(ctx.dashDbSummary({ backend: "postgres", user: EVIL, host: EVIL, port: 5432, database: EVIL, sslmode: EVIL, caPem: true }), "dashDbSummary");
     clean(ctx.dashDbSummary({ backend: "sqlite", path: EVIL }), "dashDbSummary");
     for (const blocked of ["insecure", "browser", ""]) {

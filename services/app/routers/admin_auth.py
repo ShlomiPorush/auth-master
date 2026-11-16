@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from app import login_limit
+from app import display_settings, login_limit
 from app.crypto_totp import decrypt_totp_secret
 from app.datetime_utils import get_tz_name
 from app.sessions import (
@@ -175,4 +175,7 @@ async def me(request: Request):
         "csrf": sess["csrf"],
         "allowedAreas": areas,
         "timeZone": get_tz_name(),
+        # How every date and time on the pages is written (Settings > General).
+        "dateFormat": display_settings.current().date_format,
+        "timeFormat": display_settings.current().time_format,
     }

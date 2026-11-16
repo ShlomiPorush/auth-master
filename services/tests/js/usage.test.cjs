@@ -17,7 +17,7 @@ function load() {
     const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.showToast = () => {};
     ctx.uiSetAppZone("UTC");
-    ctx.uiSetDatePrefs("dmy", "24");
+    ctx.uiSetDatePrefs("DD/MM/YYYY", "24h");
     return ctx;
 }
 

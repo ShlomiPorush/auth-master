@@ -210,6 +210,7 @@ FLOATING_CSS = {
     ".ui-gs-panel": "the global search results under the top bar search field (SR-3)",
     ".ui-gs.is-sheet": "the phone search over the whole screen (SR-8, a listed DS-24 exception)",
     "html:has(.ui-dialog-backdrop) .ui-gs.is-sheet": "a question asked from the phone search comes over it (SR-7, SR-8)",
+    ".ui-savebar": "the Settings save bar (SV-1), part of the page",
 }
 
 HTML_LAYER_PATTERNS = {
@@ -1264,6 +1265,7 @@ DATE_HELPERS = {
     ("js/ui.js", "uiZoneValid"): "checks that a zone name works in this browser",
     ("js/ui.js", "uiZoneParts"): "reads an instant's wall clock in the app zone",
     ("js/ui.js", "writeDate"): "writes a date in the browser's order for Date Format 'Browser order'",
+    ("js/ui.js", "writeClock"): "writes a time on the browser's own clock for Time Format 'Browser'",
 }
 NUMBER_LOCALE = re.compile(r"Number\((?:[^()]|\([^()]*\))*\)\.toLocaleString\s*\(")
 

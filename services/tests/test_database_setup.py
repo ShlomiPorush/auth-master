@@ -1609,3 +1609,175 @@ def test_a_failed_attach_does_not_wait_for_a_stuck_settings_connection(workdir, 
                 hang.set()
 
     run(go())
+
+
+# ── The pending mark of a connection change (a lost answer) ─────
+
+class _HeldChange:
+    """A connection change on a SQLite service with the PostgreSQL parts replaced: the
+    second-factor check waits until `release` (and fails when `refuse` is set), and the
+    job waits until `finish`.  The request's own logic around them is the real one."""
+
+    def __init__(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from app import db_operations
+        from app.routers import admin_database
+
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finish = asyncio.Event()
+        self.refuse = False
+        self.checks = 0
+
+        async def held_step_up(*_a, **_k):
+            self.checks += 1
+            self.entered.set()
+            await self.release.wait()
+            if self.refuse:
+                raise HTTPException(401, "Invalid code")
+            return "code"
+
+        async def held_edit(_rt, _app, job, *_a, **_k):
+            job.step = "testing"
+            await self.finish.wait()
+            return {"action": "database.connection_changed"}
+
+        monkeypatch.setattr(admin_database, "_editable", lambda _rt: None)
+        monkeypatch.setattr(admin_database, "_params", lambda _body, _saved=None: object())
+        monkeypatch.setattr(admin_database, "verify_step_up", held_step_up)
+        monkeypatch.setattr(db_operations, "run_edit", held_edit)
+
+    BODY = {"postgres": {"host": "db.example", "database": "auth", "user": "auth"}, "code": "123456"}
+
+
+async def _signed_in_service(svc: Service):
+    await setup_sqlite(svc)
+    admin_id, _totp = await svc.add_admin()
+    return await svc.signed_in(admin_id)
+
+
+async def _job_view(c) -> dict | None:
+    res = await c.get("/admin/api/settings/database")
+    assert res.status_code == 200, res.text
+    return res.json()["job"]
+
+
+def test_a_change_reads_pending_until_its_job_starts(workdir, monkeypatch):
+    """The answer of the request is lost while it waits for the second factor: the read
+    the page makes then says pending, a second change is refused without clearing the
+    first one's mark, and the first one goes on to its running job."""
+    held = _HeldChange(monkeypatch)
+
+    async def go():
+        async with service(monkeypatch) as svc:
+            c = await _signed_in_service(svc)
+            first = asyncio.create_task(c.put("/admin/api/settings/database", json=held.BODY))
+            await held.entered.wait()
+            assert await _job_view(c) == {"state": "pending"}
+
+            second = await c.put("/admin/api/settings/database", json=held.BODY)
+            assert second.status_code == 409 and second.json()["code"] == "busy"
+            assert second.json()["job"] == {"state": "pending"}
+            assert held.checks == 1  # refused before its own second-factor check
+            assert await _job_view(c) == {"state": "pending"}
+
+            held.release.set()
+            res = await first
+            assert res.status_code == 202, res.text
+            job = res.json()["job"]
+            assert job["state"] == "running" and job["kind"] == "edit"
+            assert (await _job_view(c))["id"] == job["id"]
+
+            held.finish.set()
+            done = await wait_job(c, f"/admin/api/settings/database/jobs/{job['id']}")
+            assert done["state"] == "done"
+            assert await _job_view(c) is None
+
+    run(go())
+
+
+def test_a_change_refused_by_the_second_factor_clears_its_mark(workdir, monkeypatch):
+    held = _HeldChange(monkeypatch)
+
+    async def go():
+        async with service(monkeypatch) as svc:
+            c = await _signed_in_service(svc)
+            held.refuse = True
+            first = asyncio.create_task(c.put("/admin/api/settings/database", json=held.BODY))
+            await held.entered.wait()
+            assert await _job_view(c) == {"state": "pending"}
+            held.release.set()
+            res = await first
+            assert res.status_code == 401
+            assert await _job_view(c) is None
+            # Nothing is left behind: the next change goes through.
+            held.refuse = False
+            res = await c.put("/admin/api/settings/database", json=held.BODY)
+            assert res.status_code == 202, res.text
+            held.finish.set()
+            await wait_job(c, f"/admin/api/settings/database/jobs/{res.json()['job']['id']}")
+
+    run(go())
+
+
+@pytest.mark.parametrize("failure", ["busy", "error"])
+def test_a_change_that_fails_to_start_its_job_clears_its_mark(workdir, monkeypatch, failure):
+    from app.db_runtime import Busy, Job
+
+    held = _HeldChange(monkeypatch)
+    held.release.set()
+
+    async def go():
+        async with service(monkeypatch) as svc:
+            c = await _signed_in_service(svc)
+
+            def broken_start(*_a, **_k):
+                if failure == "busy":
+                    raise Busy(Job("other", "reconnect"))
+                raise RuntimeError("start failed")
+
+            monkeypatch.setattr(svc.runtime.jobs, "start", broken_start)
+            if failure == "busy":
+                res = await c.put("/admin/api/settings/database", json=held.BODY)
+                assert res.status_code == 409 and res.json()["code"] == "busy"
+            else:
+                with pytest.raises(RuntimeError):
+                    await c.put("/admin/api/settings/database", json=held.BODY)
+            assert svc.runtime.jobs.busy() is None
+            assert await _job_view(c) is None
+
+    run(go())
+
+
+def test_a_cancelled_change_clears_its_mark(workdir, monkeypatch):
+    held = _HeldChange(monkeypatch)
+
+    async def go():
+        async with service(monkeypatch) as svc:
+            c = await _signed_in_service(svc)
+            first = asyncio.create_task(c.put("/admin/api/settings/database", json=held.BODY))
+            await held.entered.wait()
+            assert svc.runtime.jobs.busy() is not None
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            assert svc.runtime.jobs.busy() is None
+            assert await _job_view(c) is None
+
+    run(go())
+
+
+def test_only_the_request_that_set_the_mark_clears_it():
+    from app.db_runtime import Busy, Jobs
+
+    jobs = Jobs()
+    mark = jobs.mark_pending()
+    with pytest.raises(Busy) as refused:
+        jobs.mark_pending()
+    assert refused.value.job.view() == {"state": "pending"}
+    other = type(mark)()
+    jobs.clear_pending(other)
+    assert jobs.busy() is mark
+    jobs.clear_pending(mark)
+    assert jobs.busy() is None

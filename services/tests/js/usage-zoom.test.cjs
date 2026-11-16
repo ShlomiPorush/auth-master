@@ -13,7 +13,7 @@ function load() {
     const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.showToast = () => {};
     ctx.uiSetAppZone("UTC");
-    ctx.uiSetDatePrefs("dmy", "24");
+    ctx.uiSetDatePrefs("DD/MM/YYYY", "24h");
     // The writer has not filled the new words yet: stand-ins to read
     Object.assign(ctx.UI_TEXT, {
         "usage.span": "{from} to {to}", "usage.chart.clear": "Clear", "usage.zoom.group": "Zoom",
