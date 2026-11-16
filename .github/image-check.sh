@@ -161,20 +161,39 @@ on_volume "$f" 'chown 10001:10001 /d'
 start f -v "$f:/app/data:ro" "$IMAGE"
 refused f "cannot use the data directory"
 
-echo "G. a SQLite file outside /app/data, written as root by $OLD_IMAGE"
+echo "G. a SQLite file outside /app/data, left by $OLD_IMAGE (root) after a SIGKILL"
 g=$(volume g)
 start old-g -v "$g:/db" -e DATABASE_URL=sqlite:////db/auth.db "$OLD_IMAGE"
 healthy old-g
-docker stop "$RUN-old-g" >/dev/null
+# Written while the old service holds the database, then killed: the row stays in the
+# write-ahead log, and -wal and -shm stay behind, owned by root.
 on_volume "$g" "$put_marker /d/auth.db $marker"
-start g -v "$g:/db" -e DATABASE_URL=sqlite:////db/auth.db "$IMAGE"
-code=$(timeout 90 docker wait "$RUN-g") || fail "G: started on a database it cannot write"
-[ "$code" != 0 ] || fail "G: exited with 0"
-on_volume "$g" 'chown -R 10001:10001 /d'
-docker rm "$RUN-g" >/dev/null
+docker kill "$RUN-old-g" >/dev/null
+[ "$(on_volume "$g" 'stat -c %u /d/auth.db-wal /d/auth.db-shm' | tr '\n' ' ')" = "0 0 " ] ||
+    fail "G: the old image left no root-owned -wal and -shm"
 start g -v "$g:/db" -e DATABASE_URL=sqlite:////db/auth.db "$IMAGE"
 healthy g
 [ "$(on_volume "$g" "$get_marker /d/auth.db")" = "$marker" ] || fail "G: the data changed"
+leftover=$(not_service_owned "$g")
+[ -z "$leftover" ] || fail "G: not owned by 10001: $leftover"
+
+echo "G2. a SQLite file in a directory that also holds another file"
+g2=$(volume g2)
+on_volume "$g2" 'echo x > /d/auth.db && echo n > /d/notes.txt'
+start g2 -v "$g2:/db" -e DATABASE_URL=sqlite:////db/auth.db "$IMAGE"
+refused g2 "/db also holds notes.txt"
+[ "$(on_volume "$g2" 'stat -c %u /d /d/auth.db /d/notes.txt' | tr '\n' ' ')" = "0 0 0 " ] ||
+    fail "G2: something changed"
+
+echo "G3. a SQLite file in a subdirectory of a volume, written by $OLD_IMAGE"
+g3=$(volume g3)
+start old-g3 -v "$g3:/db" -e DATABASE_URL=sqlite:////db/auth/auth.db "$OLD_IMAGE"
+healthy old-g3
+docker stop "$RUN-old-g3" >/dev/null
+start g3 -v "$g3:/db" -e DATABASE_URL=sqlite:////db/auth/auth.db "$IMAGE"
+healthy g3
+[ "$(on_volume "$g3" 'stat -c %u /d /d/auth /d/auth/auth.db' | tr '\n' ' ')" = "0 10001 10001 " ] ||
+    fail "G3: wrong owners"
 
 echo "H. a file the service user can write but not read"
 h=$(volume h)

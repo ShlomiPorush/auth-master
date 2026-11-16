@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that the user can read and write them, and then starts the service as that user. When the
   check fails, the container stops and its log lists the paths. See "Data directory and file
   ownership" in README.md.
+- When `DATABASE_URL` names a SQLite file outside `/app/data`, the container also gives the
+  service user the directory of that file and the database files in it, when the directory
+  holds nothing else (or already belongs to the service user). A directory with other files,
+  `/` and system directories are never changed: the container stops and names the reason.
 
 ### Fixed
 
@@ -64,8 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registers itself there at start, and one that cannot does not start.
 - On the first start, the owner of `./data` and the files in it changes to uid 10001 on the
   host. Scripts that read or copy `./data` as another user need root or that uid.
-- A SQLite file outside `/app/data` (a `DATABASE_URL` such as `sqlite:////db/auth.db`) is not
-  changed: give it and its directory to uid 10001 before the upgrade.
+- A SQLite file outside `/app/data` (a `DATABASE_URL` such as `sqlite:////db/auth.db`) must be in
+  a directory that holds only the database; its directory then belongs to uid 10001.
 - Files in `./data` with more than one hard link, and symlink targets, are not changed. Replace
   them with regular copies if the service cannot read and write them.
 - The data directory must be mounted writable. On an NFS export with `root_squash`, give it to

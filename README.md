@@ -505,11 +505,19 @@ paths and what to do.
 - **Another user:** to run the container as another user, set `user:` in the compose file, for
   example `user: "1000:1000"`, and give that user read and write access to `./data` and the
   files in it. The container then only checks.
-- **SQLite outside `/app/data`:** the container does not change a database that `DATABASE_URL`
-  places elsewhere, such as `sqlite:////db/auth.db`. Before you upgrade, stop the service and
-  give uid 10001 that directory and the files in it (`auth.db`, `auth.db-wal`, `auth.db-shm`)
-  on the host: `sudo chown -R 10001:10001 <host directory>`. Otherwise the service cannot write
-  the database and does not start.
+- **SQLite outside `/app/data`:** when `DATABASE_URL` names a SQLite file elsewhere, such as
+  `sqlite:////db/auth.db` on a volume at `/db`, the container also prepares it. SQLite creates
+  files next to the database, so the service needs its directory:
+  - The container creates missing directories (0755) and gives uid 10001 the directory of the
+    file and the database files in it (`auth.db`, `auth.db-wal`, `auth.db-shm`,
+    `auth.db-journal`). The directory then belongs to uid 10001 for good: use it only for this
+    database, because the service can delete or replace anything put in it.
+  - It does this only when the directory is new, empty, or holds only those files, or already
+    belongs to uid 10001. A directory that holds other files, `/`, a system directory, or the
+    image's own directories under `/app` are never changed: the container stops and names the
+    reason. Point `DATABASE_URL` at a file in a directory of its own, for example on a volume.
+  - The path must not contain a symlink, `.` or `..`. Directories above the database's own are
+    never changed: when one of them does not let uid 10001 pass, the container stops and names it.
 - **Commands in the container:** `docker compose exec` runs as root. Run anything that writes to
   `/app/data` as the service user: `docker compose exec --user 10001:10001 auth-service <command>`.
   A file that root creates there is given to uid 10001 at the next start.
