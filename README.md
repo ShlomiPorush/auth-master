@@ -86,8 +86,14 @@ are not copied.
 
 ### General settings
 
-The **General** panel of the Settings page (`/admin/settings`) holds the time zone, the
-retention of both logs and the Secure session cookie. It works like the rate limit panel:
+The Settings page shows one section at a time, each at its own address: General
+(`/admin/settings/general`), Rate limit, Passkeys, Database and Redis. Changed fields are
+counted in a bar at the bottom of the page, and **Save changes** there saves every section
+that holds a change; a part that fails keeps its change and says why. The database
+connection is the exception: it has its own button (see below).
+
+The **General** section holds the time zone, the retention of both logs and the Secure
+session cookie. It works like the rate limit section:
 each save is a new version in the table `app_settings`, a save applies at once in the server
 process that saved it and within about 15 seconds in any other, and two admins who save from
 the same version are told about the conflict.
@@ -272,11 +278,18 @@ Settings page then shows the connection locked.
 
 #### Change the connection
 
-The **Database** panel of the Settings page shows the connection, never the password. For a
+The **Database** section of the Settings page shows the connection, never the password. For a
 PostgreSQL database chosen in setup, it takes a new host, port, database name, user, password
 or TLS mode for the same installation, for example after you changed the database user's
-password. Leave the password empty to keep the saved one; for another host or port, enter it
-again, so the saved password never goes to a server it was not saved for.
+password. The saved password and CA certificate show as stored; choose Replace to enter a new
+one. When the host or port changes, the password field opens, so the saved password never goes
+to a server it was not saved for.
+
+The change has its own button, not the save bar: it may switch to a copy of the database that
+holds other settings. It starts only when no other section holds an unsaved change, and while
+it runs every Settings field is locked. If the page loses the answer, it reads the state of the
+change again and never sends the change or the code twice; when the server shows no change
+running, the page says the result is unknown and stays locked until it is reloaded.
 
 After a password change on the server, connections the service already has keep working, but
 new ones fail until you save the new password here. To change it without that gap, create a new
@@ -344,7 +357,7 @@ data.
 
 ### Redis connection
 
-Admin sessions and the first-admin setup live in Redis. The **Redis connection** panel of the
+Admin sessions and the first-admin setup live in Redis. The **Redis connection** section of the
 Settings page shows the URL this server process uses, with the password replaced by `****`,
 and takes a new URL. The page never shows a password, and the field is write-only.
 
