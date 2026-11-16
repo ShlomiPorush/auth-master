@@ -122,6 +122,44 @@ function loginPage(answers, get) {
     return { ctx, els, signals, calls };
 }
 
+// Sign-in errors (P9): the server's reason is what the page says; the catalog only
+// gives the page's own words when there is no reason, or no answer at all
+test("sign-in errors: the server's reason whatever the status; the page's own words without one", async () => {
+    const answers = [];
+    const { ctx, els } = loginPage((path) => (path === "/admin/api/login" ? answers.shift() : { status: 409, data: {} }), () => Promise.reject(new Error("no")));
+    for (const status of [400, 401, 403, 429, 503]) {
+        assert.equal(ctx.authErrorText({ status, data: { detail: "Server words " + status } }, "fallback", "network"), "Server words " + status);
+    }
+    assert.equal(ctx.authErrorText({ status: 500, data: {} }, "fallback", "network"), "fallback");
+    assert.equal(ctx.authErrorText({ status: 0, data: {}, network: true }, "fallback", "network"), "network");
+
+    // The login form: its own words for no reason and for no answer (filled in here until the writer words them)
+    ctx.UI_TEXT["login.no-reason"] = "Sign-in words without a reason";
+    ctx.UI_TEXT["login.no-network"] = "Sign-in words without an answer";
+    const input = (value) => ({ value, removeAttribute() {}, setAttribute() {}, focus() {} });
+    const user = input("admin");
+    const pass = input("pw");
+    const button = { textContent: "Sign in", disabled: false, innerHTML: "", setAttribute() {}, getAttribute: () => "Sign in" };
+    let submit = null;
+    els.f = { addEventListener: (type, fn) => { if (type === "submit") submit = fn; },
+        querySelector: (s) => (s === '[name="username"]' ? user : s === '[name="password"]' ? pass : button) };
+    ctx.authLogin();
+    const run = async (answer) => {
+        if (answer.network) {
+            ctx.adminApi = () => Promise.reject(new TypeError("Failed to fetch"));
+        } else {
+            answers.push(answer);
+        }
+        pass.value = "pw";
+        submit({ preventDefault() {} });
+        await settle();
+        return els.err.textContent;
+    };
+    assert.equal(await run({ status: 401, data: { detail: "Invalid username or password" } }), "Invalid username or password");
+    assert.equal(await run({ status: 500, data: {} }), ctx.t("login.no-reason"));
+    assert.equal(await run({ network: true }), ctx.t("login.no-network"));
+});
+
 const OPTIONS = { publicKey: { challenge: "c1", rpId: "example.test", allowCredentials: [] }, ceremony: "cer-1" };
 const assertion = { toJSON: () => ({ id: "cred-abc", rawId: "cred-abc", type: "public-key", response: {} }) };
 

@@ -346,8 +346,11 @@ var UI_TEXT = {
     "login.continue": "Continue",
     "login.could-not-sign-in-with-the": "Could not sign in with the passkey. Try again.",
     "login.could-not-start-the-passkey-sign": "Could not start the passkey sign-in. Try again.",
-    "login.failed": "Failed",
     "login.have-a-passkey-sign-in-with": "Have a passkey? Sign in with your fingerprint, face or screen lock instead.",
+    // brief: error banner on the sign-in page (password or passkey) when no answer came from the server; must say the server could not be reached and to check the connection and try again, max 12 words
+    "login.no-network": "",
+    // brief: error banner on the sign-in page when the server refused the user name and password without saying why; must say signing in did not work and to try again, max 10 words
+    "login.no-reason": "",
     "login.passkey-old-browser": "This browser cannot use passkeys here. Use your password and authenticator code.",
     "login.password": "Password",
     "login.password-enter-your-password": "Password: enter your password",
@@ -369,7 +372,10 @@ var UI_TEXT = {
     "loginmfa.enter-the-code-from-your-authenticator": "Enter the code from your authenticator app.",
     "loginmfa.enter-your-6-digit-code-to": "Enter your 6-digit code to continue",
     "loginmfa.enter-your-authenticator-code-to-sign": "Enter your authenticator code to sign in",
-    "loginmfa.failed": "Failed",
+    // brief: error banner on the authenticator code step of sign-in when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "loginmfa.no-network": "",
+    // brief: error banner on the authenticator code step of sign-in when the server refused the code without saying why; must say the code was not accepted and to try a new one, max 12 words
+    "loginmfa.no-reason": "",
     "loginmfa.sign-in": "Sign In",
     "loginmfa.signing-in": "Signing in...",
 
@@ -915,10 +921,13 @@ var UI_TEXT = {
     "setup.could-not-start-the-setup": "Could not start the setup.",
     "setup.create-the-first-administrator-account": "Create the first administrator account",
     "setup.creating-the-account": "Creating the account...",
-    "setup.failed": "Failed",
     "setup.initial-setup": "Initial Setup",
     "setup.initial-setup-auth-service": "Initial Setup · Auth Service",
     "setup.loading": "Loading...",
+    // brief: error banner on the first-setup page when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "setup.no-network": "",
+    // brief: error banner on the first-setup page (database and first admin) when the server refused without saying why; must say setup did not continue and to try again, max 12 words
+    "setup.no-reason": "",
     "setup.password-min-8-characters": "Password (min 8 characters)",
     "setup.password-use-at-least-8-characters": "Password: use at least 8 characters",
     "setup.password-use-at-most-72-bytes": "Password: use at most 72 bytes. Letters outside English, such as Hebrew, and emoji take 2 to 4 bytes each",
@@ -938,12 +947,15 @@ var UI_TEXT = {
     "setupmfa.checking": "Checking...",
     "setupmfa.could-not-change-the-name-try": "Could not change the name. Try again.",
     "setupmfa.enter-the-code-from-your-authenticator": "Enter the code from your authenticator app.",
-    "setupmfa.failed": "Failed",
     "setupmfa.issuer-locked": "Set by the {env} environment variable ({value}). Remove it there to change the name here.",
     "setupmfa.manual-entry-secret": "Manual entry secret:",
     "setupmfa.mfa-setup-auth-service": "MFA Setup · Auth Service",
     "setupmfa.name-in-authenticator-apps": "Name in authenticator apps",
     "setupmfa.name-in-authenticator-apps-enter-a": "Name in authenticator apps: enter a name.",
+    // brief: error banner on the authenticator setup step when no answer came from the server; must say the server could not be reached and to try again, max 12 words
+    "setupmfa.no-network": "",
+    // brief: error banner on the authenticator setup step of first setup when the server refused the code without saying why; must say the code was not accepted and to try a new one, max 12 words
+    "setupmfa.no-reason": "",
     "setupmfa.preparing-your-authenticator-code": "Preparing your authenticator code...",
     "setupmfa.qr-code-for-your-authenticator-app": "QR code for your authenticator app",
     "setupmfa.scan-the-qr-code-with-your": "Scan the QR code with your authenticator app",

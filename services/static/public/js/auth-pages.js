@@ -16,8 +16,10 @@ function authPost(promise) {
     });
 }
 
-function authErrorText(res, fallback) {
-    if (res.network) return t(AUTH_NETWORK_TEXT);
+// The server's own reason is the text; the catalog gives only what the page says
+// when there is no reason (fallback) or no answer at all (network, per page)
+function authErrorText(res, fallback, network) {
+    if (res.network) return network || t(AUTH_NETWORK_TEXT);
     var j = res.data || {};
     if (typeof j.detail === "string" && j.detail) return j.detail;
     if (typeof j.error === "string" && j.error) return j.error;
@@ -99,7 +101,7 @@ function authLogin() {
             authBusy(button, false);
             if (!res.ok) {
                 pass.value = "";
-                authShowError(authErrorText(res, t("login.failed")));
+                authShowError(authErrorText(res, t("login.no-reason"), t("login.no-network")));
                 pass.focus();
                 return;
             }
@@ -159,7 +161,7 @@ function authPasskeySignIn() {
     authPost(adminApi("/admin/api/login/passkey/options", { method: "POST" })).then(function (opt) {
         if (!opt.ok) {
             if (opt.status === 409) document.getElementById("pk-login").classList.add("hidden");
-            done(authErrorText(opt, t("login.could-not-start-the-passkey-sign")));
+            done(authErrorText(opt, t("login.could-not-start-the-passkey-sign"), t("login.no-network")));
             return;
         }
         var json = opt.data.publicKey || {};
@@ -181,7 +183,7 @@ function authPasskeySignIn() {
                 }
                 // The server has no such passkey: the password manager may drop it
                 if (res.status === 404) authPasskeyForget(json.rpId, encoded.id);
-                done(authErrorText(res, t("login.could-not-sign-in-with-the")));
+                done(authErrorText(res, t("login.could-not-sign-in-with-the"), t("login.no-network")));
             });
         }, function (err) {
             done(uiPasskeyErrorText(err, false));
@@ -209,7 +211,7 @@ function authLoginMfa() {
         authPost(adminApi("/admin/api/login/mfa", { method: "POST", body: { code: code.value }, csrf: readCsrf() })).then(function (res) {
             authBusy(button, false);
             if (!res.ok) {
-                authShowError(authErrorText(res, t("loginmfa.failed")));
+                authShowError(authErrorText(res, t("loginmfa.no-reason"), t("loginmfa.no-network")));
                 code.select();
                 return;
             }
@@ -305,7 +307,7 @@ function authSetupDatabase(showRegister) {
         authPost(adminApi("/admin/api/setup/database/check", { method: "POST", body: body() })).then(function (res) {
             setBusy(false, button);
             if (!res.ok) {
-                authSetError("db-err", authErrorText(res, t("setup.the-check-failed")));
+                authSetError("db-err", authErrorText(res, t("setup.the-check-failed"), t("setup.no-network")));
                 if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
                 return;
             }
@@ -323,7 +325,7 @@ function authSetupDatabase(showRegister) {
         authPost(adminApi("/admin/api/setup/database", { method: "POST", body: b })).then(function (res) {
             if (!res.ok || !res.data.job) {
                 setBusy(false, button);
-                authSetError("db-err", authErrorText(res, t("setup.could-not-start-the-setup")));
+                authSetError("db-err", authErrorText(res, t("setup.could-not-start-the-setup"), t("setup.no-network")));
                 if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
                 return;
             }
@@ -384,7 +386,7 @@ function authSetup() {
         authPost(adminApi("/admin/api/bootstrap/register", { method: "POST", body: { username: user.value, password: pass.value } })).then(function (res) {
             authBusy(button, false);
             if (!res.ok) {
-                authShowError(authErrorText(res, t("setup.failed")));
+                authShowError(authErrorText(res, t("setup.no-reason"), t("setup.no-network")));
                 return;
             }
             writeCsrf(res.data.csrf || "");
@@ -495,7 +497,7 @@ function authSetupMfa() {
                 return;
             }
             if (!res.ok) {
-                authShowError(authErrorText(res, t("setupmfa.failed")));
+                authShowError(authErrorText(res, t("setupmfa.no-reason"), t("setupmfa.no-network")));
                 code.select();
                 return;
             }
