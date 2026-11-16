@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- In the Docker image, every PostgreSQL connection failed (setup, the Settings page, the
+  recovery page and `DATABASE_URL`), reported as "The database server cannot be reached":
+  the service ran as uid 10001 with `HOME=/root`, and the PostgreSQL driver stopped with a
+  permission error while it looked for client certificates in `~/.postgresql`. The service
+  now runs with the service user's own home, `/nonexistent`. Affects 2.3.0 and 2.4.0.
+
 ## [2.4.0] - 2026-11-16
 
 ### Added
