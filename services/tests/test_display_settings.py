@@ -292,13 +292,29 @@ def test_a_refused_write_is_a_failed_save_never_bad_stored_data(tmp_path):
 
     class NoPrivilege(ReadOnly):
         async def fetchval_write(self, *_a):
-            raise PermissionError("permission denied for table app_state")
+            import asyncpg
+
+            raise asyncpg.exceptions.InsufficientPrivilegeError("permission denied for table app_state")
+
+    class Dropped(ReadOnly):
+        # The connection failed after the statement was sent: it may have been committed
+        async def fetchval_write(self, *_a):
+            raise ConnectionError("connection was closed in the middle of operation")
+
+    class PgDropped(ReadOnly):
+        async def fetchval_write(self, *_a):
+            import asyncpg
+
+            raise asyncpg.exceptions.ConnectionDoesNotExistError("connection was closed")
 
     async def scenario():
         for db, busy in ((ReadOnly(), False), (Locked(), True), (NoPrivilege(), False)):
             with pytest.raises(ds.WriteRefused) as e:
                 await ds.save(db, ds.EMPTY, "{}")
             assert e.value.busy is busy
+        for db in (Dropped(), PgDropped()):
+            with pytest.raises(ds.WriteUnknown):
+                await ds.save(db, ds.EMPTY, "{}")
 
     _run(scenario())
 
@@ -545,6 +561,22 @@ def test_a_write_the_database_refuses_is_reported_and_saves_nothing(admin, monke
     assert res.status_code == 503 and res.json()["code"] == "write_refused"
     assert admin.get().json()["version"] == 0
     assert ds.current().date_format == "browser"
+
+
+def test_a_write_the_database_did_not_confirm_is_reported_as_unknown(admin, monkeypatch):
+    ds = _ds()
+    admin.login()
+
+    async def unconfirmed(*_a, **_k):
+        raise ds.WriteUnknown()
+
+    real_save = ds.save
+    ds.save = unconfirmed
+    try:
+        res = admin.put({"baseVersion": 0, "dateFormat": "DD/MM/YYYY"})
+    finally:
+        ds.save = real_save
+    assert res.status_code == 503 and res.json()["code"] == "write_unknown"
 
 
 def test_the_start_reads_the_stored_value(monkeypatch, tmp_path):

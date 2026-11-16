@@ -108,6 +108,7 @@ test("a database change drops the rows and ignores a late answer from the previo
     const oldRead = ctx.dashSearchRead("tokens");
     // WP2 dispatches ui:db-changed once the switch completed
     db = "new";
+    ctx.uiDataReset();
     ctx.dashSearchDbChanged();
     assert.equal(ctx.dashSearchResults("token").tokens.loading, true, "nothing from before the change is shown");
     await ctx.dashSearchRead("tokens");

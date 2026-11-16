@@ -196,6 +196,25 @@ async def read_current(db: Database) -> Stored:
     return Stored(version, values, actor, saved_at, raw=text)
 
 
+def _server_refused(e: BaseException) -> bool:
+    """True when PostgreSQL itself answered with an error for the statement (it did not take
+    effect); False for a lost or failed connection (SQLSTATE class 08) and anything else."""
+    try:
+        import asyncpg
+    except ImportError:  # pragma: no cover
+        return False
+    if not isinstance(e, asyncpg.PostgresError):
+        return False
+    return not str(getattr(e, "sqlstate", "") or "").startswith("08")
+
+
+class WriteUnknown(Exception):
+    """The connection failed before the database confirmed the write: it may have been saved."""
+
+    def __init__(self) -> None:
+        super().__init__("the database did not confirm the write")
+
+
 class WriteRefused(Exception):
     """The database did not take the write (privileges, read-only, locked)."""
 
@@ -221,11 +240,16 @@ async def save(write_db: Database, base: Stored, value: str) -> bool:
                 KEY, value, base.raw,
             )
     except sqlite3.OperationalError as e:
+        # SQLite runs in this process: an error means the statement did not take effect
         raise WriteRefused(busy="locked" in str(e).lower()) from None
     except Exception as e:
-        # PostgreSQL: no privilege, a read-only transaction or server; never a stored-value problem.
-        print(f"Display settings were not saved: the database refused the write ({type(e).__name__})")
-        raise WriteRefused(busy=False) from None
+        if _server_refused(e):
+            # PostgreSQL answered with an error: no privilege, a read-only transaction or server
+            print(f"Display settings were not saved: the database refused the write ({type(e).__name__})")
+            raise WriteRefused(busy=False) from None
+        # The connection failed before the answer came: the write may have been committed
+        print(f"Display settings: the database did not confirm the write ({type(e).__name__})")
+        raise WriteUnknown() from None
     return done is not None
 
 

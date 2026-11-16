@@ -800,7 +800,7 @@ function dashSearchRead(kind) {
 // The database may have changed: what the search read is dropped, every kind is
 // stale, answers that started before are ignored, the counters read again
 function dashSearchDbChanged() {
-    uiDataReset();
+    // The generation step (uiDataReset) is taken once by the dispatcher, before any listener runs
     DASH_SEARCH_DATA.forEach(function (kind) {
         var slot = dashSearchSlot(kind);
         slot.rows = null;
@@ -4015,8 +4015,8 @@ registerPageRefresh("usage", 60000, function (isCurrent) { return dashUseLoad(is
 // ===========================================================================
 
 function dashListsDbChanged() {
-    // Token, zone, API key and passkey reads under way publish nothing
-    uiMutated();
+    // Token, zone, API key and passkey reads under way publish nothing: the dispatcher took the
+    // generation step (uiDataReset) before this listener runs
     var store = dashTokenStore;
     store.rows = null;
     store.at = 0;
@@ -4883,16 +4883,27 @@ function dashDispSave() {
             dashPanelConflict(p, d.current);
             return "conflict";
         }
-        if (res.status === 0) {
+        // No answer, or the database did not confirm the write: it may have been saved
+        if (res.status === 0 || d.code === "write_unknown") {
             dashPanelUnknown(p);
             return "unknown";
         }
         if (res.status === 401) return "failed";
-        dashPanelFail(p, apiError(res, t("settings.display.could-not-save")), d.field || "");
+        // The codes this route added show catalog words; older API errors keep the server's reason
+        var known = DASH_DISP_ERRORS[d.code];
+        dashPanelFail(p, known ? t(known) : apiError(res, t("settings.display.could-not-save")), d.field || "");
         if (d.code === "locked") dashDispLoad();
         return "failed";
     });
 }
+
+// The refusals of PUT /admin/api/settings/display, by code (R2: never the server's words)
+var DASH_DISP_ERRORS = {
+    busy: "settings.display.save-busy",
+    write_refused: "settings.display.save-refused",
+    locked: "settings.display.save-locked",
+    invalid: "settings.display.save-invalid",
+};
 
 // ---------------------------------------------------------------------------
 // Rate limit
@@ -5302,6 +5313,16 @@ function dashRedisInput() {
     dashRedisSyncForm();
 }
 
+// The field the address names after #, or "" when there is none or it cannot be decoded (R4)
+function dashSettingsHashField() {
+    var raw = window.location.hash ? window.location.hash.slice(1) : "";
+    try {
+        return decodeURIComponent(raw);
+    } catch (e) {
+        return "";
+    }
+}
+
 function dashRedisDrawForm() {
     var body = document.getElementById("redis-body");
     if (!body || !dashRedis.baseSnap) return;
@@ -5321,7 +5342,7 @@ function dashRedisDrawForm() {
         '<form class="ui-form" id="redis-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields ui-set-rows" id="redis-fields">' +
         '<div class="ui-set-row" id="redis-now-row"><div class="ui-set-text"><div class="ui-set-label"><span class="ui-label">' + esc(t("settings.redis.current-connection")) +
         '</span></div></div><div class="ui-set-control">' + now + "</div></div>" +
-        dashSetRow({ id: "redis-url", forId: u.locked ? "redis-url" : "", label: t("settings.redis.new-connection-url"), locked: u.locked, control: control,
+        dashSetRow({ id: "redis-url", forId: "redis-url", label: t("settings.redis.new-connection-url"), locked: u.locked, control: control,
             marks: u.locked ? dashSetLockPill(u, u.connected) : "",
             hint: tHtml("settings.redis.the-whole-url-with-its-password", { scheme: dashCode(t("settings.redis.rediss")) }) }) +
         '<p class="ui-error hidden" id="redis-err" role="alert"></p>' +
@@ -5858,7 +5879,7 @@ DASH_PAGE_IMPL.settings = function (info) {
     dashDbBind();
     var asked = uiPageSection("settings");
     var id = asked || dashSettings.section || SETTINGS_SECTIONS[0].id;
-    dashSettingsOpen(id, { replace: !asked || !dashSettingsInfo(asked), field: window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : "" });
+    dashSettingsOpen(id, { replace: !asked || !dashSettingsInfo(asked), field: dashSettingsHashField() });
     DASH_SET_ORDER.forEach(function (name) { DASH_SET_PANELS[name].draw(); });
     dashDbDraw(false);
     dashSaveBarSync();
@@ -6304,6 +6325,9 @@ function dashDbContextChanged() {
             uiSetDatePrefs(d.dateFormat, d.timeFormat);
         }
         dashRedrawDates();
+        // One step for every reader (R3): reads that started before the change are stale from here,
+        // and each listener then starts its own reads, which no other listener invalidates
+        uiDataReset();
         if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") window.dispatchEvent(new CustomEvent("ui:db-changed"));
     });
 }

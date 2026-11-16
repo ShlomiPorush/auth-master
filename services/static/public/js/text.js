@@ -685,6 +685,14 @@ var UI_TEXT = {
     "settings.display": "Date and time",
     "settings.display.changes-apply": "{saved} Saved formats apply here now. Reload other open tabs to use them.",
     "settings.display.could-not-load": "Could not load date and time formats",
+    // brief: error under the Date and time section when saving the formats failed because the database was busy (locked) at that moment; nothing was saved; the admin can try again in a moment; max 12 words
+    "settings.display.save-busy": "",
+    // brief: error under the Date and time section when the database refused to store the formats (no write permission or a read-only database); nothing was saved; the admin must fix the database access; max 14 words
+    "settings.display.save-refused": "",
+    // brief: error under the Date and time section when a format the admin tried to save is set by an environment variable (DATE_FORMAT or TIME_FORMAT) and cannot be changed here; max 14 words
+    "settings.display.save-locked": "",
+    // brief: error under the Date and time section when the server did not accept a format value (not one of the listed choices, or left empty); the admin should pick a listed choice; max 12 words
+    "settings.display.save-invalid": "",
     "settings.display.could-not-save": "Could not save formats. Your changes are kept.",
     "settings.display.env-invalid": "Invalid environment value; using {value}",
     "settings.display.env-not-a-choice": "Locked by {env}; using {value}. Set the variable to a listed choice, or remove it to choose here.",

@@ -18,7 +18,8 @@ function load() {
     // Needs attention reads again too; recorded here, not run
     ctx.refreshed = [];
     ctx.uiRefreshNow = (id) => { ctx.refreshed.push(id); return Promise.resolve(true); };
-    ctx.dbChanged = () => (listeners["ui:db-changed"] || []).forEach((fn) => fn(new ctx.CustomEvent("ui:db-changed")));
+    // As the dispatcher (dashDbContextChanged) does: one generation step, then every listener
+    ctx.dbChanged = () => { ctx.uiDataReset(); (listeners["ui:db-changed"] || []).forEach((fn) => fn(new ctx.CustomEvent("ui:db-changed"))); };
     ctx.listeners = listeners;
     return ctx;
 }
@@ -134,4 +135,21 @@ test("the list shown reads again at once; another page waits until it is opened"
     ctx.uiPageCurrent = "settings";
     ctx.dbChanged();
     assert.deepEqual(shown, [], "Settings reads its sections itself");
+});
+
+test("every listener of the change runs, and none invalidates the reads another one started (R3)", async () => {
+    const ctx = load();
+    const pending = heldApi(ctx);
+    // Both the lists and the search listen; the search runs second
+    if ((ctx.listeners["ui:db-changed"] || []).length < 2) ctx.listeners["ui:db-changed"].push(() => ctx.dashSearchDbChanged());
+    // The Tokens page shown reads again (its page code reads the shared token store)
+    ctx.uiPageCurrent = "tokens";
+    let reading = null;
+    ctx.DASH_PAGE_IMPL.tokens = () => { reading = ctx.dashTokensLoad(true); };
+    ctx.dbChanged();
+    const reads = pending.filter((p) => p.path === "/admin/api/tokens");
+    assert.ok(reads.length >= 1, "the token list reads the new database");
+    reads.forEach((r) => r.answer(200, [{ id: "new", name: "new" }]));
+    await reading;
+    assert.deepEqual(Array.from(ctx.dashTokenStore.rows || [], (t) => t.id), ["new"], "the new answer is kept, not dropped as stale");
 });

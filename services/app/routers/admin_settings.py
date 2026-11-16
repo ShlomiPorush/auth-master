@@ -583,6 +583,8 @@ async def put_display_settings(
         if e.busy:
             return _error(503, "busy", _BUSY)
         return _error(503, "write_refused", "The database did not accept the change. Nothing was saved.")
+    except ds.WriteUnknown:
+        return _error(503, "write_unknown", "The database did not confirm the change. It may have been saved; read the settings again.")
     if not saved:
         return _error(409, "conflict", _CONFLICT, current=_display_view(await _read_display(request)))
 

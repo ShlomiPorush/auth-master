@@ -414,9 +414,6 @@ body.ui-app { overflow: hidden; }
 .ui-settings-info { display: grid; }
 .ui-settings-info > .ui-alert:first-child { border-top: 0; }
 /* Confirmations the server asked for, inside a settings form */
-.ui-settings-asks { display: grid; gap: var(--ui-sp-4); }
-.ui-settings-asks:empty { display: none; }
-.ui-settings-asks .ui-check-label { margin-top: var(--ui-sp-3); }
 /* Masked URLs, zone names and paths wrap on a phone instead of widening the page */
 .ui-settings-fields code, .ui-settings-info code { overflow-wrap: anywhere; }
 .ui-locked-note svg { flex: none; }
@@ -686,7 +683,6 @@ body.ui-app { overflow: hidden; }
     background-size: 100% 1px; background-position: 0 0, 0 50%; background-repeat: no-repeat; touch-action: pan-y; }
 .ui-chart-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: var(--ui-sp-1); min-width: 0; height: 100%; padding: 0; border: 0;
     border-radius: var(--ui-radius-xs) var(--ui-radius-xs) 0 0; background: none; cursor: default; }
-.ui-chart-col.is-on { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); }
 @media (hover: hover) { .ui-chart-col:hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); } }
 .ui-chart-col:focus-visible { outline-offset: 0; }
 .ui-chart-col.is-none, .ui-chart-col.is-partial {
@@ -731,7 +727,8 @@ body.ui-app { overflow: hidden; }
 .ui-chart-col::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; z-index: 3; width: max-content; max-width: min(260px, 70vw);
     padding: var(--ui-sp-2) var(--ui-sp-4); border-radius: var(--ui-sp-3); background: var(--ui-ink); color: var(--ui-bg); font-size: var(--ui-fs-meta);
     font-weight: 500; line-height: 1.35; text-align: start; white-space: normal; transform: translateX(-50%); pointer-events: none; visibility: hidden; }
-.ui-chart-col:hover::after, .ui-chart-col:focus-visible::after { visibility: visible; }
+.ui-chart-col:focus-visible::after { visibility: visible; }
+@media (hover: hover) { .ui-chart-col:hover::after { visibility: visible; } }
 .ui-chart-col.is-tip-start::after { left: 0; transform: none; }
 .ui-chart-col.is-tip-end::after { left: auto; right: 0; transform: none; }
 .ui-chart-view.is-moving .ui-chart-col::after { visibility: hidden; }

@@ -1060,3 +1060,20 @@ test("an active ADMIN_API_KEY is a locked row on API Keys", () => {
     assert.ok(row.includes(ctx.tHtml("apikeys.set-by-the", { env: ctx.tRaw("<code>ADMIN_API_KEY</code>") })));
     assert.doesNotMatch(row, /data-key|tabindex|data-row-menu/);
 });
+
+test("an address fragment that cannot be decoded names no field and stops nothing (R4)", () => {
+    for (const [hash, field] of [["", ""], ["#redis_url", "redis_url"], ["#%E2%9C%93", "✓"], ["#%", ""], ["#%E2%9C", ""]]) {
+        const ctx = load({ location: { origin: "https://a.example", pathname: "/admin/settings/general", search: "", hash } });
+        assert.equal(ctx.dashSettingsHashField(), field, hash);
+    }
+});
+
+test("the Redis URL field keeps its visible label as its name, also before Replace (R5)", () => {
+    const body = { innerHTML: "" };
+    const ctx = load({ document: Object.assign({}, PAGE, { getElementById: (id) => (id === "redis-body" ? body : null) }) });
+    ctx.dashRedis.baseSnap = { version: 0, url: { connected: "redis://:****@redis:6379/0", saved: "", source: "default", locked: false } };
+    ctx.dashRedis.st = ctx.dashRedis.st || {};
+    try { ctx.dashRedisDrawForm(); } catch (e) { /* binding needs a page; the markup is written first */ }
+    assert.match(body.innerHTML, /<label[^>]*for="redis-url"/);
+    assert.match(body.innerHTML, /<input[^>]*id="redis-url"/);
+});
