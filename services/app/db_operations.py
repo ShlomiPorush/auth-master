@@ -280,7 +280,7 @@ async def run_setup(rt: Runtime, app: Any, job: Job, backend: str, params: PgPar
         except BaseException:
             await _close(new_db)
             raise
-        new_cfg = Config(db_config.POSTGRES, iid, pg=params)
+        new_cfg = _pg_config(iid, params, result.migration_id, None)
 
     logged: dict[str, Any] = {}
 
@@ -343,7 +343,7 @@ async def run_edit(rt: Runtime, app: Any, job: Job, params: PgParams, confirm_co
     except BaseException:
         await _close(new_db)
         raise
-    new_cfg = Config(db_config.POSTGRES, cfg.installation_id, pg=params)
+    new_cfg = _pg_config(cfg.installation_id, params, result.migration_id, cfg)
     before = _public(cfg)
     logged: dict[str, Any] = {}
 
@@ -440,7 +440,7 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
     elif completing is not None:
         new_cfg = Config(db_config.POSTGRES, iid, pg=params, migration_id=completing[0], moved_from_sqlite=completing[1])
     else:
-        new_cfg = Config(db_config.POSTGRES, iid, pg=params)
+        new_cfg = _pg_config(iid, params, result.migration_id, rt.config)
     logged: dict[str, Any] = {}
 
     async def after() -> None:
@@ -449,6 +449,17 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
 
     await _switch(rt, app, job, new_db, new_cfg, after=after)
     return {"action": action, "warning": logged.get("warning")}
+
+
+def _pg_config(iid: str, params: PgParams, migration_id: str | None, current: Config | None) -> Config:
+    """A PostgreSQL configuration that keeps the record of a move from SQLite: the
+    installation row keeps the move's id for good, so every later save (a connection change,
+    a recovery) writes it again, and the recovery page keeps refusing the old SQLite file."""
+    if not migration_id:
+        return Config(db_config.POSTGRES, iid, pg=params)
+    moved = (current.moved_from_sqlite if current is not None and current.migration_id == migration_id
+             and current.moved_from_sqlite else str(db_config.default_sqlite_path()))
+    return Config(db_config.POSTGRES, iid, pg=params, migration_id=migration_id, moved_from_sqlite=moved)
 
 
 async def _move_to_complete(rt: Runtime, result: CheckResult) -> tuple[str, str] | None:

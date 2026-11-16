@@ -540,7 +540,10 @@ class CheckView:
     counts: dict[str, int]
 
     def view(self) -> dict[str, Any]:
-        return {"target": self.target, "problems": self.problems, "counts": self.counts}
+        # The log tables are counted, not read: reading every log row takes minutes on a large
+        # installation; the move reads each one and stops before anything changes on a problem.
+        return {"target": self.target, "problems": self.problems, "counts": self.counts,
+                "uncheckedTables": list(LOG_TABLES)}
 
 
 def _movable(rt: Runtime) -> Config:

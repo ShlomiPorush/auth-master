@@ -652,7 +652,7 @@ var UI_TEXT = {
     "settings.database.moving": "Moving…",
     "settings.database.move-cannot-start": "The move cannot start",
     "settings.database.move-ready-title": "Ready to move",
-    "settings.database.move-ready": "{tokens} tokens, {zones} zones and {logs} log entries will be copied. Nothing changes until the switch.",
+    "settings.database.move-ready": "{tokens} tokens, {zones} zones and {logs} log entries will be copied. Every row except the log entries was checked; log entries are checked as they are copied, and a problem there stops the move before anything changes.",
     "settings.database.move-earlier-copy": "An unfinished copy from an earlier attempt will be replaced.",
     "settings.database.move-check-failed": "The check found a problem, so nothing was moved.",
     "settings.database.confirm-the-move": "Confirm the move",

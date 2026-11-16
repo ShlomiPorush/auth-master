@@ -335,7 +335,8 @@ the service keeps running, then switches to it.
 2. Enter the host, port, database, user, password and TLS mode, then choose **Check
    connection**. The check changes nothing. It shows how many tokens, zones and log entries
    will be copied, and names any row that cannot be moved (table, row and column), so you can
-   fix or delete it first.
+   fix or delete it first. Log entries are only counted there; the move checks each one as
+   it copies it and stops before anything changes when one cannot be moved.
 3. Choose **Move to PostgreSQL** and confirm with your authenticator code or a passkey.
 
 While the data is copied, the log cleanup and the Usage summary pause. At the switch, requests

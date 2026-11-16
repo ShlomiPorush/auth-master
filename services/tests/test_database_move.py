@@ -21,6 +21,7 @@ import pytest
 
 from test_database_setup import (  # noqa: F401  (the harness sets the environment first)
     ADMIN_URL,
+    _edit,
     Pg,
     fresh_code,
     needs_pg,
@@ -957,6 +958,11 @@ def test_after_a_move_the_recovery_page_refuses_a_sqlite_file(workdir, monkeypat
                 _admin, totp, c = await _signed_in_sqlite(svc)
                 job = await _move(c, pg, totp)
                 assert job["state"] == "done", job
+                migration_id = svc.config()["migrationId"]
+                # A later connection change keeps the record of the move.
+                job = await _edit(svc, c, pg.body(), totp)
+                assert job["state"] == "done" and job["result"]["action"] == "database.connection_changed", job
+                assert svc.config()["migrationId"] == migration_id
             backup = workdir / "data" / "auth.db"
             backup.unlink()
             for extra in ("-wal", "-shm"):
