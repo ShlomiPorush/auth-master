@@ -435,7 +435,7 @@ body.ui-app { overflow: hidden; }
 .ui-settings-link[aria-current="true"] { background: var(--ui-accent); color: var(--ui-on-accent); font-weight: 650; }
 @media (hover: hover) { .ui-settings-link:not([aria-current="true"]):hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); } }
 /* A section that holds an unsaved change */
-.ui-settings-link.has-changes::after { content: ""; flex: none; width: 7px; height: 7px; margin-inline-start: auto; border-radius: 50%; background: var(--ui-info); }
+.ui-settings-link.has-changes::after { content: ""; flex: none; width: 7px; height: 7px; margin-inline-start: auto; border-radius: var(--ui-radius-round); background: var(--ui-info); }
 .ui-settings-pick { display: none; }
 /* The last field is never under the save bar */
 .ui-settings-content { display: grid; gap: var(--ui-gap); min-width: 0; padding-bottom: calc(var(--ui-sp-11) + var(--ui-sp-11) + var(--ui-sp-9)); }
