@@ -134,8 +134,13 @@ class Settings(BaseSettings):
     access_log_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="ACCESS_LOG_RETENTION_DAYS")
     # The passkey address (app.passkey_settings). Empty: not set here; the Settings page manages it.
     passkey_origin: str = Field(default="", validation_alias="PASSKEY_ORIGIN")
+    # How dates and times are written on the admin pages (app.display_settings). Set, they
+    # override the Settings page and lock its fields; a value that is not one of the choices
+    # is not an error: the default applies and the page says why. Empty means not set.
+    date_format: str | None = Field(default=None, validation_alias="DATE_FORMAT")
+    time_format: str | None = Field(default=None, validation_alias="TIME_FORMAT")
 
-    @field_validator("cookie_secure", mode="before")
+    @field_validator("cookie_secure", "date_format", "time_format", mode="before")
     @classmethod
     def _empty_means_not_set(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value

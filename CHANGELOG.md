@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The **Date format** and **Time format** of every date on the dashboard are server settings
+  in Settings > General, sent to every page by `GET /admin/api/me` (`dateFormat`,
+  `timeFormat`). `DATE_FORMAT` and `TIME_FORMAT` set them and lock the fields. They are
+  stored in the table `app_state` (key `display_settings`), so the database schema does not
+  change. The two fields leave **Preferences**, and the choice each browser kept there is no
+  longer read.
+- Each Settings section has its own address, such as `/admin/settings/database`.
+
+### Fixed
+
+- A database connection change whose answer was lost no longer reads as "nothing running"
+  while it still waits for its second-factor check: `GET /admin/api/settings/database` reports
+  it as `{"state": "pending"}` until its operation starts or the request ends.
+
 ## [2.3.0] - 2026-11-16
 
 ### Added

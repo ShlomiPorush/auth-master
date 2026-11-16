@@ -369,6 +369,31 @@ Authorization: Bearer <api-key>
 
 ---
 
+## Dashboard endpoints
+
+The admin pages call endpoints under `/admin/api/`. They need a signed-in admin session and,
+for every change, the `X-CSRF-Token` header. They are not meant for integrations, but two of
+them carry values that other tools may read:
+
+- `GET /admin/api/me` returns, besides the user, `timeZone`, `dateFormat` and `timeFormat`:
+  the time zone and the formats every date on the pages is written in. `dateFormat` is one
+  of `browser`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`, `YYYY-MM-DD`; `timeFormat` is one of
+  `24h`, `12h`, `browser`. `browser` leaves the order of the date, or the clock, to the
+  browser's language.
+- `GET /admin/api/settings/display` and `PUT /admin/api/settings/display` read and save those
+  two formats. The body of a save is `{"baseVersion": <version read>, "dateFormat": ...,
+  "timeFormat": ...}` with only the fields being changed. A save from an older version, or
+  one another admin made first, answers `409` with `"code": "conflict"` and the current
+  values in `current`. A field that `DATE_FORMAT` or `TIME_FORMAT` sets answers `409` with
+  `"code": "locked"`. A write the database refuses answers `503` with `"code": "busy"` or
+  `"code": "write_refused"`, and nothing is saved.
+- `GET /admin/api/settings/database` reports in `job` a database operation that runs
+  (`{"state": "running", ...}`), or `{"state": "pending"}` while a connection change has been
+  received but has not started its operation yet. A second change meanwhile answers `409`
+  with `"code": "busy"`.
+
+---
+
 ## Error Responses
 
 All error responses follow a consistent format:

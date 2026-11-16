@@ -46,7 +46,7 @@ from typing import Any, Awaitable, Callable
 
 import redis.asyncio as redis_asyncio
 
-from app import db_config, db_inspect, general_settings, installation, login_limit, rate_limit_settings, redis_settings
+from app import db_config, db_inspect, display_settings, general_settings, installation, login_limit, rate_limit_settings, redis_settings
 from app.config import GENERATE_HINT, get_settings
 from app.db import open_settings_database
 from app.schema import ensure_database_schema
@@ -619,6 +619,8 @@ class Runtime:
             await rate_limit_settings.load(settings_db, force=switching)
             # Copies the values the environment sets, before the first purge.
             await general_settings.load(settings_db, db)
+            # Never stops the start: unusable stored values give the default formats.
+            await display_settings.load(settings_db, db)
             from app.logger import init_purged_before
             from app.zones import copy_allowed_areas_once
 

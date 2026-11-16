@@ -201,8 +201,9 @@ async def _ensure_pg(db: "Database") -> None:
             )
         """)
 
-    # Internal state that is not a setting: markers of one-time steps and the access log
-    # purge boundary.
+    # Internal state: markers of one-time steps, the access log purge boundary, and one
+    # setting, the date and time formats of the admin pages (key display_settings,
+    # app.display_settings), kept here so that the schema does not change for it.
     await db.execute("""
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,

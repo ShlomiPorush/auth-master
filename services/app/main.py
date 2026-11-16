@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from contextlib import asynccontextmanager
 from html import escape as html_escape
 from pathlib import Path
@@ -20,7 +21,7 @@ from app.datetime_utils import is_expired
 from app.db import create_database
 from app.db_gate import DatabaseGateMiddleware
 from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage, admin_passkeys, admin_database
-from app import db_runtime, general_settings, rate_limit_settings, redis_settings, usage_rollup
+from app import db_runtime, display_settings, general_settings, rate_limit_settings, redis_settings, usage_rollup
 from app.logger import purge_old_logs
 from app.security_headers import AntiFramingMiddleware
 from app import request_log
@@ -104,6 +105,7 @@ async def settings_reload_loop(settings_db, db) -> None:
         await asyncio.sleep(rate_limit_settings.RELOAD_INTERVAL_SEC)
         await rate_limit_settings.reload_once(settings_db)
         await general_settings.reload_once(settings_db)
+        await display_settings.reload_once(settings_db)
         await redis_settings.retry_sync(settings_db, db)
 
 
@@ -356,6 +358,18 @@ async def page_login_mfa():
 @app.get("/admin/settings")
 @app.get("/admin/account")
 async def page_dashboard():
+    return _serve_html("index.html")
+
+
+# A Settings section has its own address (/admin/settings/database); the page opens it,
+# and an id it does not know opens the first section.
+_SETTINGS_SECTION = re.compile(r"[a-z0-9_-]{1,64}")
+
+
+@app.get("/admin/settings/{section}")
+async def page_settings_section(section: str):
+    if not _SETTINGS_SECTION.fullmatch(section):
+        raise HTTPException(status_code=404, detail="Not found")
     return _serve_html("index.html")
 
 

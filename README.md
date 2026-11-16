@@ -64,6 +64,8 @@ the variable to manage the value on the page.
 | Variable | Default | Settings page field |
 |---|---|---|
 | `TZ` | `UTC` | **Time zone** for dates on every page and in the Usage report, such as `Asia/Jerusalem`. An empty value or a name that is not a time zone keeps dates in UTC, and the page says so |
+| `DATE_FORMAT` | `browser` | **Date format** of every date on the dashboard: `browser` (the browser's own order), `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY` or `YYYY-MM-DD`. Another value locks the field and the default applies, and the page says so. An empty value counts as not set |
+| `TIME_FORMAT` | `24h` | **Time format** of every time on the dashboard: `24h`, `12h` or `browser`. Another value locks the field and the default applies. An empty value counts as not set |
 | `COOKIE_SECURE` | `false` | **Secure session cookie**. Set it to `true` when admins use the portal over HTTPS. See [Remote access and HTTPS](#remote-access-and-https). An empty value counts as not set |
 | `ACTIVITY_LOG_RETENTION_DAYS` | `30` | **Activity log retention**, from 1 to 3650 days. A value outside that range stops the start |
 | `ACCESS_LOG_RETENTION_DAYS` | `30` | **Access log retention**, from 1 to 3650 days; also the longest period the Usage page can count. A value outside that range stops the start |
@@ -73,11 +75,12 @@ the variable to manage the value on the page.
 | `TOTP_ISSUER` | `AuthService` | **Name in authenticator apps**, on the MFA step of the first setup. The name is used only there |
 | `PASSKEY_ORIGIN` | _(empty)_ | **Passkey address**, such as `https://auth.example.com`. Not copied to the page: when you remove it, the saved address applies. An empty value counts as not set. See [Passkeys](#passkeys) |
 
-At each start, the service copies `TZ`, `COOKIE_SECURE` and the two retention values from
-the environment to the Settings page when they differ from the saved values. Each copy is a
+At each start, the service copies `TZ`, `COOKIE_SECURE`, `DATE_FORMAT`, `TIME_FORMAT` and the
+two retention values from the environment to the Settings page when they differ from the saved values. Each copy is a
 new version, saved by `environment` and shown in the Activity Log. So when you remove one of
 these variables later, the field keeps its last value instead of going back to the default.
-The service does not copy a `TZ` that is not a time zone. `REDIS_URL` is copied only after a
+The service does not copy a `TZ` that is not a time zone, or a format that is not one of the
+choices. `REDIS_URL` is copied only after a
 check against it passes (see [Redis connection](#redis-connection)). The rate limit variables
 are not copied.
 
@@ -100,6 +103,14 @@ the same version are told about the conflict.
   turn it on from a page opened over plain HTTP, the page asks you to confirm, because signing
   in over HTTP stops working. Sessions that are already open keep working until they end. To
   undo it without the page, set `COOKIE_SECURE=false`.
+
+The **Date format** and **Time format** are shown in the General section too, but they are
+saved on their own: in the table `app_state` under the key `display_settings`, with their own
+version, so a save of one part never refuses or undoes the other. Every page reads them when
+it opens; a saved change applies to the tab that saved it at once and to other open tabs when
+they are reloaded. A stored value that cannot be read gives the defaults and a line in the
+service log; it never stops the start. The formats used to be a choice of each browser under
+**Preferences**; that choice is no longer read.
 
 When a retention value is raised, the Usage page still marks the days that the earlier,
 shorter retention already deleted, instead of showing them as zero.
