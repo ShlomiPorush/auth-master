@@ -582,6 +582,49 @@ function dashTag(text, tone) {
     return '<span class="ui-tag' + (tone ? " ui-tag-" + tone : "") + '">' + esc(text) + "</span>";
 }
 
+// LD-12: after a background read failed, a line under the list's count says so,
+// with the server's reason and how long ago the rows shown were loaded (the exact
+// time on hover). One shared timer keeps every such line current.
+function dashFreshText(at, reason, now) {
+    return t("list.fresh-failed", { reason: reason, ago: formatAgo(at, now) });
+}
+
+function dashFreshFill(el) {
+    var at = Number(el.getAttribute("data-fresh-at"));
+    var text = el.querySelector("[data-fresh-text]");
+    if (!text || !at) return;
+    text.textContent = dashFreshText(at, el.getAttribute("data-fresh-reason") || "");
+    text.setAttribute("title", formatTime(at));
+}
+
+var dashFreshTimer = null;
+
+// reason "" (or no time of a good read) hides the line
+function dashFreshSet(id, at, reason) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var on = !!(reason && at);
+    el.classList.toggle("hidden", !on);
+    if (!on) {
+        el.removeAttribute("data-fresh-at");
+        return;
+    }
+    el.setAttribute("data-fresh-at", String(at));
+    el.setAttribute("data-fresh-reason", reason);
+    dashFreshFill(el);
+    if (!dashFreshTimer) {
+        dashFreshTimer = setInterval(function () {
+            document.querySelectorAll(".ui-fresh[data-fresh-at]").forEach(dashFreshFill);
+        }, 30000);
+    }
+}
+
+// Its Try again reads the list again
+function dashFreshBind(id, retry) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("click", function (event) { if (event.target.closest("[data-fresh-retry]")) retry(); });
+}
+
 // A header label that sorts (TB-1): the label is a button that says its order in
 // hidden words; the cell's data-sort-state draws the arrow. def: the list's own
 // column and order, for a list that has one.
@@ -775,6 +818,7 @@ function dashTokSyncControls() {
 function dashTokDraw(quiet) {
     if (!dashTok.bound) return;
     var rowsEl = document.getElementById("tok-rows");
+    dashFreshSet("tok-fresh", dashTokenStore.at, dashTokenStore.rows ? dashTokenStore.failed : "");
     if (quiet && uiAreaHeld(rowsEl)) return;
     var rows = dashTokenStore.rows;
     var html;
@@ -891,6 +935,7 @@ function dashTokBind() {
     document.getElementById("tok-rows").addEventListener("click", function (event) {
         if (event.target.closest("[data-tok-retry]")) dashTokLoad(true);
     });
+    dashFreshBind("tok-fresh", function () { dashTokLoad(true); });
     dashBindList({
         head: "tok-head", rows: "tok-rows", sortButton: "tok-sort", name: t("list.name-tokens"), cols: DASH_TOK_COLS, state: dashTok.sort,
         redraw: function () { dashTokDraw(false); },
@@ -1292,7 +1337,7 @@ registerPageRefresh("tokens", 30000, function () {
 // Zones
 // ===========================================================================
 
-var dashZones = { q: "", sort: { key: "", dir: "" }, drawn: "", bound: false, loaded: false };
+var dashZones = { q: "", sort: { key: "", dir: "" }, drawn: "", bound: false, loaded: false, at: 0 };
 var DASH_ZONE_COLS = [{ key: "name", label: "zones.name", kind: "text" }, { key: "createdAt", label: "zones.created", kind: "date" }];
 
 function dashZoneFind(id) {
@@ -1327,6 +1372,7 @@ function dashZonesDraw(quiet) {
         dupEl.classList.toggle("hidden", !dupHtml);
     }
     var rowsEl = document.getElementById("zone-rows");
+    dashFreshSet("zone-fresh", dashZones.at, dashZones.loaded ? dash.zonesFailed : "");
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
     var q = dashZones.q.toLowerCase();
@@ -1362,6 +1408,7 @@ function dashZonesDraw(quiet) {
 function dashZonesLoadPage(quiet) {
     return dashZonesLoad().then(function () {
         if (dash.zonesLoaded) dashZones.loaded = true;
+        if (dash.zonesLoaded && !dash.zonesFailed) dashZones.at = Date.now();
         dashZonesDraw(quiet);
     });
 }
@@ -1418,6 +1465,7 @@ function dashZonesBind() {
     document.getElementById("zone-rows").addEventListener("click", function (event) {
         if (event.target.closest("[data-zone-retry]")) dashZonesLoadPage(false);
     });
+    dashFreshBind("zone-fresh", function () { dashZonesLoadPage(false); });
     dashBindList({
         head: "zone-head", rows: "zone-rows", sortButton: "zone-sort", name: t("list.name-zones"), cols: DASH_ZONE_COLS, state: dashZones.sort,
         redraw: function () { dashZonesDraw(false); },
@@ -1515,7 +1563,7 @@ registerPageRefresh("zones", 30000, function () { return dashZonesLoadPage(true)
 // API keys
 // ===========================================================================
 
-var dashKeys = { rows: null, failed: "", master: null, sort: { key: "", dir: "" }, drawn: "", bound: false };
+var dashKeys = { rows: null, failed: "", master: null, sort: { key: "", dir: "" }, drawn: "", bound: false, at: 0 };
 var DASH_KEY_COLS = [{ key: "name", label: "apikeys.name", kind: "text" }, { key: "createdAt", label: "apikeys.created", kind: "date" }];
 
 function dashKeyFind(id) {
@@ -1530,6 +1578,7 @@ function dashKeysLoad(quiet) {
         if (uiStaleSince(mark)) return;
         if (res.ok && Array.isArray(res.data)) {
             dashKeys.rows = res.data;
+            dashKeys.at = Date.now();
             dashKeys.failed = "";
         } else {
             dashKeys.failed = apiError(res, t("apikeys.failed"));
@@ -1555,6 +1604,7 @@ function dashKeyMasterRow() {
 function dashKeysDraw(quiet) {
     if (!dashKeys.bound) return;
     var rowsEl = document.getElementById("key-rows");
+    dashFreshSet("key-fresh", dashKeys.at, dashKeys.rows ? dashKeys.failed : "");
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
     if (!dashKeys.rows) {
@@ -1592,6 +1642,7 @@ function dashKeysBind() {
     document.getElementById("key-rows").addEventListener("click", function (event) {
         if (event.target.closest("[data-key-retry]")) dashKeysLoad(false);
     });
+    dashFreshBind("key-fresh", function () { dashKeysLoad(false); });
     dashBindList({
         head: "key-head", rows: "key-rows", sortButton: "key-sort", name: t("apikeys.api-keys"), cols: DASH_KEY_COLS, state: dashKeys.sort,
         redraw: function () { dashKeysDraw(false); },
@@ -1735,6 +1786,8 @@ Object.keys(dashLogs).forEach(function (k) {
     s.drawn = "";
     s.bound = false;
     s.applied = { search: "", filter: "", token: "" };
+    s.at = 0;
+    s.observer = null;
 });
 
 function dashLogQuery(s, extra) {
@@ -1818,6 +1871,7 @@ function dashLogFirst(s, quiet, isCurrent) {
         s.failed = "";
         s.refreshFailed = "";
         s.capped = false;
+        s.at = Date.now();
         s.heads = {};
         s.nexts = {};
         dashLogCursors(s, res.data);
@@ -1827,14 +1881,44 @@ function dashLogFirst(s, quiet, isCurrent) {
         s.hasMore = (res.data.logs || []).length >= LOG_PAGE_SIZE;
         s.pending = [];
         dashLogDraw(s, false);
+        dashLogEndCheck(s);
     });
 }
 
 // An update that failed keeps the rows, says so under the list, and tells once
-// per run of failures with the old wording
+// per run of failures with the old wording, offering to try again (FB-2)
 function dashLogRefreshFailed(s, reason) {
-    if (!s.refreshFailed) showToast(t(s.failedText), "error");
+    if (!s.refreshFailed) {
+        showToast(t(s.failedText), "error", { action: { label: t("logs.try-again"), run: function () { return dashLogRefresh(s); } } });
+    }
     s.refreshFailed = reason || t(s.failedText);
+}
+
+// TB-6: the next page loads from a sentinel under the list before its end comes
+// into view; a failed page waits for Try again and never asks again by itself
+function dashLogWatch(s) {
+    var line = document.getElementById(s.id + "-more");
+    if (!line || typeof IntersectionObserver !== "function") return;
+    s.observer = new IntersectionObserver(function (entries) {
+        if (entries.some(function (e) { return e.isIntersecting; })) dashLogNearEnd(s);
+    }, { root: uiMainScroller(), rootMargin: "0px 0px 400px 0px" });
+    s.observer.observe(line);
+}
+
+function dashLogNearEnd(s) {
+    if (uiPageCurrent !== s.id || s.moreFailed || s.loading || !s.hasMore || !dashLogReady(s)) return;
+    dashLogMore(s);
+}
+
+// A short page can leave the end in view, and the observer reports only changes
+function dashLogEndCheck(s) {
+    if (!s.observer || typeof requestAnimationFrame !== "function") return;
+    requestAnimationFrame(function () {
+        var line = document.getElementById(s.id + "-more");
+        var main = uiMainScroller();
+        if (!line || !main || !line.getClientRects().length) return;
+        if (line.getBoundingClientRect().top < main.getBoundingClientRect().bottom + 400) dashLogNearEnd(s);
+    });
 }
 
 function dashLogMore(s) {
@@ -1858,6 +1942,7 @@ function dashLogMore(s) {
         s.rows = uiLogMerge(s.rows, logs);
         s.hasMore = logs.length >= LOG_PAGE_SIZE;
         dashLogDraw(s, false);
+        dashLogEndCheck(s);
     });
 }
 
@@ -1902,6 +1987,7 @@ function dashLogRefresh(s, isCurrent) {
             return;
         }
         s.refreshFailed = "";
+        s.at = Date.now();
         if (complete === false) {
             s.capped = true;
             s.pending = [];
@@ -2091,22 +2177,20 @@ function dashLogDraw(s, quiet) {
     // The pill and the line under the list always follow; the rows only when free
     var n = s.pending.length;
     pillEl.classList.toggle("hidden", !n && !s.capped);
-    pillEl.textContent = s.capped ? t("logs.more-new-entries-than-can-be")
+    pillEl.querySelector("[data-pill-text]").textContent = s.capped ? t("logs.more-new-entries-than-can-be")
         : tn("logs.new-entries", n);
     var moreHtml = "";
     if (s.moreFailed) {
         moreHtml = '<span role="alert">' + esc(t("logs.could-not-load-more-entries", { reason: s.moreFailed })) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-more>' + esc(t("logs.try-again")) + '</button>';
     } else if (s.rows && s.rows.length && s.hasMore) {
-        moreHtml = s.loading ? '<span class="ui-spin" aria-hidden="true"></span><span role="status">' + esc(t("logs.loading-more")) + '</span>'
+        // The sentinel loads the next page by itself; without one, a Load more button
+        moreHtml = s.loading || s.observer ? '<span class="ui-spin" aria-hidden="true"></span><span role="status">' + esc(t("logs.loading-more")) + '</span>'
             : '<button type="button" class="ui-btn ui-btn-sm" data-log-more data-inventory="' + s.id + '.loadmore">' + esc(t("logs.load-more")) + '</button>';
     } else if (s.rows && s.rows.length > LOG_PAGE_SIZE) {
         moreHtml = '<span role="status">' + esc(t("logs.all", { n: uiNum(s.rows.length) })) + "</span>";
     }
-    // A failed update keeps the rows and Load more, and says so above them (R7)
-    if (s.refreshFailed && s.rows) {
-        moreHtml = '<span role="status">' + esc(t("logs.the-list-shows-what-was-loaded", { what: t(s.failedText), reason: s.refreshFailed })) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-retry-new>' + esc(t("logs.try-again")) + '</button>' +
-            (moreHtml ? " " + moreHtml : "");
-    }
+    // A failed update keeps the rows and says so under the count (LD-12)
+    dashFreshSet(s.id + "-fresh", s.at, s.rows ? s.refreshFailed : "");
     if (moreEl.innerHTML !== moreHtml) moreEl.innerHTML = moreHtml;
     moreEl.classList.toggle("hidden", !moreHtml);
     var filtered = s.applied.search || s.applied.filter;
@@ -2181,8 +2265,9 @@ function dashLogBind(s) {
     panel.addEventListener("click", function (event) {
         if (event.target.closest("[data-log-more]")) dashLogMore(s);
         else if (event.target.closest("[data-log-retry]")) dashLogFirst(s, false);
-        else if (event.target.closest("[data-log-retry-new]")) dashLogRefresh(s);
+        else if (event.target.closest("[data-fresh-retry]")) dashLogRefresh(s);
     });
+    dashLogWatch(s);
 }
 
 // Reset shows while any filter is set; the token filter (from Usage) is a chip that removes it
@@ -2338,7 +2423,7 @@ var USAGE_NOTE = "usage.note";
 
 // data: the last answer; shown: the answer the page now draws (a refresh skipped while the
 // user works in the page leaves the older one on screen, and the chart reads that one)
-var dashUse = { range: "7d", token: "", data: null, dataFor: "", notFound: false, failed: "", seq: 0,
+var dashUse = { range: "7d", token: "", data: null, dataFor: "", notFound: false, failed: "", seq: 0, at: 0,
     sort: { key: "", dir: "" }, sel: -1, drawn: "", shown: null, bound: false };
 // The note under the usage tables (HTML)
 function dashUseNote() {
@@ -2384,6 +2469,7 @@ function dashUseLoad(isCurrent) {
         if (res.ok && res.data && Array.isArray(res.data.series)) {
             dashUse.data = res.data;
             dashUse.dataFor = key;
+            dashUse.at = Date.now();
             dashUse.notFound = false;
             dashUse.failed = "";
         } else if (res.status === 404 && dashUse.token) {
@@ -2531,9 +2617,6 @@ function dashUseNotices(d) {
     if (d.areasIncomplete) {
         out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>' + esc(t("usage.area-figures-are-incomplete-for-this")) + '</b>' +
             esc(t("usage.the-calls-name-more-different-zones")) + "</div></div>";
-    }
-    if (dashUse.failed) {
-        out += '<div class="ui-banner ui-banner-fail" role="alert"><div><b>' + esc(t("usage.could-not-refresh-these-figures")) + '</b>' + esc(t("usage.they-are-tried-again-every-minute", { reason: dashUse.failed })) + "</div></div>";
     }
     return out;
 }
@@ -2697,6 +2780,8 @@ function dashUseDraw(quiet) {
     if (!body) return;
     dashUseSyncRange();
     var mine = dashUse.dataFor === dashUseKey();
+    // A failed refresh keeps the figures shown and says so above them (LD-12)
+    dashFreshSet("usage-fresh", dashUse.at, mine && dashUse.data ? dashUse.failed : "");
     var html;
     if (mine && dashUse.notFound) html = dashUseNotFoundHtml();
     else if (mine && dashUse.data) html = dashUse.token ? dashUseTokenHtml(dashUse.data) : dashUseOverviewHtml(dashUse.data);
@@ -2727,6 +2812,7 @@ function dashUseBind() {
         dashUseDraw(false);
         dashUseLoad().then(function () { uiRefreshLoaded("usage"); });
     });
+    dashFreshBind("usage-fresh", function () { dashUseLoad(); });
     var body = document.getElementById("usage-body");
     body.addEventListener("click", function (event) {
         var target = event.target;

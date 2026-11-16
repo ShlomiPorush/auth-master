@@ -544,6 +544,15 @@ body.ui-app { overflow: hidden; }
 .ui-more-line { display: flex; justify-content: center; align-items: center; gap: var(--ui-sp-4); padding: var(--ui-sp-6) var(--ui-pad-x);
     border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
 
+/* WP4, live lists: the "N new entries" pill sits outside the table's sideways
+   scroll, sticks at the list's top edge and points up to the new rows (LD-15, LD-2);
+   the freshness line after a failed update (LD-12) */
+.ui-new-pill { display: inline-flex; align-items: center; gap: var(--ui-sp-3); }
+.ui-new-pill svg { width: 14px; height: 14px; }
+.ui-fresh { color: var(--ui-warn); font-size: var(--ui-fs-sm); }
+.ui-panel > .ui-fresh { padding: var(--ui-sp-4) var(--ui-pad-x); border-bottom: 1px solid var(--ui-line); }
+.ui-fresh [data-fresh-text] { cursor: help; }
+
 /* Token permissions in the token dialog: one row per zone */
 .ui-perm-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-4); }
 .ui-perm-tools > .ui-search { flex: 1 1 180px; min-width: 0; }

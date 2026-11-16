@@ -150,6 +150,7 @@
               </div>
             </div>
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="tok-count"></span><button type="button" class="ui-clear-filters hidden" id="tok-clear" data-inventory="tokens.filter.clear" data-t="tokens.clear-filters"></button></p>
+            <p class="ui-fresh hidden" id="tok-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
             <div class="ui-table ui-stack" id="tok-table" role="table" data-inventory="tokens.table" data-t-attr="aria-label:tokens.tokens">
               <div class="ui-tr ui-tr-head" role="row" id="tok-head"></div>
               <div class="ui-table-body" id="tok-rows" role="rowgroup"></div>
@@ -199,6 +200,7 @@
               </div>
             </div>
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="zone-count"></span><button type="button" class="ui-clear-filters hidden" id="zone-clear" data-t="zones.clear-filters"></button></p>
+            <p class="ui-fresh hidden" id="zone-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
             <div class="ui-table ui-stack" id="zone-table" role="table" data-inventory="zones.table" data-t-attr="aria-label:zones.zones">
               <div class="ui-tr ui-tr-head" role="row" id="zone-head"></div>
               <div class="ui-table-body" id="zone-rows" role="rowgroup"></div>
@@ -223,6 +225,7 @@
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
               </button>
             </p>
+            <p class="ui-fresh hidden" id="key-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
             <div class="ui-table ui-stack" id="key-table" role="table" data-inventory="apikeys.table" data-t-attr="aria-label:apikeys.api-keys">
               <div class="ui-tr ui-tr-head" role="row" id="key-head"></div>
               <div class="ui-table-body" id="key-rows" role="rowgroup"></div>
@@ -268,6 +271,8 @@
               </div>
             </div>
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="activity-count"></span><button type="button" class="ui-clear-filters hidden" id="activity-reset" data-inventory="activity.filter.reset" data-t="activity.reset"></button></p>
+            <p class="ui-fresh hidden" id="activity-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="activity-new"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg><span data-pill-text></span></button></div>
             <div class="ui-table ui-stack" id="activity-table" role="table" data-nosort data-t-attr="aria-label:activity.activity-log-2">
               <div class="ui-tr ui-tr-head" role="row">
                 <div class="ui-td" role="columnheader" data-t="activity.timestamp"></div>
@@ -278,7 +283,6 @@
                 <div class="ui-td" role="columnheader" data-t="activity.details"></div>
                 <div class="ui-td" role="columnheader" data-t="activity.ip-address"></div>
               </div>
-              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="activity-new"></button></div>
               <div class="ui-table-body" id="activity-rows" role="rowgroup"></div>
             </div>
             <div class="ui-more-line hidden" id="activity-more" aria-live="polite" data-inventory="activity.loadmore"></div>
@@ -310,6 +314,8 @@
               </div>
             </div>
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="access-count"></span><button type="button" class="ui-clear-filters hidden" id="access-reset" data-inventory="access.filter.reset" data-t="access.reset"></button></p>
+            <p class="ui-fresh hidden" id="access-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="access-new"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg><span data-pill-text></span></button></div>
             <div class="ui-table ui-stack" id="access-table" role="table" data-nosort data-t-attr="aria-label:access.access-logs-2">
               <div class="ui-tr ui-tr-head" role="row">
                 <div class="ui-td" role="columnheader" data-t="access.timestamp"></div>
@@ -319,7 +325,6 @@
                 <div class="ui-td" role="columnheader" data-t="access.result"></div>
                 <div class="ui-td" role="columnheader" data-t="access.ip-address"></div>
               </div>
-              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="access-new"></button></div>
               <div class="ui-table-body" id="access-rows" role="rowgroup"></div>
             </div>
             <div class="ui-more-line hidden" id="access-more" aria-live="polite" data-inventory="access.loadmore"></div>
@@ -341,6 +346,7 @@
               </div>
             </div>
           </div>
+          <p class="ui-fresh hidden" id="usage-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
           <div class="ui-page" id="usage-body"></div>
         </section>
 

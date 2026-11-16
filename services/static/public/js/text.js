@@ -330,6 +330,8 @@ var UI_TEXT = {
 
     "list.actions": "Actions",
     "list.actions-for": "Actions for {name}",
+    // brief: line under a list's count (Tokens, Zones, API Keys, both logs, Usage) after its automatic update failed while the rows from the last good read stay shown; says the list could not be updated, the server's reason {reason}, and how long ago the rows shown were read {ago} (a relative time such as "3 min ago"); a Try again link follows it; max 16 words
+    "list.fresh-failed": "",
     "list.name-tokens": "tokens",
     "list.name-zones": "zones",
     "list.sort": "Sort: {column}, {order}",
@@ -481,7 +483,6 @@ var UI_TEXT = {
     "logs.signed-in-with": "Signed in with:",
     "logs.status": "Status: {status}",
     "logs.text": "×",
-    "logs.the-list-shows-what-was-loaded": "{what}: {reason}. The list shows what was loaded before.",
     "logs.the-passkey-could-not-be-verified": "The passkey could not be verified",
     "logs.the-passkey-does-not-match-its": "The passkey does not match its account",
     "logs.time-zone": "Time zone",
@@ -1033,7 +1034,6 @@ var UI_TEXT = {
     "usage.calls-with-a-token-the-service": "calls with a token the service does not know",
     "usage.chart-label": "{title}. Arrow keys move between bars.",
     "usage.could-not-load-the-usage": "Could not load the usage",
-    "usage.could-not-refresh-these-figures": "Could not refresh these figures",
     "usage.count-addresses": { "one": "{n} address", "other": "{n} addresses" },
     "usage.count-calls": { "one": "{n} call", "other": "{n} calls" },
     "usage.count-days": { "one": "{n} day", "other": "{n} days" },
@@ -1084,7 +1084,6 @@ var UI_TEXT = {
     "usage.the-last-30-days": "the last 30 days",
     "usage.the-last-7-days": "the last 7 days",
     "usage.the-server-did-not-answer": "The server did not answer.",
-    "usage.they-are-tried-again-every-minute": "{reason} They are tried again every minute.",
     "usage.this-browser-cannot-show-this-report": "This browser cannot show this report's time zone",
     "usage.this-period-has": "This period has {checks}.",
     "usage.this-report-uses-another-time-zone": "This report uses another time zone",
