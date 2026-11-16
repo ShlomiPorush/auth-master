@@ -660,17 +660,17 @@ body.ui-app { overflow: hidden; }
 .ui-chart-zoom .ui-icon-btn svg { width: 16px; height: 16px; }
 .ui-chart-zoom .ui-icon-btn:disabled { opacity: .35; }
 .ui-chart-zoom .is-gone { visibility: hidden; }
-.ui-strip { position: relative; height: 30px; margin-top: var(--ui-sp-4); border-radius: 7px; background: color-mix(in srgb, var(--ui-ink) 5%, transparent);
+.ui-strip { position: relative; height: 30px; margin-top: var(--ui-sp-4); border-radius: var(--ui-radius-sm); background: color-mix(in srgb, var(--ui-ink) 5%, transparent);
     touch-action: pan-y; user-select: none; }
 .ui-strip-bars { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(var(--ui-chart-n), minmax(0, 1fr)); align-items: end;
     gap: var(--ui-sp-1); padding: 0 var(--ui-sp-1); overflow: hidden; border-radius: inherit; }
-.ui-strip-bars > i { display: block; border-radius: 1px 1px 0 0; background: var(--ui-muted); opacity: .45; }
+.ui-strip-bars > i { display: block; border-radius: var(--ui-radius-xxs) var(--ui-radius-xxs) 0 0; background: var(--ui-muted); opacity: .45; }
 .ui-strip-bars > i.is-none { border-radius: 0; opacity: 1;
     background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 7%, transparent) 0 2px, transparent 2px 6px); }
-.ui-strip-win { position: absolute; top: 0; bottom: 0; border: 1.5px solid var(--ui-accent); border-radius: 7px;
+.ui-strip-win { position: absolute; top: 0; bottom: 0; border: 1.5px solid var(--ui-accent); border-radius: var(--ui-radius-sm);
     background: color-mix(in srgb, var(--ui-accent) 14%, transparent); cursor: grab; }
 .ui-strip.is-held .ui-strip-win { cursor: grabbing; }
-.ui-strip-edge { position: absolute; top: 4px; z-index: 1; width: 10px; height: 22px; border-radius: 3px; background: var(--ui-accent);
+.ui-strip-edge { position: absolute; top: 4px; z-index: 1; width: 10px; height: 22px; border-radius: var(--ui-radius-mark); background: var(--ui-accent);
     transform: translateX(-50%); cursor: ew-resize; }
 .ui-strip-edge::before { content: ""; position: absolute; inset: -10px -12px; }
 
