@@ -210,3 +210,250 @@ def test_check_passes_on_a_usable_directory(tmp_path):
     (top / "auth.db").write_text("x")
     assert data_dir.check(str(top)) == []
     assert sorted(os.listdir(top)) == ["auth.db", "sub"]
+
+
+# ---------------------------------------------------------------------------
+# A SQLite file that DATABASE_URL names (take_database, check_database)
+# ---------------------------------------------------------------------------
+
+OTHER_UID, OTHER_GID = UID + 1, GID + 1  # a target owner that differs from the current one
+as_root = pytest.mark.skipif(os.geteuid() != 0, reason="changing the owner needs root")
+not_root = pytest.mark.skipif(os.geteuid() == 0, reason="root passes every access check")
+
+
+@pytest.fixture
+def umask_077():
+    old = os.umask(0o077)
+    yield
+    os.umask(old)
+
+
+@pytest.mark.parametrize("url", [
+    "sqlite:///data/auth.db",
+    "sqlite:///sub/dir/auth.db",
+    "sqlite:////abs/dir/auth.db",
+    "sqlite:",
+    "sqlite:///data/auth.db?mode=ro",
+    "sqlite:///a/../b/auth.db",
+])
+def test_the_path_is_the_one_the_service_opens(url, tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import aiosqlite
+    from app import db as app_db
+
+    opened = []
+
+    async def connect(path, **kwargs):
+        opened.append(path)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(aiosqlite, "connect", connect)
+    monkeypatch.setattr(Path, "mkdir", lambda *a, **k: None)
+    monkeypatch.chdir(tmp_path)
+    import asyncio
+    with pytest.raises(RuntimeError):
+        asyncio.run(app_db.create_database(url))
+    assert data_dir.sqlite_path(url, str(tmp_path)) == os.path.join(str(tmp_path), opened[0])
+
+
+def test_only_sqlite_urls_name_a_file():
+    assert data_dir.sqlite_path(None, "/app") is None
+    assert data_dir.sqlite_path("postgres://h/db", "/app") is None
+    assert data_dir.sqlite_path("sqlite:///x/auth.db", "/w") == "/w/x/auth.db"
+
+
+@pytest.mark.parametrize("path,reason", [
+    ("/auth.db", "system directory"),
+    ("/etc/auth/auth.db", "system directory"),
+    ("/usr/local/lib/auth.db", "system directory"),
+    ("/app/auth.db", "image's own files"),
+    ("/app/static/public/images/favicon.svg", "image's own files"),
+    ("/db/../etc/auth.db", "'..'"),
+    ("/db//auth.db", "empty"),
+    ("/db/./auth.db", "'.'"),
+])
+def test_directories_that_are_never_given_away(path, reason):
+    with pytest.raises(data_dir.Refused, match=reason):
+        data_dir._database_target(path)
+
+
+def test_the_data_directory_and_var_are_allowed():
+    assert data_dir._database_target("/app/data/sub/auth.db")[2] == "/app/data/sub"
+    assert data_dir._database_target("/var/lib/auth-master/auth.db")[2] == "/var/lib/auth-master"
+
+
+def test_missing_directories_are_created_searchable_under_a_strict_umask(tmp_path, umask_077):
+    db = tmp_path / "new" / "sub" / "auth.db"
+    data_dir.take_database(str(db), UID, GID)
+    assert mode(tmp_path / "new") == 0o755
+    assert mode(tmp_path / "new" / "sub") == 0o755
+    assert os.umask(0o077) == 0o077  # restored
+
+
+def test_a_directory_already_owned_gets_its_owner_bits_back(tmp_path):
+    # An earlier run stopped between fchown and fchmod.
+    d = tmp_path / "db"
+    d.mkdir()
+    (d / "auth.db").write_text("x")
+    (d / "auth.db.bak").write_text("b")  # accepted: the directory is already the service's
+    os.chmod(d / "auth.db", 0o400)
+    os.chmod(d, 0o500)
+    try:
+        data_dir.take_database(str(d / "auth.db"), UID, GID)
+        assert mode(d) == 0o700
+        assert mode(d / "auth.db") == 0o600
+    finally:
+        os.chmod(d, 0o700)
+
+
+def test_a_directory_named_like_the_database_is_not_changed(tmp_path):
+    d = tmp_path / "db"
+    (d / "auth.db").mkdir(parents=True)
+    os.chmod(d / "auth.db", 0o500)
+    try:
+        data_dir.take_database(str(d / "auth.db"), UID, GID)
+        assert mode(d / "auth.db") == 0o500
+    finally:
+        os.chmod(d / "auth.db", 0o700)
+
+
+def test_a_symlinked_or_hard_linked_database_is_not_changed(tmp_path):
+    d = tmp_path / "db"
+    d.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "real.db").write_text("r")
+    os.chmod(outside / "real.db", 0o400)
+    os.symlink(outside / "real.db", d / "auth.db")
+    (outside / "wal").write_text("w")
+    os.link(outside / "wal", d / "auth.db-wal")
+    os.chmod(outside / "wal", 0o400)
+    data_dir.take_database(str(d / "auth.db"), UID, GID)
+    assert mode(outside / "real.db") == 0o400
+    assert mode(outside / "wal") == 0o400
+
+
+def test_a_symlink_in_the_path_is_refused(tmp_path):
+    (tmp_path / "real").mkdir()
+    os.symlink(tmp_path / "real", tmp_path / "link")
+    with pytest.raises(data_dir.Refused, match="is a symlink"):
+        data_dir.take_database(str(tmp_path / "link" / "auth.db"), UID, GID)
+
+
+@pytest.mark.parametrize("extra", ["notes.txt", "auth.db-passwords", "auth.db.bak"])
+def test_a_directory_with_other_files_is_refused_and_unchanged(tmp_path, extra):
+    d = tmp_path / "db"
+    d.mkdir()
+    (d / "auth.db").write_text("x")
+    (d / extra).write_text("e")
+    os.chmod(d, 0o500)
+    try:
+        with pytest.raises(data_dir.Refused, match=extra.replace(".", r"\.")):
+            data_dir.take_database(str(d / "auth.db"), OTHER_UID, OTHER_GID)
+        assert mode(d) == 0o500
+        assert os.stat(d).st_uid == UID
+    finally:
+        os.chmod(d, 0o700)
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink", "hard link"])
+def test_a_directory_whose_database_names_are_not_plain_files_is_refused_and_unchanged(tmp_path, kind):
+    d = tmp_path / "db"
+    d.mkdir()
+    (d / "auth.db").write_text("x")
+    if kind == "directory":
+        (d / "auth.db-wal").mkdir()
+    elif kind == "symlink":
+        (tmp_path / "elsewhere").write_text("e")
+        os.symlink(tmp_path / "elsewhere", d / "auth.db-wal")
+    else:
+        os.link(d / "auth.db", tmp_path / "second-name")
+    os.chmod(d, 0o500)
+    try:
+        with pytest.raises(data_dir.Refused, match="not a regular file with one link"):
+            data_dir.take_database(str(d / "auth.db"), OTHER_UID, OTHER_GID)
+        assert mode(d) == 0o500
+    finally:
+        os.chmod(d, 0o700)
+
+
+@as_root
+def test_a_database_directory_is_given_to_the_service_user(tmp_path):
+    d = tmp_path / "db"
+    d.mkdir()
+    for name in ("auth.db", "auth.db-wal", "auth.db-shm"):
+        (d / name).write_text("x")
+    data_dir.take_database(str(d / "auth.db"), 10001, 10001)
+    for p in (d, d / "auth.db", d / "auth.db-wal", d / "auth.db-shm"):
+        assert (os.stat(p).st_uid, os.stat(p).st_gid) == (10001, 10001)
+    assert os.stat(tmp_path).st_uid == 0  # parents are never changed
+
+
+@as_root
+def test_an_entry_that_appears_during_the_change_restores_the_owner(tmp_path, monkeypatch):
+    d = tmp_path / "db"
+    d.mkdir()
+    (d / "auth.db").write_text("x")
+    os.chmod(d, 0o750)
+    real = data_dir._other_entries
+    calls = []
+
+    def appearing(dir_fd, name):
+        calls.append(1)
+        if len(calls) == 2:
+            (d / "intruder").write_text("i")
+        return real(dir_fd, name)
+
+    monkeypatch.setattr(data_dir, "_other_entries", appearing)
+    with pytest.raises(data_dir.Refused, match="intruder appeared"):
+        data_dir.take_database(str(d / "auth.db"), 10001, 10001)
+    assert (os.stat(d).st_uid, mode(d)) == (0, 0o750)
+
+
+@as_root
+def test_a_failed_restore_says_the_directory_is_still_the_service_users(tmp_path, monkeypatch):
+    d = tmp_path / "db"
+    d.mkdir()
+    (d / "auth.db").write_text("x")
+    real_entries, real_fchown = data_dir._other_entries, os.fchown
+    calls = []
+
+    def appearing(dir_fd, name):
+        calls.append(1)
+        if len(calls) == 2:
+            (d / "intruder").write_text("i")
+        return real_entries(dir_fd, name)
+
+    def fchown(fd, uid, gid):
+        if uid == 0:
+            raise OSError(5, "Input/output error")
+        return real_fchown(fd, uid, gid)
+
+    monkeypatch.setattr(data_dir, "_other_entries", appearing)
+    monkeypatch.setattr(data_dir.os, "fchown", fchown)
+    with pytest.raises(data_dir.Problem, match="still owned by uid 10001"):
+        data_dir.take_database(str(d / "auth.db"), 10001, 10001)
+
+
+def test_check_accepts_missing_directories_the_service_can_create(tmp_path):
+    assert data_dir.check_database(str(tmp_path / "a" / "b" / "auth.db")) == []
+
+
+@not_root
+def test_check_names_a_parent_the_service_cannot_pass(tmp_path):
+    d = tmp_path / "closed" / "db"
+    d.mkdir(parents=True)
+    os.chmod(tmp_path / "closed", 0o600)
+    try:
+        problems = data_dir.check_database(str(d / "auth.db"))
+    finally:
+        os.chmod(tmp_path / "closed", 0o700)
+    assert problems == [f"{tmp_path / 'closed'}: cannot pass this directory to reach {d}"]
+
+
+@not_root
+def test_check_names_a_database_file_it_cannot_read(tmp_path):
+    (tmp_path / "auth.db").write_text("x")
+    os.chmod(tmp_path / "auth.db", 0o200)
+    problems = data_dir.check_database(str(tmp_path / "auth.db"))
+    assert problems == [f"{tmp_path / 'auth.db'}: cannot read and write the file"]
