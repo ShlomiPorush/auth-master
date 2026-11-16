@@ -50,18 +50,19 @@ def _operation_error():
 
 # ── Unit: map, conversion, bounded reads, fence ─────────────────
 
+async def _build_sqlite(path: Path) -> None:
+    from app.db import create_database
+    from app.installation import create
+    from app.schema import ensure_database_schema
+
+    db = await create_database(f"sqlite:///{path}")
+    await ensure_database_schema(db)
+    await create(db, str(uuid.uuid4()))
+    await db.close()
+
+
 def _sqlite_schema(path: Path) -> None:
-    async def go():
-        from app.db import create_database
-        from app.installation import create
-        from app.schema import ensure_database_schema
-
-        db = await create_database(f"sqlite:///{path}")
-        await ensure_database_schema(db)
-        await create(db, str(uuid.uuid4()))
-        await db.close()
-
-    run(go())
+    run(_build_sqlite(path))
 
 
 def test_the_map_names_every_sqlite_column(tmp_path):
@@ -148,6 +149,41 @@ def test_a_row_larger_than_the_limit_is_refused_by_sqlite_and_named(tmp_path, mo
         with pytest.raises(_operation_error()) as e:
             _dm()._scan(src, ("zones",))
         assert e.value.code == "row_too_large" and f"rowid {big_rowid}" in e.value.text
+    finally:
+        src.conn.close()
+
+
+def test_an_oversized_first_row_is_named_too(tmp_path):
+    path = tmp_path / "auth.db"
+    _sqlite_schema(path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO zones (id, name, description) VALUES (?, ?, ?)", (str(uuid.uuid4()), "big", "x" * (2 * 1024 * 1024)))
+    rowid = conn.execute("SELECT rowid FROM zones").fetchone()[0]
+    conn.commit()
+    conn.close()
+    src = _dm().Source(str(path))
+    src._open()
+    try:
+        with pytest.raises(_operation_error()) as e:
+            _dm()._scan(src, ("zones",))
+        assert e.value.code == "row_too_large" and f"rowid {rowid}" in e.value.text
+    finally:
+        src.conn.close()
+
+
+def test_rows_at_rowid_zero_and_below_are_read(tmp_path):
+    path = tmp_path / "auth.db"
+    _sqlite_schema(path)
+    conn = sqlite3.connect(path)
+    for rowid in (-7, 0, 5):
+        conn.execute("INSERT INTO zones (rowid, id, name) VALUES (?, ?, ?)", (rowid, str(uuid.uuid4()), f"z{rowid}"))
+    conn.commit()
+    conn.close()
+    src = _dm().Source(str(path))
+    src._open()
+    try:
+        assert _dm()._scan(src, ("zones",)) == {"zones": 3}
+        assert src.count("zones", None, src.max_rowid("zones")) == 3
     finally:
         src.conn.close()
 
@@ -340,6 +376,9 @@ def test_the_move_copies_everything_and_switches(workdir, monkeypatch, capsys):
                 assert check["ok"] and check["target"] == "empty" and check["problems"] == [], check
                 assert check["counts"]["tokens"] == 3 and check["counts"]["access_logs"] == 52
 
+                for rowid in (-3, 0):
+                    await svc.app.state.db.execute(
+                        "INSERT INTO zones (rowid, id, name) VALUES ($1, $2, $3)", rowid, str(uuid.uuid4()), f"low{rowid}")
                 before = _sqlite_counts(workdir / "data" / "auth.db")
                 job = await _move(c, pg, totp)
                 assert job["state"] == "done", job
@@ -350,6 +389,8 @@ def test_the_move_copies_everything_and_switches(workdir, monkeypatch, capsys):
 
                 cfg = svc.config()
                 assert cfg["backend"] == "postgres" and cfg["migrationId"]
+                # Rows below rowid 1 were copied too (seeded below the API rows).
+                assert await svc.app.state.db.fetchval("SELECT COUNT(*) FROM zones WHERE name LIKE 'low%'") == 2
                 assert Path(cfg["movedFromSqlite"]).resolve() == (workdir / "data" / "auth.db").resolve()
                 assert pg.password not in svc.config_text()
 
@@ -597,7 +638,7 @@ def test_a_fence_that_certainly_failed_stays_on_sqlite_and_a_new_move_replaces_t
 
 
 @needs_pg
-@pytest.mark.parametrize("failure", ["fence_unknown", "publish", "activate"])
+@pytest.mark.parametrize("failure", ["fence_unknown", "publish", "publish_uncertain", "activate"])
 def test_a_failure_after_the_commit_point_is_completed_by_the_retry(workdir, monkeypatch, failure):
     """Fence outcome unknown, data/database.json not written, or activation failed: recovery
     mode (never back to SQLite), and the retry finishes the move once the cause is gone."""
@@ -625,12 +666,15 @@ def test_a_failure_after_the_commit_point_is_completed_by_the_retry(workdir, mon
 
                     monkeypatch.setattr(_dm(), "fence_file", fence)
                     monkeypatch.setattr(_dm(), "fence_state", state)
-                elif failure == "publish":
+                elif failure in ("publish", "publish_uncertain"):
                     real_publish = db_config.publish_config
 
                     def publish(cfg):
                         if broken["on"] and cfg.backend == "postgres":
-                            raise OSError("disk full")
+                            if failure == "publish":
+                                raise OSError("disk full")
+                            real_publish(cfg)
+                            raise db_config.PublishUncertain()
                         return real_publish(cfg)
 
                     monkeypatch.setattr(db_config, "publish_config", publish)
@@ -899,5 +943,63 @@ def test_measure_the_pause_with_a_million_log_rows(workdir, monkeypatch, delay, 
                 with capsys.disabled():
                     print(f"\nmove with 1,000,000 access_logs and 10,000 tokens, added delay {delay * 1000:g} ms per chunk: "
                           f"total {total:.1f} s, final step {job.result['finalStepMs']} ms, pause {job.result['pauseMs']} ms")
+
+    run(go())
+
+
+@needs_pg
+def test_after_a_move_the_recovery_page_refuses_a_sqlite_file(workdir, monkeypatch):
+    """A SQLite file put back at the old path (a backup from before the move) is never
+    chosen in recovery while the saved configuration records the move."""
+    async def go():
+        async with pg_database() as pg:
+            async with service(monkeypatch) as svc:
+                _admin, totp, c = await _signed_in_sqlite(svc)
+                job = await _move(c, pg, totp)
+                assert job["state"] == "done", job
+            backup = workdir / "data" / "auth.db"
+            backup.unlink()
+            for extra in ("-wal", "-shm"):
+                Path(str(backup) + extra).unlink(missing_ok=True)
+            # PostgreSQL cannot be used now (another installation's row there), and a SQLite
+            # file from before the move is back at the old path; the page is asked to use it.
+            await pg.sql("UPDATE installation SET id = 'someone-else'")
+            await _build_sqlite(backup)
+            async with service(monkeypatch) as svc:
+                assert svc.runtime.mode == "recovery" and svc.runtime.failure_code == "other_installation"
+                r = svc.recovery_client()
+                res = await r.post("/admin/api/recovery/save", json={"backend": "sqlite", "confirm": True})
+                assert res.status_code == 202, res.text
+                job = await wait_job(r, f"/admin/api/recovery/jobs/{res.json()['job']['id']}")
+                assert job["state"] == "failed" and job["code"] == "database_moved", job
+                assert svc.runtime.mode == "recovery"
+
+    run(go())
+
+
+@needs_pg
+def test_a_failed_stop_of_background_work_starts_it_again(workdir, monkeypatch):
+    from app.db_runtime import OperationError
+
+    async def go():
+        async with pg_database() as pg:
+            async with service(monkeypatch) as svc:
+                _admin, totp, c = await _signed_in_sqlite(svc)
+                rt = svc.runtime
+                real_stop = rt._stop_background
+
+                async def busy_stop():
+                    await real_stop()
+                    raise OperationError("background_busy")
+
+                monkeypatch.setattr(rt, "_stop_background", busy_stop)
+                job = await _move(c, pg, totp)
+                assert job["state"] == "failed" and job["code"] == "background_busy", job
+                for _ in range(50):
+                    if rt.tasks:
+                        break
+                    await asyncio.sleep(0.05)
+                assert rt.tasks and any(not t.done() for t in rt.tasks), "background work runs again"
+                assert svc.app.state.db.is_sqlite
 
     run(go())

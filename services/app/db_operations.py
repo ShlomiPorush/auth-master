@@ -374,6 +374,10 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
     job.step = "connecting"
     if backend == db_config.SQLITE:
         cfg = rt.config
+        if cfg is not None and cfg.migration_id:
+            # The saved configuration records a move to PostgreSQL: a SQLite file at the old
+            # path now is a copy from before the move (a restored backup), never the data.
+            raise OperationError("database_moved")
         path = Path(cfg.sqlite_path) if cfg is not None and cfg.backend == db_config.SQLITE and cfg.sqlite_path else db_config.default_sqlite_path()
         if not path.is_file():
             raise OperationError("sqlite_missing")

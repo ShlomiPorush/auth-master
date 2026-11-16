@@ -1008,6 +1008,8 @@ class Runtime:
         """Publish data/database.json (the commit point), then attach the new database, all
         within the switch deadline.  The gate is closed on entry and open on every exit."""
         loop = asyncio.get_running_loop()
+        # The retry of a move whose file was not written yet is past the commit point too.
+        fenced = fenced or self.unpublished
         if publish:
             job.step = "saving the configuration"
             # Off the event loop, so a slow disk does not stop other requests' timers.
@@ -1018,11 +1020,17 @@ class Runtime:
                 # The file may already name the new database, but the disk has not confirmed
                 # it (or the write has not ended): a power failure could bring the old file
                 # back, so no write may be acknowledged on either database.
-                await self._recover_after_commit(
-                    app, new_db, new_config, old, had_db, "config_not_durable",
-                    "The new connection was written to data/database.json, but the disk did not "
-                    "confirm it in time. Check the disk, then save the connection again on this page.",
-                )
+                if fenced:
+                    # After a move's commit point the retry loop writes the file again and
+                    # finishes the switch once the disk answers.
+                    self.unpublished = True
+                    await self._recover_after_commit(app, new_db, new_config, old, had_db, "move_incomplete", None)
+                else:
+                    await self._recover_after_commit(
+                        app, new_db, new_config, old, had_db, "config_not_durable",
+                        "The new connection was written to data/database.json, but the disk did not "
+                        "confirm it in time. Check the disk, then save the connection again on this page.",
+                    )
                 if not done:
                     # Nothing else may write the file before this write has ended.
                     await asyncio.wait({writing})

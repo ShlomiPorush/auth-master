@@ -115,7 +115,9 @@ TAIL_ROWS = 5000
 MAX_PASSES = 10
 BULK_LIMIT_SEC = 60 * 60
 FINAL_STEP_LIMIT_SEC = 3.0
-PG_PREFETCH = 50
+SERVER_STATEMENT_TIMEOUT_SEC = 120
+SERVER_IDLE_TIMEOUT_SEC = 120
+PG_PREFETCH = 1000
 # pg_advisory_xact_lock key: two moves into one database never run at once.
 ADVISORY_KEY = 0x6D6F7665  # "move"
 
@@ -369,47 +371,49 @@ class Source:
     def max_rowid(self, table: str) -> int:
         return self.conn.execute(f"SELECT COALESCE(MAX(rowid), 0) FROM {_qi(table)}").fetchone()[0]
 
-    def count(self, table: str, lo: int | None = None, hi: int | None = None) -> int:
-        if lo is None:
-            return self.conn.execute(f"SELECT COUNT(*) FROM {_qi(table)}").fetchone()[0]
-        return self.conn.execute(
-            f"SELECT COUNT(*) FROM {_qi(table)} WHERE rowid > ? AND rowid <= ?", (lo, hi)
-        ).fetchone()[0]
+    def count(self, table: str, lo: int | None, hi: int) -> int:
+        """Rows with lo < rowid <= hi; lo None: from the first row (rowids can be 0 or
+        negative, SQLite allows any signed 64-bit rowid)."""
+        where, args = _range(lo, hi)
+        return self.conn.execute(f"SELECT COUNT(*) FROM {_qi(table)} WHERE {where}", args).fetchone()[0]
 
-    def chunk(self, table: str, lo: int, hi: int) -> list[tuple]:
-        """Rows with lo < rowid <= hi in rowid order: at most CHUNK_ROWS rows, stopping once
-        CHUNK_BYTES are held.  Each fetch asks only for as many rows as still fit, at
-        ROW_LIMIT_BYTES each, so the chunk stays below CHUNK_BYTES + ROW_LIMIT_BYTES."""
+    def chunk(self, table: str, lo: int | None, hi: int) -> list[tuple]:
+        """Rows with lo < rowid <= hi (lo None: from the first) in rowid order: at most
+        CHUNK_ROWS rows, stopping once CHUNK_BYTES are held.  Each fetch asks only for as
+        many rows as still fit, at ROW_LIMIT_BYTES each, so the chunk stays below
+        CHUNK_BYTES + ROW_LIMIT_BYTES."""
         cols = ", ".join(_qi(c) for c, _t in MAP[table])
-        cur = self.conn.execute(
-            f"SELECT rowid, {cols} FROM {_qi(table)} WHERE rowid > ? AND rowid <= ? ORDER BY rowid", (lo, hi)
-        )
+        where, args = _range(lo, hi)
         rows: list[tuple] = []
         size = 0
+        cur = None
         try:
+            # execute() already steps to the first row, so a first row that is too large is
+            # refused here, not in fetchmany.
+            cur = self.conn.execute(f"SELECT rowid, {cols} FROM {_qi(table)} WHERE {where} ORDER BY rowid", args)
             while len(rows) < CHUNK_ROWS and size < CHUNK_BYTES:
                 n = max(1, min(100, CHUNK_ROWS - len(rows), (CHUNK_BYTES - size) // ROW_LIMIT_BYTES))
-                try:
-                    batch = cur.fetchmany(n)
-                except (sqlite3.DataError, sqlite3.OperationalError) as e:
-                    if "too big" not in str(e):
-                        raise
-                    raise _TooBig(rows[-1][0] if rows else lo) from None
+                batch = cur.fetchmany(n)
                 if not batch:
                     break
                 for r in batch:
                     size += sum(len(v) for v in r if isinstance(v, (bytes, bytearray)))
                 rows.extend(batch)
+        except (sqlite3.DataError, sqlite3.OperationalError) as e:
+            if "too big" not in str(e):
+                raise
+            raise _TooBig(rows[-1][0] if rows else lo) from None
         finally:
-            cur.close()
+            if cur is not None:
+                cur.close()
         return rows
 
-    def oversized_row(self, table: str, after: int, hi: int) -> int | None:
+    def oversized_row(self, table: str, after: int | None, hi: int) -> int | None:
         """The rowid of the first row after `after` that SQLite refuses to return whole."""
         cols = ", ".join(_qi(c) for c, _t in MAP[table])
+        where, args = _range(after, hi)
         ids = [r[0] for r in self.conn.execute(
-            f"SELECT rowid FROM {_qi(table)} WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?",
-            (after, hi, CHUNK_ROWS + 1),
+            f"SELECT rowid FROM {_qi(table)} WHERE {where} ORDER BY rowid LIMIT ?", (*args, CHUNK_ROWS + 1),
         ).fetchall()]
         for rowid in ids:
             try:
@@ -421,9 +425,15 @@ class Source:
         return None
 
 
-async def _chunks(src: Source, table: str, lo: int, hi: int):
-    """Async iterator over the chunks of rows lo < rowid <= hi."""
-    while lo < hi:
+def _range(lo: int | None, hi: int) -> tuple[str, tuple]:
+    if lo is None:
+        return "rowid <= ?", (hi,)
+    return "rowid > ? AND rowid <= ?", (lo, hi)
+
+
+async def _chunks(src: Source, table: str, lo: int | None, hi: int):
+    """Async iterator over the chunks of rows lo < rowid <= hi (lo None: from the first)."""
+    while lo is None or lo < hi:
         try:
             rows = await src.call(src.chunk, table, lo, hi)
         except _TooBig as e:
@@ -502,8 +512,8 @@ def _scan(src: Source, tables: tuple[str, ...]) -> dict[str, int]:
     """Runs in the worker thread: converts every row of `tables` (refusals name the row)."""
     counts: dict[str, int] = {}
     for table in tables:
-        lo, hi, n = 0, src.max_rowid(table), 0
-        while lo < hi:
+        lo, hi, n = None, src.max_rowid(table), 0
+        while lo is None or lo < hi:
             try:
                 rows = src.chunk(table, lo, hi)
             except _TooBig as e:
@@ -562,14 +572,12 @@ async def check_move(rt: Runtime, params: PgParams) -> CheckView:
         await src.call(_source_problems, src)
 
         def scan() -> dict[str, int]:
-            src.begin()
-            try:
-                counts = _scan(src, MUTABLE + ("rate_limit_settings", "app_settings", "redis_settings", "passkey_settings"))
-                for t in LOG_TABLES + FROZEN:
-                    counts[t] = src.count(t)
-                return counts
-            finally:
-                src.end()
+            # No transaction around it: each chunk is its own short read, so the check holds
+            # no snapshot that would keep the WAL from being reset while requests write.
+            counts = _scan(src, MUTABLE + FROZEN + ("rate_limit_settings", "app_settings", "redis_settings", "passkey_settings"))
+            for t in LOG_TABLES:
+                counts[t] = src.count(t, None, src.max_rowid(t))
+            return counts
 
         counts = await src.call(scan)
     finally:
@@ -614,9 +622,15 @@ async def _copy_rows(conn: Any, table: str, rows: list[tuple], counts: Counts, d
 
 
 async def _pg_digest(conn: Any, table: str) -> Digest:
+    """The digest of the table in PostgreSQL, read with a cursor whose batches stay near
+    CHUNK_BYTES: the batch size comes from the largest row's text length (octet_length,
+    uncompressed), measured first."""
     d = Digest(table)
     cols = ", ".join(_qi(c) for c, _t in MAP[table])
-    async for r in conn.cursor(f"SELECT {cols} FROM {_qi(table)}", prefetch=PG_PREFETCH):
+    widths = " + ".join(f"COALESCE(octet_length({_qi(c)}::text), 0)" for c, _t in MAP[table])
+    widest = await conn.fetchval(f"SELECT COALESCE(MAX({widths}), 0) FROM {_qi(table)}")
+    prefetch = max(1, min(PG_PREFETCH, CHUNK_BYTES // max(1, widest)))
+    async for r in conn.cursor(f"SELECT {cols} FROM {_qi(table)}", prefetch=prefetch):
         d.add(tuple(r))
     return d
 
@@ -658,11 +672,11 @@ class Move:
         for table in FROZEN:
             hi = await self.src.call(self.src.max_rowid, table)
             d = Digest(table)
-            async for rows in _chunks(self.src, table, 0, hi):
+            async for rows in _chunks(self.src, table, None, hi):
                 await _copy_rows(self.conn, table, rows, self.counts, d)
-            await _compare(self.conn, table, d)
+            await self._complete(table, d, hi)
         digests = {t: Digest(t) for t in APPEND}
-        self.marks = {t: 0 for t in APPEND}
+        self.marks = {t: None for t in APPEND}
         for n in range(MAX_PASSES):
             bounds = {t: await self.src.call(self.src.max_rowid, t) for t in APPEND}
             if n > 0:
@@ -680,7 +694,16 @@ class Move:
             raise _error("too_many_changes")
         job.step = "comparing the copy"
         for table in APPEND:
-            await _compare(self.conn, table, digests[table])
+            if self.marks[table] is None:  # an empty table: nothing copied yet
+                self.marks[table] = await self.src.call(self.src.max_rowid, table)
+            await self._complete(table, digests[table], self.marks[table])
+
+    async def _complete(self, table: str, d: Digest, hi: int) -> None:
+        """The copy equals what was read (digest), and what was read is every source row up
+        to `hi` (count)."""
+        if await self.src.call(self.src.count, table, None, hi) != d.n:
+            raise _error("compare_failed", f"Not every row of {table} was read from the SQLite file.")
+        await _compare(self.conn, table, d)
 
     async def final_step(self, bounds: dict[str, int] | None = None) -> None:
         """Mutable tables whole, new rows of the append tables, zone index.  `bounds` fixes
@@ -697,9 +720,9 @@ class Move:
             for table in MUTABLE:
                 hi = await self.src.call(self.src.max_rowid, table)
                 d = Digest(table)
-                async for rows in _chunks(self.src, table, 0, hi):
+                async for rows in _chunks(self.src, table, None, hi):
                     await _copy_rows(self.conn, table, rows, self.counts, d)
-                await _compare(self.conn, table, d)
+                await self._complete(table, d, hi)
             if bounds is None:
                 bounds = {t: await self.src.call(self.src.max_rowid, t) for t in APPEND}
         except BaseException:
@@ -855,7 +878,12 @@ async def run_move(rt: Runtime, app: Any, job: Job, params: PgParams, actor: str
         await src.call(_source_problems, src)
 
         job.step = "stopping background work"
-        await rt._stop_background()
+        try:
+            await rt._stop_background()
+        except BaseException:
+            # Tasks that ended are started again once the slow ones have ended too.
+            rt._resume_background(app)
+            raise
         stopped = True
         # Statements a stopped task left on the shared connections end first: aiosqlite runs
         # each connection's statements one at a time, in order.
@@ -865,6 +893,10 @@ async def run_move(rt: Runtime, app: Any, job: Job, params: PgParams, actor: str
 
         job.step = "creating the tables"
         await conn.execute("SET synchronous_commit = on")
+        # Server-side limits (PostgreSQL's documented settings), so a statement or an open
+        # transaction that this process lost contact with ends on the server too.
+        await conn.execute(f"SET statement_timeout = '{SERVER_STATEMENT_TIMEOUT_SEC}s'")
+        await conn.execute(f"SET idle_in_transaction_session_timeout = '{SERVER_IDLE_TIMEOUT_SEC}s'")
         tx = conn.transaction()
         await tx.start()
         await conn.execute("SELECT pg_advisory_xact_lock($1)", ADVISORY_KEY)
