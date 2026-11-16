@@ -234,3 +234,11 @@ test("the browser tab names an opened level and falls back to the page name", ()
     ctx.uiSetSubTitle("Other");
     assert.equal(ctx.document.title, "Usage · Auth Service");
 });
+
+test("Needs attention opens the Database and Redis sections of Settings, and turns red with an urgent token", () => {
+    const ctx = load();
+    ctx.dashAttn.health = { db: false, redis: false };
+    ctx.dashTokenStore.rows = [tok("e", "e", { expiresAt: new Date(Date.now() + 3600 * 1000).toISOString() })];
+    const items = Array.from(ctx.dashAttnItems(), i => [i.go, i.sub_ || "", i.tone]);
+    assert.deepEqual(items, [["settings", "database", "fail"], ["settings", "redis", "fail"], ["tokens", "", "fail"]]);
+});
