@@ -11,9 +11,10 @@ const PAGE = { getElementById: () => null, querySelector: () => null, querySelec
 
 function load() {
     const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
-    // The writer has not filled the new words yet: give them a stand-in to read
-    ctx.UI_TEXT["sort.sorted-ascending"] = "sorted ascending";
-    ctx.UI_TEXT["sort.sorted-descending"] = "sorted descending";
+    // Stand-ins for the words the catalog does not have yet; the tests read them
+    // through the catalog, so they hold whatever the words are
+    if (!ctx.UI_TEXT["sort.sorted-ascending"]) ctx.UI_TEXT["sort.sorted-ascending"] = "sorted ascending";
+    if (!ctx.UI_TEXT["sort.sorted-descending"]) ctx.UI_TEXT["sort.sorted-descending"] = "sorted descending";
     return ctx;
 }
 
@@ -47,9 +48,11 @@ test("without a default order, nothing is sorted until a column is picked", () =
 
 test("the Sort button names the order shown: the default column, or Default order", () => {
     const ctx = load();
-    assert.equal(ctx.dashSortLabel({ key: "", dir: "" }, ctx.DASH_USE_COLS, ctx.DASH_USE_DEFAULT), "Sort: Calls, High to low");
-    assert.equal(ctx.dashSortLabel({ key: "", dir: "" }, ctx.DASH_TOK_COLS), "Sort: Default order");
-    assert.equal(ctx.dashSortLabel({ key: "lastUsed", dir: "desc" }, ctx.DASH_TOK_COLS), "Sort: Last Used, Newest first");
+    assert.equal(ctx.dashSortLabel({ key: "", dir: "" }, ctx.DASH_USE_COLS, ctx.DASH_USE_DEFAULT),
+        ctx.t("list.sort", { column: ctx.t("usage.calls"), order: ctx.t("sort.high-to-low") }));
+    assert.equal(ctx.dashSortLabel({ key: "", dir: "" }, ctx.DASH_TOK_COLS), ctx.t("list.sort-default-order"));
+    assert.equal(ctx.dashSortLabel({ key: "lastUsed", dir: "desc" }, ctx.DASH_TOK_COLS),
+        ctx.t("list.sort", { column: ctx.t("tokens.last-used"), order: ctx.t("sort.newest-first") }));
     // The dot shows only for an order other than the list's own
     ctx.dashUse.sort = { key: "", dir: "" };
     assert.doesNotMatch(ctx.dashUseSortButton(), /is-set/);
@@ -61,7 +64,7 @@ test("a header says its order in hidden words and draws its arrow from data-sort
     const ctx = load();
     const sorted = ctx.dashSortHead({ key: "", dir: "" }, CALLS, ctx.DASH_USE_DEFAULT);
     assert.match(sorted, /data-sort-state="descending"/);
-    assert.match(sorted, /<span class="ui-sr">sorted descending<\/span>/);
+    assert.ok(sorted.includes('<span class="ui-sr">' + ctx.esc(ctx.t("sort.sorted-descending")) + "</span>"));
     assert.doesNotMatch(sorted, /aria-sort/, "aria-sort belongs on a real th only");
     assert.match(sorted, /class="ui-td ui-num"/, "a number column lines up at its end");
     const plain = ctx.dashSortHead({ key: "calls", dir: "asc" }, NAME, ctx.DASH_USE_DEFAULT);

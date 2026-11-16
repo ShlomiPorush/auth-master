@@ -39,10 +39,10 @@ test("formats follow the Date Format and Time Format settings", () => {
     assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("MM/DD/YYYY", "24h") }), "10/23/2026, 13:05:09");
     assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("DD.MM.YYYY", "24h") }), "23.10.2026, 13:05:09");
     assert.equal(ui.formatShortDay(t, { zone: "UTC", prefs: prefs("DD.MM.YYYY", "24h") }), "23.10");
-    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("YYYY-MM-DD", "12h"), seconds: false }), "2026-10-23, 1:05 PM");
+    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("YYYY-MM-DD", "12h"), seconds: false }), "2026-10-23, " + ui.t("dates.pm", { time: "1:05" }));
     assert.equal(ui.formatDay(t, { zone: "UTC", prefs: prefs("YYYY-MM-DD", "24h") }), "2026-10-23");
-    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 0, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), "12:07 AM");
-    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 12, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), "12:07 PM");
+    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 0, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), ui.t("dates.am", { time: "12:07" }));
+    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 12, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), ui.t("dates.pm", { time: "12:07" }));
     // Browser: the browser's own clock, with the same hour and minutes
     const own = ui.formatClock(Date.UTC(2026, 0, 1, 13, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "browser") });
     assert.match(own, /(13|1).07/);
@@ -128,9 +128,14 @@ test("Asia/Jerusalem: a wall time the clock passes twice is the earlier instant"
 
 test("formatAgo and counts", () => {
     const now = Date.UTC(2026, 0, 1, 12);
-    assert.equal(ui.formatAgo(now - 20 * 1000, now), "just now");
-    assert.equal(ui.formatAgo(now - 5 * 60000, now), "5 min ago");
-    assert.equal(ui.formatAgo(now + 60000, now), "just now");
-    assert.equal(ui.uiCountLabel(1, "logs.count-entries"), "1 entry");
-    assert.match(ui.uiCountLabel(1920, "logs.count-entries"), /^1.?920 entries$/);
+    assert.equal(ui.formatAgo(now - 20 * 1000, now), ui.t("dates.just-now"));
+    assert.equal(ui.formatAgo(now - 5 * 60000, now), ui.t("dates.min-ago", { n: 5 }));
+    assert.equal(ui.formatAgo(now + 60000, now), ui.t("dates.just-now"));
+    // The one form for 1, the other form for more, with a thousands separator
+    const forms = ui.UI_TEXT["logs.count-entries"];
+    assert.equal(ui.uiCountLabel(1, "logs.count-entries"), forms.one.replace("{n}", "1"));
+    const [before, after] = forms.other.split("{n}");
+    const label = ui.uiCountLabel(1920, "logs.count-entries");
+    assert.ok(label.startsWith(before) && label.endsWith(after), label);
+    assert.match(label.slice(before.length, label.length - after.length), /^1.?920$/);
 });

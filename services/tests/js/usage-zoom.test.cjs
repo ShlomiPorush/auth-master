@@ -14,14 +14,21 @@ function load() {
     ctx.showToast = () => {};
     ctx.uiSetAppZone("UTC");
     ctx.uiSetDatePrefs("DD/MM/YYYY", "24h");
-    // The writer has not filled the new words yet: stand-ins to read
-    Object.assign(ctx.UI_TEXT, {
+    // Stand-ins for the words the catalog does not have yet; the tests read every
+    // word through the catalog, so they hold whatever the words are
+    const standIns = {
         "usage.span": "{from} to {to}", "usage.chart.clear": "Clear", "usage.zoom.group": "Zoom",
         "usage.zoom.earlier": "Earlier", "usage.zoom.out": "Zoom out", "usage.zoom.in": "Zoom in", "usage.zoom.later": "Later", "usage.zoom.reset": "Reset zoom",
         "usage.strip.label": "Whole period", "usage.strip.start": "Start", "usage.strip.end": "End",
-    });
+    };
+    for (const [key, value] of Object.entries(standIns)) if (!ctx.UI_TEXT[key]) ctx.UI_TEXT[key] = value;
     return ctx;
 }
+
+// Markup holds a catalog text escaped; a regex holds it quoted
+const has = (html, text) => assert.ok(html.includes(text), "missing: " + text);
+const quote = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const calls = (ctx, n) => ctx.t("usage.bucket", { calls: ctx.tn("usage.count-calls", n), allowed: String(n), denied: "0" });
 
 // 24 hourly bars from 2026-11-15 00:00 UTC, i calls in bar i
 const H0 = Date.UTC(2026, 10, 15, 0);
@@ -68,10 +75,10 @@ test("a zoomed chart draws only its bars, scales to them, and offers Reset", () 
     const bars = [...html.matchAll(/data-chart-i="(\d+)"/g)].map((m) => Number(m[1]));
     assert.deepEqual(bars, [4, 5, 6, 7, 8, 9]);
     assert.match(html, /<span style="top:0%">10<\/span>/, "the axis tops out over the bars shown");
-    assert.match(html, /data-zoom-step="reset"[^>]*aria-label="Reset zoom"/);
+    assert.match(html, new RegExp('data-zoom-step="reset"[^>]*aria-label="' + quote(ctx.esc(ctx.t("usage.zoom.reset"))) + '"'));
     assert.doesNotMatch(html, /class="ui-icon-btn is-gone" data-zoom-step="reset"/);
     // The line above the chart names the span and its calls
-    assert.match(html, /<b>15\/11\/2026, 04:00 to 15\/11\/2026, 10:00<\/b> 39 calls, 39 allowed, 0 denied/);
+    has(html, "<b>" + ctx.esc(ctx.t("usage.span", { from: "15/11/2026, 04:00", to: "15/11/2026, 10:00" })) + "</b> " + ctx.esc(calls(ctx, 39)));
     // The strip's window covers bars 4 to 9 of 24; its edges are sliders with bounds
     assert.match(html, /class="ui-strip-win" aria-hidden="true" style="left:16\.667%;width:25\.000%"/);
     const start = /<span class="ui-strip-edge is-start"[^>]*/.exec(html)[0];
@@ -89,7 +96,7 @@ test("unzoomed, Reset keeps its place hidden and the buttons that cannot act are
     assert.match(html, /class="ui-icon-btn is-gone" data-zoom-step="reset"[^>]* disabled/);
     assert.match(html, /data-zoom-step="earlier"[^>]* disabled/);
     assert.match(html, /data-zoom-step="in"[^>]*"><svg/);
-    assert.match(html, /role="group" aria-label="Zoom"/);
+    has(html, 'role="group" aria-label="' + ctx.esc(ctx.t("usage.zoom.group")) + '"');
 });
 
 test("a picked bar is pressed, the others fade, and the line names it with Clear (CH-1)", () => {
@@ -100,9 +107,11 @@ test("a picked bar is pressed, the others fade, and the line names it with Clear
     assert.match(html, /ui-chart-bars has-pick/);
     assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
     assert.match(html, /data-chart-i="7"[^>]*aria-pressed="true" tabindex="0"/, "the picked bar is the Tab stop");
-    assert.match(html, /<b>15\/11\/2026, 07:00<\/b> 7 calls, 7 allowed, 0 denied <button type="button" class="ui-btn-link" data-chart-clear>Clear<\/button>/);
+    has(html, "<b>15/11/2026, 07:00</b> " + ctx.esc(calls(ctx, 7)) +
+        ' <button type="button" class="ui-btn-link" data-chart-clear>' + ctx.esc(ctx.t("usage.chart.clear")) + "</button>");
     // Every bar has its numbers as a tooltip, the same words as its name
-    assert.match(html, /aria-label="15\/11\/2026, 07:00: 7 calls, 7 allowed, 0 denied" data-tip="15\/11\/2026, 07:00: 7 calls, 7 allowed, 0 denied"/);
+    const words = ctx.esc("15/11/2026, 07:00: " + calls(ctx, 7));
+    has(html, 'aria-label="' + words + '" data-tip="' + words + '"');
     // A zoom drops the pick
     ctx.uiSetPageQuery = () => {};
     ctx.dashUse.shown = DAY;
@@ -142,7 +151,7 @@ test("bars read left to right in every language", () => {
 test("a denied share with no calls is a muted -, never 0% (FB-8)", () => {
     const ctx = load();
     assert.equal(ctx.dashUseDeniedSub({ calls: 0, denied: 0 }), '<span class="ui-muted">-</span>');
-    assert.equal(ctx.dashUseDeniedSub({ calls: 200, denied: 3 }), "2% of calls");
+    assert.equal(ctx.dashUseDeniedSub({ calls: 200, denied: 3 }), ctx.esc(ctx.t("usage.of-calls", { pct: "2%" })));
     // The figure stands over its label
     assert.match(ctx.dashUseKpi("Calls", "5", ""), /^<div class="ui-kpi"><b>5<\/b><small>Calls<\/small>/);
 });

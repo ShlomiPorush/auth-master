@@ -208,16 +208,24 @@ function drawWithProxy(value) {
     const s = start(ctx, "rate", rate(0, 120));
     s.snap.proxyNetwork = { envName: "FORWARDED_ALLOW_IPS", value: value };
     ctx.dashSettingsDrawForm();
-    // Catalog text is escaped as a whole in markup: read an apostrophe as the page shows it
-    return body.innerHTML.replace(/&#39;/g, "'");
+    return body.innerHTML;
 }
 
 const WARNING = 'id="set-exempt-warn"';
 
+// The proxy note of the rate limit form as the catalog words it (escaped as a whole)
+function proxyNote(key, value) {
+    const ctx = load();
+    const code = (v) => ctx.tRaw("<code>" + ctx.esc(v) + "</code>");
+    const vars = { env: code("FORWARDED_ALLOW_IPS"), header: code(ctx.t("settings.ratelimit.x-forwarded-for")), a: code("127.0.0.1"), b: code("::1") };
+    if (value !== undefined) vars.value = code(value);
+    return ctx.tHtml(key, vars);
+}
+
 test("a loopback-only FORWARDED_ALLOW_IPS keeps the proxy hint and the exempt warning", () => {
     for (const value of ["127.0.0.1,::1", "::1, 127.0.0.1", " 127.0.0.1", "::1", "127.0.0.1,,::1"]) {
         const html = drawWithProxy(value);
-        assert.ok(html.includes("loopback addresses only"), value);
+        assert.ok(html.includes(proxyNote("settings.ratelimit.loopback-addresses-only-uvicorn-trusts", value)), value);
         assert.ok(html.includes(WARNING), value);
     }
 });
@@ -229,9 +237,9 @@ test("a proxy address hides the exempt warning; unset, empty and * keep their me
     assert.ok(!drawWithProxy("127.0.0.1,172.18.0.5").includes(WARNING));
     assert.ok(drawWithProxy("*").includes("<code>*</code>"));
     const unset = drawWithProxy(null);
-    assert.ok(unset.includes("is not set") && unset.includes(WARNING));
+    assert.ok(unset.includes(proxyNote("settings.ratelimit.is-not-set-so-uvicorn-trusts")) && unset.includes(WARNING));
     const empty = drawWithProxy("");
-    assert.ok(empty.includes("to an empty value") && empty.includes(WARNING));
+    assert.ok(empty.includes(proxyNote("settings.ratelimit.environment-variable-to-an-empty-value")) && empty.includes(WARNING));
 });
 
 test("General sends only the changed fields, as numbers and a boolean", async () => {
@@ -262,8 +270,10 @@ test("a lower retention is confirmed in the shared question with exactly the val
     pending[0].answer(409, { code: "confirm_purge", detail: "This deletes older log entries.", estimate: { activityLogs: 412, accessLogs: 0 }, confirm });
     await settle();
     assert.equal(ctx.questions.length, 1);
-    assert.match(ctx.questions[0].message, /412 activity log entries/);
-    assert.doesNotMatch(ctx.questions[0].message, /access log entr/);
+    // The server's words and the activity log estimate only: the access logs keep their retention
+    const activity = ctx.t("settings.general.about", { count: ctx.tn("settings.general.count-activity-log-entries", 412) });
+    assert.equal(ctx.questions[0].message, ctx.t("settings.general.older-than-the-new-limit", { detail: "This deletes older log entries.", parts: activity }));
+    assert.ok(!ctx.questions[0].message.includes(ctx.tn("settings.general.count-access-log-entries", 0)));
     assert.equal(ctx.questions[0].danger, true);
     assert.deepEqual(plain(pending[1].body.confirmPurge), confirm);
     assert.equal(pending[1].body.activityLogRetentionDays, 7);
@@ -397,7 +407,7 @@ test("a locked field is never a change, and an invalid TZ is called out", () => 
     assert.equal(ctx.dashSettingsCount(), 0);
     const alerts = [];
     ctx.dashGenAlerts(s, alerts);
-    assert.match(alerts.join(""), /TZ is not a time zone/);
+    assert.ok(alerts.join("").includes(ctx.esc(ctx.t("settings.general.tz-is-not-a-time-zone"))));
 });
 
 test("a skipped purge shows its reason", () => {
@@ -407,8 +417,9 @@ test("a skipped purge shows its reason", () => {
     const alerts = [];
     ctx.dashGenAlerts(s, alerts);
     const html = alerts.join("");
-    assert.match(html, /Old access log entries were not deleted/);
+    assert.ok(html.includes(ctx.esc(ctx.t("settings.general.old", { log: ctx.t("settings.general.access-log") }))));
     assert.match(html, /but 60 are saved\./);
+    assert.ok(html.includes(ctx.esc(ctx.t("settings.general.the-cleanup-runs-again-every-minute", { reason: s.purge.access.reason }))));
 });
 
 test("changed fields carry the Changed mark and Reset names the default; locked ones a lock naming the variable", () => {
@@ -419,7 +430,7 @@ test("changed fields carry the Changed mark and Reset names the default; locked 
     assert.match(marks, /ui-set-pill is-changed/);
     const lock = ctx.dashSetLockPill({ envName: "TZ" }, "Asia/Jerusalem");
     assert.match(lock, /TZ/);
-    assert.match(lock, /environment variable \(Asia\/Jerusalem\)\. Remove it there to change the value here\./);
+    assert.ok(lock.includes(ctx.esc(ctx.t("settings.set-by-the", { env: "TZ", value: "Asia/Jerusalem" }))));
     // Reset puts the default into the draft
     start(ctx, "general", general(1, { activity: 90 }));
     ctx.dashGenReset("activityLogRetentionDays");
@@ -589,7 +600,7 @@ test("a save without an answer is not reported as nothing saved, and nothing is 
     assert.equal(pending.filter((p) => p.method === "PUT").length, 1, "the secret was sent once");
     assert.equal(r.unknown, true);
     assert.equal(r.draft.url, url, "the draft stays");
-    assert.doesNotMatch(ctx.toasts.at(-1)[0], /^Nothing was saved/);
+    assert.notEqual(ctx.toasts.at(-1)[0], ctx.t("settings.savebar.not-saved", { parts: ctx.t("settings.redis-connection") }));
     assert.equal(ctx.toasts.at(-1)[0], ctx.t("settings.savebar.result-unknown", { parts: ctx.t("settings.redis-connection") }));
 });
 
@@ -650,8 +661,12 @@ test("Redis: a failed check says why in plain words and keeps the draft", async 
     const ctx = load();
     const r = start(ctx, "redis", redisView(0));
     r.replacing = true;
-    const expected = { unreachable: /Could not connect/, auth: /refused the user name or password/, no_write: /cannot write/, other: /check of this Redis failed/ };
-    for (const [category, words] of Object.entries(expected)) {
+    const reasons = {
+        unreachable: "settings.redis.could-not-connect-to-this-redis", auth: "settings.redis.redis-refused-the-user-name-or",
+        no_write: "settings.redis.this-connection-cannot-write-the-keys", other: "settings.redis.the-check-of-this-redis-failed",
+    };
+    for (const [category, key] of Object.entries(reasons)) {
+        const words = ctx.t("settings.redis.nothing-was-saved", { reason: ctx.t(key) });
         const pending = deferredApi(ctx);
         const url = newUrl();
         r.draft.url = url;
@@ -659,7 +674,7 @@ test("Redis: a failed check says why in plain words and keeps the draft", async 
         const saving = ctx.dashRedisSave();
         pending[0].answer(422, { code: "redis_check_failed", category, detail: "server words" });
         assert.equal(await saving, "failed");
-        assert.match(r.error, words, category);
+        assert.equal(r.error, words, category);
         assert.equal(r.draft.url, url);
     }
 });
@@ -675,7 +690,9 @@ test("a locked Redis URL is not a change, and the notes for a pending sync and a
     assert.equal(r.dirty, false);
     const alerts = [];
     ctx.dashRedisAlerts(view, alerts);
-    assert.match(alerts.join(""), /keep REDIS_URL set until this note goes away/);
+    const html = alerts.join("");
+    assert.ok(html.includes(ctx.esc(ctx.t("settings.redis.the-environment-value-is-not-saved"))));
+    assert.ok(html.includes(ctx.tHtml("settings.redis.the-service-saves", { env: ctx.tRaw("<code>REDIS_URL</code>") })));
 });
 
 // The database fields as the page reads them, from stand-in inputs
@@ -983,7 +1000,7 @@ test("signing out drops unsaved changes only once the sign-out worked", async ()
     assert.equal(await out, false);
     assert.equal(ctx.uiUnsavedCount(), 1, "still guarded");
     assert.equal(ctx.dashGen.draft.timeZone, "Asia/Jerusalem");
-    assert.match(ctx.toasts.at(-1)[0], /sign out/i);
+    assert.equal(ctx.toasts.at(-1)[0], ctx.t("shell.could-not-sign-out-try-again"));
     out = ctx.dashLogout();
     await answerNext(pending, "POST", "/admin/api/logout", 200, { ok: true });
     assert.equal(await out, true);
@@ -1011,16 +1028,23 @@ test("the Activity Log names what a General, Display or Redis save changed", () 
         from: { timeZone: null, cookieSecure: false, activityLogRetentionDays: 30, accessLogRetentionDays: 30 },
         to: { timeZone: "Asia/Jerusalem", cookieSecure: true, activityLogRetentionDays: 30, accessLogRetentionDays: 7 },
     } });
-    assert.match(gen, /Version 4:/);
-    assert.match(gen, /Time zone: default to Asia\/Jerusalem/);
-    assert.match(gen, /Access log retention: 30 days to 7 days/);
+    // One change in words: the field's name, the old value and the new one
+    const change = (name, from, to) => ctx.esc(ctx.t("logs.setting-change", { name: ctx.t(name), from, to }));
+    const days = (n) => ctx.tn("logs.count-days", n);
+    // Only the changed fields, in their order; the internal version is not shown
+    assert.equal(gen, [
+        change("logs.time-zone", ctx.t("logs.default"), "Asia/Jerusalem"),
+        change("logs.access-log-retention", days(30), days(7)),
+        change("logs.secure-cookie", ctx.t("logs.off"), ctx.t("logs.on")),
+    ].join(", "));
     const disp = ctx.dashLogDetails({ action: "settings.update", entityName: "display", details: {
         version: 2, from: { dateFormat: "browser", timeFormat: "24h" }, to: { dateFormat: "DD.MM.YYYY", timeFormat: "24h" } } });
-    assert.match(disp, /Date Format: browser to DD\.MM\.YYYY/);
-    assert.doesNotMatch(disp, /Time Format/);
+    assert.ok(disp.includes(change("shell.date-format", "browser", "DD.MM.YYYY")));
+    assert.ok(!disp.includes(ctx.esc(ctx.t("shell.time-format"))));
     for (const det of [{ version: 2, from: null, to: "redis://****@cache:6379/0" },
         { version: 2, from: { url: null }, to: { url: "redis://****@cache:6379/0" } }]) {
-        assert.match(ctx.dashLogDetails({ action: "settings.update", entityName: "redis", details: det }), /Redis URL: default to redis:\/\/\*\*\*\*@cache:6379\/0/);
+        assert.ok(ctx.dashLogDetails({ action: "settings.update", entityName: "redis", details: det })
+            .includes(change("logs.redis-url", ctx.t("logs.default"), "redis://****@cache:6379/0")));
     }
     const evil = ctx.dashLogDetails({ action: "settings.update", entityName: "general", details: { version: 1, from: {}, to: { timeZone: "<img>" } } });
     assert.match(evil, /&lt;img&gt;/);
@@ -1032,7 +1056,7 @@ test("an active ADMIN_API_KEY is a locked row on API Keys", () => {
     assert.equal(ctx.dashKeyMasterRow(), "");
     ctx.dashKeys.master = { active: true, envName: "ADMIN_API_KEY" };
     const row = ctx.dashKeyMasterRow();
-    assert.match(row, /Master key/);
-    assert.match(row, /remove it from the environment to revoke/);
+    assert.ok(row.includes(ctx.esc(ctx.t("apikeys.master-key"))));
+    assert.ok(row.includes(ctx.tHtml("apikeys.set-by-the", { env: ctx.tRaw("<code>ADMIN_API_KEY</code>") })));
     assert.doesNotMatch(row, /data-key|tabindex|data-row-menu/);
 });

@@ -480,7 +480,9 @@ def inventory_problems(sources: dict[str, str]) -> list[str]:
     """Code snippets must appear in the pages' code; words live in the catalog
     (js/text.js), so a snippet of words must be the value of a catalog key that
     the code still uses at a call site (t, tn, tHtml, data-t...), not merely sit
-    in the catalog."""
+    in the catalog. The writer may reword the catalog: a snippet the baseline
+    maps to catalog keys ('catalog') is kept while one of those keys still has
+    words and a call site, whatever the words are."""
     corpus = "\n".join(text for name, text in sources.items() if name.endswith((".html", ".js")) and name != TEXT_JS)
     catalog = catalog_entries(sources[TEXT_JS])[0]
     used = catalog_uses(sources, set(catalog))[0]
@@ -496,8 +498,14 @@ def inventory_problems(sources: dict[str, str]) -> list[str]:
         if has_expect == has_dropped:
             problems.append(f"{key}: needs either 'expect' or 'dropped' with a reason")
             continue
+        held = item.get("catalog", {})
         for snippet in item.get("expect", []):
             if snippet in corpus:
+                continue
+            if snippet in held:
+                wired = [k for k in held[snippet] if k in used and k in catalog and any(f.strip() for f in catalog_forms(catalog[k]))]
+                if not wired:
+                    problems.append(f"{key}: none of {', '.join(held[snippet])}, the catalog keys of {snippet!r}, has words and a call site ({item.get('old', '')})")
                 continue
             words = html.unescape(snippet).replace('\\"', '"')
             # The old code form of a word: label: "Name", "Active", >Create<
@@ -519,6 +527,7 @@ def test_inventory_is_kept():
 
 
 def test_inventory_guard_catches():
+    assert not any("tokens.row.delete.confirm" in p or "tokens.new" in p for p in inventory_problems(SOURCES))
     # The sentence stays in the catalog, but its call site is gone
     copy = dict(SOURCES)
     assert 't("tokens.delete-this-token-permanently")' in copy["js/dashboard.js"]
@@ -529,9 +538,13 @@ def test_inventory_guard_catches():
     copy["index.html"] = copy["index.html"].replace('data-t="tokens.new-token"', "")
     copy["js/dashboard.js"] = copy["js/dashboard.js"].replace('t("tokens.new-token")', '""')
     assert any("tokens.new" in p for p in inventory_problems(copy))
-    # The words are gone from the catalog too
+    # The words are gone from the catalog too: the key, or its words
     copy = dict(SOURCES)
-    copy[TEXT_JS] = copy[TEXT_JS].replace("Delete this token permanently?", "Remove it?")
+    assert '"tokens.delete-this-token-permanently":' in copy[TEXT_JS]
+    copy[TEXT_JS] = copy[TEXT_JS].replace('"tokens.delete-this-token-permanently":', '"tokens.removed-x":')
+    assert any("tokens.row.delete.confirm" in p for p in inventory_problems(copy))
+    copy = dict(SOURCES)
+    copy[TEXT_JS] = re.sub(r'("tokens\.delete-this-token-permanently": )"[^"]*"', r'\1""', copy[TEXT_JS])
     assert any("tokens.row.delete.confirm" in p for p in inventory_problems(copy))
     copy = dict(SOURCES)
     copy["index.html"] = copy["index.html"].replace('data-inventory="tokens.search"', "")
@@ -1074,8 +1087,8 @@ def server_identifier_problems(app_sources: dict[str, str], catalog: dict) -> li
             key = prefix + value
             if key not in catalog:
                 problems.append(f"the server can emit {value!r}, but UI_TEXT has no {key!r}")
-            elif catalog[key] != value:
-                problems.append(f"UI_TEXT {key!r} should read {value!r} until the writer words it")
+            elif not any(f.strip() for f in catalog_forms(catalog[key])):
+                problems.append(f"UI_TEXT {key!r} has no words for {value!r}")
     return problems
 
 
@@ -1091,6 +1104,10 @@ def test_identifier_guard_catches_a_new_server_value():
     problems = server_identifier_problems(app, catalog)
     assert any("'logs.action.token_rotate'" in p for p in problems)
     assert any("'logs.entity.gadget'" in p for p in problems)
+    # A known identifier whose word is empty
+    assert "logs.action.token_create" in catalog
+    problems = server_identifier_problems(read_app_sources(), {**catalog, "logs.action.token_create": ""})
+    assert any("'logs.action.token_create'" in p for p in problems)
 
 
 def test_catalog_text_is_never_joined_into_one_string():

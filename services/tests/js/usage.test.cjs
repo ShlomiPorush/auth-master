@@ -50,7 +50,7 @@ test("the value axis tops out at a round, even number", () => {
 test("shares under one percent are not rounded down to zero, and no calls is no share (FB-8)", () => {
     const ctx = load();
     assert.equal(ctx.dashUsePct(0, 0), "-");
-    assert.equal(ctx.dashUsePct(1, 1000), "under 1%");
+    assert.equal(ctx.dashUsePct(1, 1000), ctx.t("usage.under-1"));
     assert.equal(ctx.dashUsePct(3, 120), "3%");
 });
 
@@ -71,9 +71,11 @@ test("the chart draws one bar per bucket, denied above allowed, and marks delete
     assert.equal((html.match(/<span style="grid-column:\d+">/g) || []).length, 7);
     assert.match(html, /grid-column:7">13\/11</);
     // The bar's name says what a bucket without data means
-    assert.match(html, /07\/11\/2026: No data: access logs older than 3 days are deleted/);
-    assert.match(html, /10\/11\/2026: 6 calls, 5 allowed, 1 denied \(counted from 10\/11\/2026, 12:00; older logs are deleted\)/);
-    assert.match(html, /Logs deleted/);
+    const days = ctx.tn("usage.count-days", 3);
+    assert.ok(html.includes(ctx.esc("07/11/2026: " + ctx.t("usage.no-data-access-logs-older-than", { days }))));
+    const counts = { calls: ctx.tn("usage.count-calls", 6), allowed: "5", denied: "1", time: "10/11/2026, 12:00" };
+    assert.ok(html.includes(ctx.esc("10/11/2026: " + ctx.t("usage.bucket-partial", counts))));
+    assert.ok(html.includes('<i class="is-none"></i>' + ctx.esc(ctx.t("usage.logs-deleted"))));
 });
 
 test("thirty days name every fifth day, counted back from today", () => {
@@ -82,7 +84,8 @@ test("thirty days name every fifth day, counted back from today", () => {
     const html = ctx.dashUseChartHtml({ range: "30d", retentionDays: 30, partial: false, series });
     const cols = [...html.matchAll(/grid-column:(\d+)"/g)].map((m) => Number(m[1]));
     assert.deepEqual(cols, [5, 10, 15, 20, 25, 30]);
-    assert.doesNotMatch(html, /Logs deleted/);
+    assert.ok(!html.includes('<i class="is-none">'));
+    assert.ok(!html.includes(ctx.esc(ctx.t("usage.logs-deleted"))));
 });
 
 test("an answer for a period the user already left is dropped", async () => {
@@ -153,7 +156,9 @@ test("the report names its hours and days in the zone it was counted in, not the
     assert.match(html, /aria-label="07\/11\/2026: /);
     assert.doesNotMatch(html, /06\/11/);
     assert.match(html, /grid-column:7">13\/11</);
-    assert.match(ctx.dashUseNotices(d), /This report uses another time zone[^]*Asia\/Jerusalem/);
+    const notice = ctx.dashUseNotices(d);
+    assert.ok(notice.includes(ctx.esc(ctx.t("usage.this-report-uses-another-time-zone"))));
+    assert.ok(notice.includes(ctx.tHtml("usage.its-hours-and-days-are-counted", { zone: ctx.tRaw("<code>Asia/Jerusalem</code>") })));
 
     // Hours too
     const hours = [{ start: "2026-11-13T10:00:00Z", end: "2026-11-13T11:00:00Z", allowed: 1, denied: 0, coverage: "full" }];
@@ -172,16 +177,26 @@ test("a report in the tab's own zone, or one without a zone, shows no zone note"
 test("a report zone this browser cannot format is named, not hidden", () => {
     const ctx = load();
     const notes = ctx.dashUseNotices({ ...WEEK, partial: false, timeZone: "Not/AZone" });
-    // Catalog text is escaped as a whole in markup: read an apostrophe as the page shows it
-    assert.match(notes.replace(/&#39;/g, "'"), /This browser cannot show this report's time zone[^]*Not\/AZone[^]*UTC/);
-    assert.doesNotMatch(notes, /This report uses another time zone/);
+    // Catalog text is escaped as a whole in markup
+    assert.ok(notes.includes(ctx.esc(ctx.t("usage.this-browser-cannot-show-this-report"))));
+    assert.ok(notes.includes(ctx.tHtml("usage.the-hours-and-days-are-counted", { zone: ctx.tRaw("<code>Not/AZone</code>"), shown: ctx.tRaw("<code>UTC</code>") })));
+    assert.ok(!notes.includes(ctx.esc(ctx.t("usage.this-report-uses-another-time-zone"))));
 });
 
 test("data that an earlier, shorter retention deleted is called that", () => {
     const ctx = load();
     const purged = { ...WEEK, dataFromReason: "purge", timeZone: "UTC" };
-    assert.match(ctx.dashUseNotices(purged), /Older calls were deleted under an earlier, shorter retention, so these figures start at/);
-    assert.match(ctx.dashUseChartHtml(purged), /07\/11\/2026: No data: these access logs were deleted under an earlier, shorter retention/);
+    // The sentence holds the time the figures start at, as a <time> element
+    const timeOf = (html) => {
+        const m = /<time [^>]*datetime="2026-11-10T12:00:00\.000Z"[^>]*>[^<]*<\/time>/.exec(html);
+        assert.ok(m, "the start time is shown");
+        return ctx.tRaw(m[0]);
+    };
+    const purgedNote = ctx.dashUseNotices(purged);
+    assert.ok(purgedNote.includes(ctx.tHtml("usage.older-calls-were-deleted-under-an", { time: timeOf(purgedNote) })));
+    assert.ok(ctx.dashUseChartHtml(purged).includes(ctx.esc("07/11/2026: " + ctx.t("usage.no-data-these-access-logs-were"))));
     const kept = { ...WEEK, dataFromReason: "retention", timeZone: "UTC" };
-    assert.match(ctx.dashUseNotices(kept), /Access logs are kept for 3 days/);
+    const keptNote = ctx.dashUseNotices(kept);
+    assert.ok(keptNote.includes(ctx.tHtml("usage.access-logs-are-kept-for", { days: ctx.tn("usage.count-days", 3), time: timeOf(keptNote) })));
+    assert.ok(!keptNote.includes(ctx.tHtml("usage.older-calls-were-deleted-under-an", { time: timeOf(keptNote) })));
 });

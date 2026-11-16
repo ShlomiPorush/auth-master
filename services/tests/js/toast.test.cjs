@@ -135,7 +135,7 @@ test("an action is one button with its label; a click runs it and closes the toa
     assert.equal(action.textContent, "Retry");
     assert.ok(action.classes.has("ui-toast-action"));
     assert.equal(action.getAttribute("aria-label"), "Retry loading");
-    assert.equal(x.getAttribute("aria-label"), "Close");
+    assert.equal(x.getAttribute("aria-label"), ctx.t("common.close"));
     action.click();
     assert.equal(runs, 1);
     assert.equal(toasts().length, 0);
@@ -181,7 +181,7 @@ test("the keyboard in a replaced toast moves to the new one: its action, else it
     assert.equal(document.activeElement, buttons(second)[0]);
     const third = ctx.showToast("c", "info");
     assert.equal(document.activeElement, buttons(third)[0]);
-    assert.equal(buttons(third)[0].getAttribute("aria-label"), "Close");
+    assert.equal(buttons(third)[0].getAttribute("aria-label"), ctx.t("common.close"));
 });
 
 test("a duration of Infinity keeps the toast until it is closed", (t) => {

@@ -62,30 +62,32 @@ test("a closed or cancelled browser window says nothing; other errors say what t
     assert.equal(ui.uiPasskeyErrorText(domError("NotAllowedError"), false), "");
     assert.equal(ui.uiPasskeyErrorText(domError("NotAllowedError"), true), "");
     assert.equal(ui.uiPasskeyErrorText(domError("AbortError"), true), "");
-    assert.match(ui.uiPasskeyErrorText(domError("InvalidStateError"), true), /already has a passkey here/);
-    assert.match(ui.uiPasskeyErrorText(domError("SecurityError"), false), /passkey address/);
-    assert.match(ui.uiPasskeyErrorText(domError("NotSupportedError"), true), /cannot create/);
-    assert.match(ui.uiPasskeyErrorText(new TypeError("x"), false), /could not be used\. Try again\./);
-    assert.match(ui.uiPasskeyErrorText(undefined, true), /could not be created\. Try again\./);
+    assert.equal(ui.uiPasskeyErrorText(domError("InvalidStateError"), true), ui.t("passkey.this-device-already-has-a-passkey"));
+    assert.equal(ui.uiPasskeyErrorText(domError("SecurityError"), false), ui.t("passkey.the-browser-refused-a-passkey-for"));
+    assert.equal(ui.uiPasskeyErrorText(domError("NotSupportedError"), true), ui.t("passkey.this-device-cannot-create-this-kind"));
+    assert.equal(ui.uiPasskeyErrorText(new TypeError("x"), false), ui.t("passkey.the-passkey-could-not-be-used"));
+    assert.equal(ui.uiPasskeyErrorText(undefined, true), ui.t("passkey.the-passkey-could-not-be-created"));
 });
 
 test("passkey names: spaces collapsed, 1 to 64 characters counted as the server counts them", () => {
     assert.equal(ui.uiPasskeyName("  My   phone \t key "), "My phone key");
-    assert.equal(ui.uiPasskeyNameProblem("   "), "Give the passkey a name.");
+    assert.equal(ui.uiPasskeyNameProblem("   "), ui.t("passkey.give-the-passkey-a-name"));
     assert.equal(ui.uiPasskeyNameProblem("x".repeat(64)), "");
-    assert.match(ui.uiPasskeyNameProblem("x".repeat(65)), /at most 64/);
+    assert.equal(ui.uiPasskeyNameProblem("x".repeat(65)), ui.t("passkey.the-name-can-have-at-most", { max: 64 }));
     // Emoji are one character each for the server (code points), not two
     assert.equal(ui.uiPasskeyNameProblem("🔑".repeat(64)), "");
     assert.equal(ui.uiPasskeyNameProblem("a" + " ".repeat(80) + "b"), "");
 });
 
 test("the proposed name names the system when the browser tells it", () => {
-    assert.equal(ui.uiPasskeyDefaultName({ userAgentData: { platform: "macOS" } }), "Passkey on Mac");
-    assert.equal(ui.uiPasskeyDefaultName({ userAgentData: { platform: "Windows" } }), "Passkey on Windows");
-    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)" }), "Passkey on Android");
-    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }), "Passkey on iPhone");
-    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Something" }), "Passkey");
-    assert.equal(ui.uiPasskeyDefaultName(undefined), "Passkey");
+    // "Passkey on <system>", as a passkey name (runs of spaces collapsed)
+    const on = (device) => ui.uiPasskeyName(ui.t("passkey.passkey-on", { device }));
+    assert.equal(ui.uiPasskeyDefaultName({ userAgentData: { platform: "macOS" } }), on(ui.t("passkey.mac")));
+    assert.equal(ui.uiPasskeyDefaultName({ userAgentData: { platform: "Windows" } }), on("Windows"));
+    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)" }), on(ui.t("passkey.android")));
+    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }), on(ui.t("passkey.iphone")));
+    assert.equal(ui.uiPasskeyDefaultName({ userAgent: "Something" }), ui.t("passkey.passkey"));
+    assert.equal(ui.uiPasskeyDefaultName(undefined), ui.t("passkey.passkey"));
 });
 
 // --- js/auth-pages.js: Sign in with a passkey -------------------------------------
@@ -182,7 +184,7 @@ test("sign-in: shown when set up; outside HTTPS a note says why instead", async 
     insecure.ctx.authPasskeyOffer();
     await settle();
     assert.ok(insecure.els["pk-login"].classList.contains("hidden"));
-    assert.equal(insecure.els["pk-note"].textContent, "Passkeys need HTTPS (or localhost).");
+    assert.equal(insecure.els["pk-note"].textContent, insecure.ctx.t("passkey.passkeys-need-https-or-localhost"));
 });
 
 test("sign-in: new options on the click, the JSON credential with its ceremony, then the safe next page", async () => {
@@ -278,8 +280,8 @@ test("Use a passkey is offered only with a passkey made for the current address"
     await no.ctx.dashPkLoad(true);
     assert.equal(no.ctx.dashPkUsable(), false);
     const html = no.ctx.dashPkRowHtml(no.ctx.dashPk.data.passkeys[0]);
-    assert.ok(html.includes("Not usable at this address (made for old.example.test)"));
-    assert.ok(html.includes("Synced"));
+    assert.ok(html.includes(no.ctx.esc(no.ctx.t("account.passkeys.not-usable-at-this-address-made", { address: "old.example.test" }))));
+    assert.ok(html.includes(no.ctx.esc(no.ctx.t("account.passkeys.synced"))));
 });
 
 function address(version, origin, locked) {
@@ -357,10 +359,10 @@ test("passkey address form: locked by PASSKEY_ORIGIN shows the variable and a di
     pkUnit(ctx, address(2, "https://auth.example.test", true));
     ctx.dashPkSetDrawForm();
     const locked = body.innerHTML;
-    assert.ok(locked.includes("PASSKEY_ORIGIN environment variable (https://auth.example.test)"));
+    assert.ok(locked.includes(ctx.esc(ctx.t("settings.set-by-the", { env: "PASSKEY_ORIGIN", value: "https://auth.example.test" }))));
     assert.ok(/id="set-pk-origin"[^>]*disabled/.test(locked), "the value shows in a disabled field");
     assert.ok(!locked.includes("set-pk-save"), "the save bar saves; no Save of its own");
-    assert.ok(locked.includes("Passkeys made for another address stop working"));
+    assert.ok(locked.includes(ctx.esc(ctx.t("settings.passkeys.passkeys-made-for-another-address-stop"))));
 
     const s = pkUnit(ctx, address(0, null));
     s.draft.origin = '"><img src=x>';
@@ -368,23 +370,25 @@ test("passkey address form: locked by PASSKEY_ORIGIN shows the variable and a di
     const open = body.innerHTML;
     assert.ok(open.includes('value="&quot;&gt;&lt;img src=x&gt;"'));
     assert.ok(!open.includes("<img"));
-    assert.ok(open.includes("Not set yet"));
+    assert.ok(open.includes(ctx.tHtml("settings.passkeys.not-set-yet-the-first-passkey", { here: ctx.tRaw("<code>https://auth.example.test</code>") })));
 });
 
 test("Account page notes: HTTPS, old browser, no address, another address, locked", () => {
     const { ctx } = dashboard(() => null);
     const here = "https://auth.example.test";
     const data = (origin, locked) => ({ address: address(1, origin, locked), passkeys: [] });
-    assert.ok(ctx.dashPkInfoHtml(null, "insecure", here).includes("Passkeys need HTTPS (or localhost)."));
-    assert.ok(ctx.dashPkInfoHtml(null, "browser", here).includes("This browser cannot use passkeys here."));
+    const words = (key) => ctx.esc(ctx.t(key));
+    assert.ok(ctx.dashPkInfoHtml(null, "insecure", here).includes(words("passkey.passkeys-need-https-or-localhost")));
+    assert.ok(ctx.dashPkInfoHtml(null, "browser", here).includes(words("passkey.this-browser-cannot-use-passkeys-here")));
     const none = ctx.dashPkInfoHtml(data(null), "", here);
-    assert.ok(none.includes("No passkey address yet"));
+    assert.ok(none.includes(words("account.passkeys.no-passkey-address-yet")));
     assert.ok(none.includes("<code>https://auth.example.test</code>"));
     const other = ctx.dashPkInfoHtml(data("https://other.example.test"), "", here);
-    assert.ok(other.includes("This page is open at another address"));
+    assert.ok(other.includes(words("account.passkeys.this-page-is-open-at-another")));
     assert.ok(other.includes("<code>https://other.example.test</code>"));
     const locked = ctx.dashPkInfoHtml(data(here, true), "", here);
-    assert.ok(locked.includes("<code>PASSKEY_ORIGIN</code> environment variable sets it"));
+    assert.ok(locked.includes(ctx.tHtml("account.passkeys.environment-variable-sets-it",
+        { origin: ctx.tRaw("<code>https://auth.example.test</code>"), env: ctx.tRaw("<code>PASSKEY_ORIGIN</code>") })));
     assert.ok(!locked.includes("is-warn"));
     const open = ctx.dashPkInfoHtml(data(here, false), "", here);
     assert.ok(open.includes('data-go="settings"'));
@@ -393,17 +397,22 @@ test("Account page notes: HTTPS, old browser, no address, another address, locke
 test("Activity Log: passkey sign-ins, reveals, passkey actions and the address in words, escaped", () => {
     const { ctx } = dashboard(() => null);
     const d = (action, details, entityName) => ctx.dashLogDetails({ action, details, entityName });
-    assert.equal(d("login", { method: "passkey", passkey: "<b>Phone</b>" }), '<b>Signed in with:</b> passkey (<bdi dir="auto">&lt;b&gt;Phone&lt;/b&gt;</bdi>)');
-    assert.equal(d("token_reveal", { method: "passkey" }), "<b>Confirmed with:</b> Passkey");
-    assert.equal(d("api_key_reveal", { method: "code" }), "<b>Confirmed with:</b> Authenticator code");
-    assert.equal(d("passkey_added", { rpId: "auth.example.test" }), "<b>Made for:</b> auth.example.test");
-    assert.equal(d("passkey_renamed", { from: "Old" }), '<b>Renamed from:</b> <bdi dir="auto">Old</bdi>');
-    assert.equal(d("passkey_failed", { where: "token_reveal", reason: "invalid" }), "<b>Where:</b> Copy token<br><b>Reason:</b> The passkey could not be verified");
-    assert.equal(d("passkey_failed", { where: "<x>", reason: "constructor" }), "<b>Where:</b> &lt;x&gt;<br><b>Reason:</b> constructor");
-    assert.equal(d("settings.update", { from: { origin: null }, to: { origin: "https://a.example.test" } }, "passkeys"), "<b>Passkey address set to:</b> https://a.example.test");
-    assert.equal(d("settings.update", { from: { origin: "https://a.example.test" }, to: { origin: null } }, "passkeys"), "<b>Passkey address removed.</b> It was https://a.example.test");
+    const w = (key, vars) => ctx.esc(ctx.t(key, vars));
+    assert.equal(d("login", { method: "passkey", passkey: "<b>Phone</b>" }),
+        "<b>" + w("logs.signed-in-with") + "</b> " + ctx.tHtml("logs.passkey-named", { name: ctx.tRaw('<bdi dir="auto">&lt;b&gt;Phone&lt;/b&gt;</bdi>') }));
+    assert.equal(d("token_reveal", { method: "passkey" }), "<b>" + w("logs.confirmed-with") + "</b> " + w("logs.passkey"));
+    assert.equal(d("api_key_reveal", { method: "code" }), "<b>" + w("logs.confirmed-with") + "</b> " + w("logs.authenticator-code"));
+    assert.equal(d("passkey_added", { rpId: "auth.example.test" }), "<b>" + w("logs.made-for") + "</b> auth.example.test");
+    assert.equal(d("passkey_renamed", { from: "Old" }), "<b>" + w("logs.renamed-from") + '</b> <bdi dir="auto">Old</bdi>');
+    assert.equal(d("passkey_failed", { where: "token_reveal", reason: "invalid" }),
+        "<b>" + w("logs.where") + "</b> " + w("logs.copy-token") + "<br><b>" + w("logs.reason") + "</b> " + w("logs.the-passkey-could-not-be-verified"));
+    assert.equal(d("passkey_failed", { where: "<x>", reason: "constructor" }), "<b>" + w("logs.where") + "</b> &lt;x&gt;<br><b>" + w("logs.reason") + "</b> constructor");
+    assert.equal(d("settings.update", { from: { origin: null }, to: { origin: "https://a.example.test" } }, "passkeys"),
+        "<b>" + w("logs.passkey-address-set-to") + "</b> https://a.example.test");
+    assert.equal(d("settings.update", { from: { origin: "https://a.example.test" }, to: { origin: null } }, "passkeys"),
+        "<b>" + w("logs.passkey-address-removed") + "</b> " + w("logs.it-was", { origin: "https://a.example.test" }));
     assert.equal(d("settings.update", { from: { origin: "https://a.example.test" }, to: { origin: "https://b.example.test" } }, "passkeys"),
-        "<b>Passkey address changed</b> from https://a.example.test to https://b.example.test");
+        "<b>" + w("logs.passkey-address-changed") + "</b> " + w("logs.from", { from: "https://a.example.test", to: "https://b.example.test" }));
     // A password sign-in has no details; other settings rows stay as data
     assert.equal(d("login", null), '<span class="ui-muted">-</span>');
     assert.ok(d("settings.update", { from: { maxReq: 1 }, to: { maxReq: 2 } }, "rate_limit").startsWith('<code class="ui-mono">'));

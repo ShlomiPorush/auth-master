@@ -100,7 +100,7 @@ test("the freshness line says the reason and how long ago the shown rows were re
     const ctx = load();
     ctx.UI_TEXT["list.fresh-failed"] = "Could not update: {reason} Shown: {ago}";
     const now = Date.UTC(2026, 0, 1, 12, 0, 0);
-    assert.equal(ctx.dashFreshText(now - 3 * 60000, "Service Unavailable", now), "Could not update: Service Unavailable Shown: 3 min ago");
+    assert.equal(ctx.dashFreshText(now - 3 * 60000, "Service Unavailable", now), "Could not update: Service Unavailable Shown: " + ctx.t("dates.min-ago", { n: 3 }));
 });
 
 test("a failed log update keeps the rows and its toast offers Try again, which reads again (FB-2)", async () => {
@@ -119,7 +119,7 @@ test("a failed log update keeps the rows and its toast offers Try again, which r
     assert.equal(s.refreshFailed, "down");
     assert.equal(s.at, loadedAt, "the time of the last good read stays");
     assert.equal(toasts.length, 1);
-    assert.equal(toasts[0].opts.action.label, "Try again");
+    assert.equal(toasts[0].opts.action.label, ctx.t("logs.try-again"));
     const calls = api(ctx, () => ({ status: 200, data: logPage([logRow(0)]) }));
     await toasts[0].opts.action.run();
     assert.equal(calls.length, 1, "Try again reads the list again");

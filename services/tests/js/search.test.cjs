@@ -231,11 +231,13 @@ test("the browser tab names an opened level and falls back to the page name", ()
     ctx.uiPageCurrent = "usage";
     ctx.document.title = "";
     ctx.UI_TEXT["common.page-title-sub"] = "{sub} · {page} · {app}";
+    const page = ctx.t("shell.usage");
+    const app = ctx.t("common.auth-service");
     ctx.uiSetSubTitle("Orders service");
-    assert.equal(ctx.document.title, "Orders service · Usage · Auth Service");
+    assert.equal(ctx.document.title, "Orders service · " + page + " · " + app);
     ctx.UI_TEXT["common.page-title-sub"] = "";
     ctx.uiSetSubTitle("Other");
-    assert.equal(ctx.document.title, "Usage · Auth Service");
+    assert.equal(ctx.document.title, ctx.t("common.page-title", { page, app }));
 });
 
 test("Needs attention opens the Database and Redis sections of Settings, and turns red with an urgent token", () => {
