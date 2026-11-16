@@ -270,13 +270,26 @@ _UNREADABLE = object()
 RECHECK_TIMEOUT_SEC = 5.0
 
 
+async def _bounded(coro: Any) -> Any:
+    """The result of `coro`, or _UNREADABLE when it fails or takes longer than
+    RECHECK_TIMEOUT_SEC.  A read still waiting then is left to finish on its own instead of
+    being cancelled: cancelling an asyncpg query waits for its cancel request and the
+    connection's release, which can hang too (R9)."""
+    task = asyncio.ensure_future(coro)
+    done, _pending = await asyncio.wait({task}, timeout=RECHECK_TIMEOUT_SEC)
+    if task not in done:
+        # Its result or error is not needed any more; reading it keeps asyncio quiet
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        return _UNREADABLE
+    if task.cancelled() or task.exception() is not None:
+        return _UNREADABLE
+    return task.result()
+
+
 async def _held_value(db: Database) -> Any:
     """The stored value of the key right now (None when absent), or _UNREADABLE (also when
     the read takes longer than RECHECK_TIMEOUT_SEC)."""
-    try:
-        return await asyncio.wait_for(db.fetchval("SELECT value FROM app_state WHERE key = $1", KEY), RECHECK_TIMEOUT_SEC)
-    except Exception:
-        return _UNREADABLE
+    return await _bounded(db.fetchval("SELECT value FROM app_state WHERE key = $1", KEY))
 
 
 async def log_change(
@@ -349,10 +362,8 @@ async def sync_from_environment(db: Database, write_db: Database) -> Stored:
         saved = False
     except WriteUnknown:
         # The copy may or may not have been stored: read again, keep what was read on failure (R8)
-        try:
-            return await asyncio.wait_for(read_current(db), RECHECK_TIMEOUT_SEC)
-        except Exception:
-            return stored
+        again = await _bounded(read_current(db))
+        return stored if again is _UNREADABLE else again
     if not saved:
         print("The display settings set by DATE_FORMAT or TIME_FORMAT were not copied to the Settings page; "
               "they apply while the variables are set.")

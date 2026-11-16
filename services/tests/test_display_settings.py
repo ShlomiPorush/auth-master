@@ -661,6 +661,38 @@ def test_a_recheck_that_waits_on_a_lock_ends_in_unknown_and_keeps_the_read_setti
     _run(scenario())
 
 
+def test_a_recheck_does_not_wait_for_a_cancel_that_hangs(monkeypatch):
+    # R9: cancelling a waiting asyncpg read waits for its cancel request and the release of
+    # the connection; here that cancel takes a second, far longer than the recheck limit
+    import time
+
+    ds = _ds()
+    monkeypatch.setattr(ds, "RECHECK_TIMEOUT_SEC", 0.05)
+
+    class SlowCancel:
+        is_pg, is_sqlite = True, False
+
+        async def fetchval(self, *_a):
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                await asyncio.sleep(1.0)
+                raise
+
+        async def fetchval_write(self, *_a):
+            import asyncpg
+
+            raise asyncpg.exceptions.QueryCanceledError("canceling statement due to user request")
+
+    async def scenario():
+        started = time.monotonic()
+        with pytest.raises(ds.WriteUnknown):
+            await ds.save(SlowCancel(), ds.EMPTY, "{}")
+        assert time.monotonic() - started < 0.5
+
+    _run(scenario())
+
+
 def test_a_write_the_database_did_not_confirm_is_reported_as_unknown(admin, monkeypatch):
     ds = _ds()
     admin.login()
