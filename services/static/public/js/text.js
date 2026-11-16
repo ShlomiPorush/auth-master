@@ -1033,6 +1033,8 @@ var UI_TEXT = {
     "usage.calls-per-zone": "Calls per zone",
     "usage.calls-with-a-token-the-service": "calls with a token the service does not know",
     "usage.chart-label": "{title}. Arrow keys move between bars.",
+    // brief: link at the end of the line above the Usage chart while one bar is picked; drops the pick so the line and the bars show the whole span again; max 2 words
+    "usage.chart.clear": "",
     "usage.could-not-load-the-usage": "Could not load the usage",
     "usage.count-addresses": { "one": "{n} address", "other": "{n} addresses" },
     "usage.count-calls": { "one": "{n} call", "other": "{n} calls" },
@@ -1077,6 +1079,14 @@ var UI_TEXT = {
     "usage.open-in-access-logs": "Open in Access Logs",
     "usage.part-of-this-period-is-no": "Part of this period is no longer in the log",
     "usage.period": "Period",
+    // brief: the stretch of time the Usage chart shows, in bold before its call counts above the chart; {from} and {to} are the first and last hour or day shown (written dates and times); max 4 words besides the two values
+    "usage.span": "",
+    // brief: screen reader name of the slider at the end edge of the overview strip's window: the end of the stretch the chart shows; arrows move it one bar; max 6 words
+    "usage.strip.end": "",
+    // brief: screen reader name of the overview strip under the Usage chart: it shows the whole period in small bars, with a window over the stretch the chart shows; max 8 words
+    "usage.strip.label": "",
+    // brief: screen reader name of the slider at the start edge of the overview strip's window: the start of the stretch the chart shows; arrows move it one bar; max 6 words
+    "usage.strip.start": "",
     "usage.the-calls-came-from": "the calls came from",
     "usage.the-calls-name-more-different-zones": "The calls name more different zones than the page can count, so zone figures are not shown. Call counts are complete.",
     "usage.the-hours-and-days-are-counted": "The hours and days are counted in {zone}, but their names here use {shown}, so they can be off by the difference between the two. Choose another time zone on the Settings page.",
@@ -1099,6 +1109,18 @@ var UI_TEXT = {
     "usage.validate-grants": "/validate/grants",
     "usage.zone": "Zone",
     "usage.zones": "Zones",
+    // brief: tooltip and screen reader name of the Usage chart's zoom button that moves the shown stretch to earlier hours or days, by half of it; max 3 words
+    "usage.zoom.earlier": "",
+    // brief: screen reader name of the row of zoom buttons under the Usage chart; max 4 words
+    "usage.zoom.group": "",
+    // brief: tooltip and screen reader name of the zoom button that shows the middle half of the stretch; also names the other ways to zoom: drag across bars, pinch, Ctrl+wheel; max 10 words
+    "usage.zoom.in": "",
+    // brief: tooltip and screen reader name of the zoom button that moves the shown stretch to later hours or days, by half of it; max 3 words
+    "usage.zoom.later": "",
+    // brief: tooltip and screen reader name of the zoom button that shows twice the stretch, up to the whole period; max 3 words
+    "usage.zoom.out": "",
+    // brief: tooltip and screen reader name of the zoom button, shown only while zoomed, that shows the whole period again; max 3 words
+    "usage.zoom.reset": "",
 
     "zones.a-token-for-one-of-them": "{groups}. A token for one of them passes /validate for the others. Rename or delete all but one of each group.",
     "zones.actions": "Actions",

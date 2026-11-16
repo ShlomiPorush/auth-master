@@ -47,9 +47,9 @@ test("the value axis tops out at a round, even number", () => {
     assert.deepEqual([0, 1, 3, 7, 12, 120, 999, 1000, 4100].map(ctx.dashUseNiceMax), [2, 2, 6, 10, 20, 200, 1000, 1000, 5000]);
 });
 
-test("shares under one percent are not rounded down to zero", () => {
+test("shares under one percent are not rounded down to zero, and no calls is no share (FB-8)", () => {
     const ctx = load();
-    assert.equal(ctx.dashUsePct(0, 0), "0%");
+    assert.equal(ctx.dashUsePct(0, 0), "-");
     assert.equal(ctx.dashUsePct(1, 1000), "under 1%");
     assert.equal(ctx.dashUsePct(3, 120), "3%");
 });

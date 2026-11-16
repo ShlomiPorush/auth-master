@@ -619,6 +619,50 @@ body.ui-app { overflow: hidden; }
 #usage-areas { --ui-cols: minmax(140px, 1fr) 90px minmax(120px, 1.2fr) minmax(0, 1fr); --ui-table-min: 640px; }
 #usage-addrs { --ui-cols: minmax(140px, 1fr) 90px 90px 130px; }
 
+/* WP4, Usage: what is shown stays while another period or token loads, dimmed
+   after 200ms (TB-5); figures in one strip drawn with outlined cells, the number
+   over its label (TB-19) */
+#usage-body.is-dim { opacity: .6; transition: opacity .15s; }
+.ui-kpis { gap: 0; overflow: clip; border-radius: var(--ui-radius); background: var(--ui-panel); }
+.ui-kpi { border-radius: 0; background: none; outline: 1px solid var(--ui-line); }
+
+/* WP4, Usage chart: time runs left to right in every language (CH-1, RT-1); a
+   click picks a bar and fades the others to 30%; hover and focus show a tooltip
+   (CH-3); zoom buttons (CH-9) and the overview strip (CH-10) */
+.ui-chart-plot, .ui-strip { direction: ltr; }
+.ui-chart-view { position: relative; min-width: 0; overflow-x: clip; }
+.ui-chart-view > .ui-chart-bars { height: 100%; user-select: none; }
+.ui-chart-col { position: relative; cursor: pointer; }
+.ui-chart-col[aria-pressed="true"] { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); }
+.ui-chart-bars.has-pick > .ui-chart-col[aria-pressed="false"] { opacity: .3; }
+.ui-chart-col::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; z-index: 3; width: max-content; max-width: min(260px, 70vw);
+    padding: var(--ui-sp-2) var(--ui-sp-4); border-radius: var(--ui-sp-3); background: var(--ui-ink); color: var(--ui-bg); font-size: var(--ui-fs-meta);
+    font-weight: 500; line-height: 1.35; text-align: start; white-space: normal; transform: translateX(-50%); pointer-events: none; visibility: hidden; }
+.ui-chart-col:hover::after, .ui-chart-col:focus-visible::after { visibility: visible; }
+.ui-chart-col.is-tip-start::after { left: 0; transform: none; }
+.ui-chart-col.is-tip-end::after { left: auto; right: 0; transform: none; }
+.ui-chart-view.is-moving .ui-chart-col::after { visibility: hidden; }
+.ui-chart-band { position: absolute; top: 0; bottom: 0; z-index: 2; border-inline: 1px solid var(--ui-accent);
+    background: color-mix(in srgb, var(--ui-accent) 14%, transparent); pointer-events: none; }
+.ui-chart-zoom { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ui-sp-2); }
+.ui-chart-zoom .ui-icon-btn { width: var(--ui-chip-h); height: var(--ui-chip-h); }
+.ui-chart-zoom .ui-icon-btn svg { width: 16px; height: 16px; }
+.ui-chart-zoom .ui-icon-btn:disabled { opacity: .35; }
+.ui-chart-zoom .is-gone { visibility: hidden; }
+.ui-strip { position: relative; height: 30px; margin-top: var(--ui-sp-4); border-radius: 7px; background: color-mix(in srgb, var(--ui-ink) 5%, transparent);
+    touch-action: pan-y; user-select: none; }
+.ui-strip-bars { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(var(--ui-chart-n), minmax(0, 1fr)); align-items: end;
+    gap: var(--ui-sp-1); padding: 0 var(--ui-sp-1); overflow: hidden; border-radius: inherit; }
+.ui-strip-bars > i { display: block; border-radius: 1px 1px 0 0; background: var(--ui-muted); opacity: .45; }
+.ui-strip-bars > i.is-none { border-radius: 0; opacity: 1;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 7%, transparent) 0 2px, transparent 2px 6px); }
+.ui-strip-win { position: absolute; top: 0; bottom: 0; border: 1.5px solid var(--ui-accent); border-radius: 7px;
+    background: color-mix(in srgb, var(--ui-accent) 14%, transparent); cursor: grab; }
+.ui-strip.is-held .ui-strip-win { cursor: grabbing; }
+.ui-strip-edge { position: absolute; top: 4px; z-index: 1; width: 10px; height: 22px; border-radius: 3px; background: var(--ui-accent);
+    transform: translateX(-50%); cursor: ew-resize; }
+.ui-strip-edge::before { content: ""; position: absolute; inset: -10px -12px; }
+
 /* ---------- Dialogs (js/ui.js, uiDialog) ---------- */
 
 .ui-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: var(--ui-sp-7);

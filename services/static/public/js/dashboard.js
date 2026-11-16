@@ -2424,7 +2424,19 @@ var USAGE_NOTE = "usage.note";
 // data: the last answer; shown: the answer the page now draws (a refresh skipped while the
 // user works in the page leaves the older one on screen, and the chart reads that one)
 var dashUse = { range: "7d", token: "", data: null, dataFor: "", notFound: false, failed: "", seq: 0, at: 0,
-    sort: { key: "", dir: "" }, sel: -1, drawn: "", shown: null, bound: false };
+    sort: { key: "", dir: "" }, pick: "", zoom: null, drawn: "", drawnKind: "", shown: null, bound: false,
+    gesture: null, redrawAfter: false, swallowUntil: 0, wheel: null, keySpan: null, keyTimer: null, dimTimer: null };
+
+// CH-9, CH-10: the chart zooms over the bars the API returns, never finer, and
+// shows at least this many bars
+var USAGE_ZOOM_MIN = 2;
+var USAGE_ICONS = {
+    earlier: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>',
+    out: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM13.5 10.5h-6"/></svg>',
+    "in": '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6"/></svg>',
+    later: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>',
+    reset: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/></svg>',
+};
 // The note under the usage tables (HTML)
 function dashUseNote() {
     return tHtml(USAGE_NOTE, { path: tRaw("<code>" + esc(t("usage.validate-grants")) + "</code>") });
@@ -2441,12 +2453,16 @@ function dashUseReadQuery() {
     var r = q.get("range") || "7d";
     dashUse.range = USAGE_RANGES[r] ? r : "7d";
     dashUse.token = q.get("token") || "";
+    // ?zoom=<start>-<end> in Unix seconds: the span the chart shows
+    var z = /^(\d{1,12})-(\d{1,12})$/.exec(q.get("zoom") || "");
+    dashUse.zoom = z && Number(z[1]) < Number(z[2]) ? { from: Number(z[1]) * 1000, to: Number(z[2]) * 1000 } : null;
 }
 
-function dashUseQuery(token, range) {
+function dashUseQuery(token, range, zoom) {
     var p = new URLSearchParams();
     if (token) p.set("token", token);
     if (range !== "7d") p.set("range", range);
+    if (zoom) p.set("zoom", Math.floor(zoom.from / 1000) + "-" + Math.ceil(zoom.to / 1000));
     return p.toString();
 }
 
@@ -2496,7 +2512,7 @@ function dashUseNiceMax(v) {
 }
 
 function dashUsePct(part, whole) {
-    if (!whole) return "0%";
+    if (!whole) return "-";
     var p = (part / whole) * 100;
     if (p > 0 && p < 1) return t("usage.under-1");
     return Math.round(p) + "%";
@@ -2530,73 +2546,270 @@ function dashUseBucketWords(d, b) {
     return t("usage.bucket-partial", counts);
 }
 
-// Allowed and denied calls per hour or day: bars from the series, a readout line that
-// follows the pointer and the keyboard, and the same numbers as a table for screen readers
+// The bars a zoom covers, snapped to the bars there are: { a, b } as indices,
+// both included. Nothing zoomed, or less than the shortest span left in the
+// data, is the whole series (CH-10).
+function dashUseSpan(series, zoom) {
+    var n = series.length;
+    var all = { a: 0, b: n - 1, zoomed: false };
+    if (!zoom || n <= USAGE_ZOOM_MIN) return all;
+    var a = -1;
+    var b = -1;
+    series.forEach(function (bar, i) {
+        if (a === -1 && uiParseInstant(bar.end) > zoom.from) a = i;
+        if (uiParseInstant(bar.start) < zoom.to) b = i;
+    });
+    if (a === -1 || b - a + 1 < USAGE_ZOOM_MIN || (a === 0 && b === n - 1)) return all;
+    return { a: a, b: b, zoomed: true };
+}
+
+// len bars from a, kept inside the series and at least the shortest span
+function dashUseClamp(a, len, n) {
+    var l = Math.max(Math.min(USAGE_ZOOM_MIN, n), Math.min(n, Math.round(len)));
+    var s = Math.max(0, Math.min(n - l, Math.round(a)));
+    return { a: s, b: s + l - 1 };
+}
+
+// The zoom buttons (CH-9): Zoom in keeps the middle half, Zoom out doubles, Earlier
+// and Later move by half the span, Reset shows every bar; all by whole bars
+function dashUseZoomStep(v, n, kind) {
+    var len = v.b - v.a + 1;
+    if (kind === "in") {
+        var l = Math.max(USAGE_ZOOM_MIN, Math.round(len / 2));
+        return dashUseClamp(v.a + Math.floor((len - l) / 2), l, n);
+    }
+    if (kind === "out") {
+        var wide = Math.min(n, len * 2);
+        return dashUseClamp(v.a - Math.floor((wide - len) / 2), wide, n);
+    }
+    if (kind === "earlier") return dashUseClamp(v.a - Math.max(1, Math.floor(len / 2)), len, n);
+    if (kind === "later") return dashUseClamp(v.a + Math.max(1, Math.floor(len / 2)), len, n);
+    return { a: 0, b: n - 1 };
+}
+
+function dashUseZoomCan(v, n) {
+    var len = v.b - v.a + 1;
+    return { earlier: v.a > 0, out: len < n, "in": len > USAGE_ZOOM_MIN, later: v.b < n - 1, reset: len < n };
+}
+
+// The span shown in words: hours with their times, days by their dates
+function dashUseSpanName(d, first, last) {
+    var z = { seconds: false, zone: dashUseZone(d) };
+    var hourly = d.range === "24h";
+    return t("usage.span", { from: hourly ? formatTime(first.start, z) : formatDay(first.start, z), to: hourly ? formatTime(last.end, z) : formatDay(last.start, z) });
+}
+
+function dashUseSumWords(bars) {
+    var allowed = 0;
+    var denied = 0;
+    bars.forEach(function (b) { allowed += b.allowed; denied += b.denied; });
+    return t("usage.bucket", { calls: tn("usage.count-calls", allowed + denied), allowed: uiNum(allowed), denied: uiNum(denied) });
+}
+
+// A strip edge as a slider: its time, and the bounds the other edge leaves it (CH-10)
+function dashUseEdge(d, span, which) {
+    var s = d.series;
+    var n = s.length;
+    var z = { seconds: false, zone: dashUseZone(d) };
+    var now = which === "start" ? uiParseInstant(s[span.a].start) : uiParseInstant(s[span.b].end);
+    var min = which === "start" ? uiParseInstant(s[0].start) : uiParseInstant(s[Math.min(n - 1, span.a + USAGE_ZOOM_MIN - 1)].end);
+    var max = which === "start" ? uiParseInstant(s[Math.max(0, span.b - USAGE_ZOOM_MIN + 1)].start) : uiParseInstant(s[n - 1].end);
+    return { now: now, min: min, max: max, text: formatTime(now, z), left: ((which === "start" ? span.a : span.b + 1) / n * 100).toFixed(3) + "%" };
+}
+
+// CH-10: the whole period in small bars, with a window over the span the chart shows
+function dashUseStripHtml(d, v) {
+    var s = d.series;
+    var n = s.length;
+    if (n <= USAGE_ZOOM_MIN) return "";
+    var max = 0;
+    s.forEach(function (b) { max = Math.max(max, b.allowed + b.denied); });
+    var bars = s.map(function (b) {
+        // Time before the logs kept is hatched over the whole height (FB-9)
+        if (b.coverage === "none") return '<i class="is-none" style="height:100%"></i>';
+        return '<i style="height:' + Math.max(6, max ? ((b.allowed + b.denied) / max) * 100 : 0).toFixed(1) + '%"></i>';
+    }).join("");
+    var edge = function (which, key) {
+        var e = dashUseEdge(d, v, which);
+        return '<span class="ui-strip-edge is-' + which + '" role="slider" tabindex="0" data-edge="' + which + '" data-action="strip-' + which + '" aria-label="' + esc(t(key)) +
+            '" aria-valuemin="' + e.min + '" aria-valuemax="' + e.max + '" aria-valuenow="' + e.now + '" aria-valuetext="' + esc(e.text) + '" style="left:' + e.left + '"></span>';
+    };
+    return '<div class="ui-strip" role="group" aria-label="' + esc(t("usage.strip.label")) + '">' +
+        '<div class="ui-strip-bars" aria-hidden="true" style="--ui-chart-n:' + n + '">' + bars + "</div>" +
+        '<div class="ui-strip-win" aria-hidden="true" style="left:' + (v.a / n * 100).toFixed(3) + "%;width:" + ((v.b - v.a + 1) / n * 100).toFixed(3) + '%"></div>' +
+        edge("start", "usage.strip.start") + edge("end", "usage.strip.end") + "</div>";
+}
+
+// Allowed and denied calls per hour or day over the span shown (CH-1, CH-3): a
+// readout of the picked bar or of the span, bars that pick on a click and show a
+// tooltip on hover and focus, the zoom buttons (CH-9), the overview strip
+// (CH-10), and the same numbers as a table for screen readers. Time runs left to
+// right in every language.
 function dashUseChartHtml(d) {
     var series = d.series;
-    var n = series.length;
+    var v = dashUseSpan(series, dashUse.zoom);
+    var shown = series.slice(v.a, v.b + 1);
+    var n = shown.length;
     var max = 0;
-    series.forEach(function (b) { max = Math.max(max, b.allowed + b.denied); });
+    shown.forEach(function (b) { max = Math.max(max, b.allowed + b.denied); });
     var top = dashUseNiceMax(max);
     var hourly = d.range === "24h";
     var zone = { zone: dashUseZone(d) };
     var every = hourly ? 3 : n > 10 ? 5 : 1;
     var gaps = false;
-    var cols = series.map(function (b, i) {
+    var picked = -1;
+    shown.forEach(function (b, k) { if (dashUse.pick && b.start === dashUse.pick) picked = k; });
+    // One Tab stop among the bars: the picked one, else the newest shown
+    var stop = picked !== -1 ? picked : n - 1;
+    // Tooltips of the bars at the ends line up with the chart's edge
+    var tipEdge = Math.max(1, Math.round(n / 6));
+    var cols = shown.map(function (b, k) {
         var cls = b.coverage === "none" ? " is-none" : b.coverage === "partial" ? " is-partial" : "";
         if (cls) gaps = true;
-        var seg = function (v, tone) {
-            return v ? '<span class="ui-chart-seg is-' + tone + '" style="height:' + ((v / top) * 100).toFixed(2) + '%"></span>' : "";
+        cls += k < tipEdge ? " is-tip-start" : k >= n - tipEdge ? " is-tip-end" : "";
+        var seg = function (val, tone) {
+            return val ? '<span class="ui-chart-seg is-' + tone + '" style="height:' + ((val / top) * 100).toFixed(2) + '%"></span>' : "";
         };
-        return '<button type="button" class="ui-chart-col' + cls + '" data-chart-i="' + i + '" data-action="chart-' + i + '" tabindex="-1" aria-label="' +
-            esc(dashUseBucketName(d, b) + ": " + dashUseBucketWords(d, b)) + '">' + seg(b.denied, "fail") + seg(b.allowed, "base") + "</button>";
+        var words = dashUseBucketName(d, b) + ": " + dashUseBucketWords(d, b);
+        return '<button type="button" class="ui-chart-col' + cls + '" data-chart-i="' + (v.a + k) + '" data-action="bar-' + esc(b.start) + '" aria-pressed="' + (k === picked) +
+            '" tabindex="' + (k === stop ? "0" : "-1") + '" aria-label="' + esc(words) + '" data-tip="' + esc(words) + '">' + seg(b.denied, "fail") + seg(b.allowed, "base") + "</button>";
     }).join("");
-    var ticks = series.map(function (b, i) {
-        // Count the labels back from the newest bucket, so the last one is always named
+    var ticks = shown.map(function (b, i) {
+        // Count the labels back from the newest bucket shown, so the last one is always named
         var back = n - 1 - i;
         if (back % every) return "";
         // On a phone every other hour label goes, so the rest do not touch
         var minor = hourly && (back / every) % 2 ? ' class="is-minor"' : "";
         return "<span" + minor + ' style="grid-column:' + (i + 1) + '">' + esc(hourly ? formatClock(b.start, zone) : formatShortDay(b.start, zone)) + "</span>";
     }).join("");
-    var rows = series.map(function (b) {
+    var rows = shown.map(function (b) {
         return "<tr><th scope=\"row\">" + esc(dashUseBucketName(d, b)) + "</th><td>" +
             (b.coverage === "none" ? esc(t("usage.no-data")) : esc(uiNum(b.allowed))) + "</td><td>" + (b.coverage === "none" ? esc(t("usage.no-data")) : esc(uiNum(b.denied))) + "</td></tr>";
     }).join("");
+    var read = "";
+    if (picked !== -1) {
+        read = "<b>" + esc(dashUseBucketName(d, shown[picked])) + "</b> " + esc(dashUseBucketWords(d, shown[picked])) +
+            ' <button type="button" class="ui-btn-link" data-chart-clear>' + esc(t("usage.chart.clear")) + "</button>";
+    } else if (n) {
+        read = "<b>" + esc(dashUseSpanName(d, shown[0], shown[n - 1])) + "</b> " + esc(dashUseSumWords(shown));
+    }
+    var can = dashUseZoomCan(v, series.length);
+    var tool = function (kind, key) {
+        var label = t(key);
+        return '<button type="button" class="ui-icon-btn' + (kind === "reset" && !v.zoomed ? " is-gone" : "") + '" data-zoom-step="' + kind + '" data-action="zoom-' + kind +
+            '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (can[kind] ? "" : " disabled") + ">" + USAGE_ICONS[kind] + "</button>";
+    };
+    var tools = series.length > USAGE_ZOOM_MIN ? '<div class="ui-chart-zoom" role="group" aria-label="' + esc(t("usage.zoom.group")) + '">' +
+        tool("earlier", "usage.zoom.earlier") + tool("out", "usage.zoom.out") + tool("in", "usage.zoom.in") + tool("later", "usage.zoom.later") + tool("reset", "usage.zoom.reset") + "</div>" : "";
     return '<div class="ui-chart">' +
-        '<p class="ui-chart-read" id="usage-read" aria-live="polite"></p>' +
+        '<p class="ui-chart-read" id="usage-read" aria-live="polite">' + read + "</p>" +
         '<div class="ui-chart-plot">' +
         '<div class="ui-chart-y" aria-hidden="true"><span style="top:0%">' + esc(uiNum(top)) + '</span><span style="top:50%">' + esc(uiNum(top / 2)) +
         '</span><span style="top:100%">0</span></div>' +
-        '<div class="ui-chart-bars" role="group" aria-label="' + esc(t("usage.chart-label", { title: hourly ? t("usage.calls-per-hour") : t("usage.calls-per-day") })) + '" style="--ui-chart-n:' + n + '">' + cols + "</div>" +
+        '<div class="ui-chart-view"><div class="ui-chart-bars' + (picked !== -1 ? " has-pick" : "") + '" role="group" aria-label="' + esc(t("usage.chart-label", { title: hourly ? t("usage.calls-per-hour") : t("usage.calls-per-day") })) + '" style="--ui-chart-n:' + n + '">' + cols + "</div></div>" +
         '<div class="ui-chart-x" aria-hidden="true" style="--ui-chart-n:' + n + '">' + ticks + "</div></div>" +
+        tools + dashUseStripHtml(d, v) +
         '<p class="ui-chart-key"><span><i class="is-base"></i>' + esc(t("usage.allowed-2")) + '</span><span><i class="is-fail"></i>' + esc(t("usage.denied")) + '</span>' +
         (gaps ? '<span><i class="is-none"></i>' + esc(t("usage.logs-deleted")) + '</span>' : "") + "</p>" +
         '<table class="ui-sr"><caption>' + (hourly ? esc(t("usage.calls-per-hour")) : esc(t("usage.calls-per-day"))) + "</caption><thead><tr><th scope=\"col\">" +
         (hourly ? esc(t("usage.hour")) : esc(t("usage.day"))) + '</th><th scope="col">' + esc(t("usage.allowed-2")) + '</th><th scope="col">' + esc(t("usage.denied")) + '</th></tr></thead><tbody>' + rows + "</tbody></table></div>";
 }
 
-// Show one bar's numbers; the newest bar when none was picked
-function dashUseSelect(i, focus) {
-    var body = document.getElementById("usage-body");
+// A click on a bar picks it (the others fade); the same bar again drops the pick
+function dashUsePick(start) {
+    dashUse.pick = dashUse.pick === start ? "" : start;
+    dashUseDraw(false);
+}
+
+// Show another span: the zoom goes into the address with the period, and a picked
+// bar is dropped (CH-1, CH-9)
+function dashUseZoomTo(span) {
     var d = dashUse.shown;
-    if (!body || !d) return;
-    var cols = body.querySelectorAll("[data-chart-i]");
-    if (!cols.length) return;
-    if (i < 0 || i >= cols.length) i = cols.length - 1;
-    dashUse.sel = i;
-    Array.prototype.forEach.call(cols, function (c, k) {
-        c.classList.toggle("is-on", k === i);
-        c.setAttribute("tabindex", k === i ? "0" : "-1");
+    if (!d || !d.series.length) return;
+    var s = d.series;
+    var n = s.length;
+    var whole = span.a <= 0 && span.b >= n - 1;
+    dashUse.zoom = whole ? null : { from: uiParseInstant(s[span.a].start), to: uiParseInstant(s[span.b].end) };
+    dashUse.pick = "";
+    dashUse.redrawAfter = false;
+    uiSetPageQuery(new URLSearchParams(dashUseQuery(dashUse.token, dashUse.range, dashUse.zoom)));
+    dashUseDraw(false);
+}
+
+// A zoom button: after the redraw the keyboard stays on that button, else on the
+// first one that can still act
+function dashUseZoomButton(kind) {
+    var d = dashUse.shown;
+    if (!d) return;
+    dashUseZoomTo(dashUseZoomStep(dashUseSpan(d.series, dashUse.zoom), d.series.length, kind));
+    var body = document.getElementById("usage-body");
+    var a = document.activeElement;
+    if (a && a !== document.body && body.contains(a) && !a.disabled) return;
+    var usable = function (b) { return b && !b.disabled && !b.classList.contains("is-gone"); };
+    var same = body.querySelector('[data-zoom-step="' + kind + '"]');
+    var first = Array.prototype.filter.call(body.querySelectorAll("[data-zoom-step]"), usable)[0];
+    var to = usable(same) ? same : first || body.querySelector('.ui-chart-col[tabindex="0"]');
+    if (to) to.focus({ preventScroll: true });
+}
+
+// Move the strip's window and edges to a span before it is applied (a drag, keys)
+function dashUseStripPreview(span) {
+    var d = dashUse.shown;
+    var strip = document.querySelector("#usage-body .ui-strip");
+    if (!d || !strip) return;
+    var n = d.series.length;
+    var win = strip.querySelector(".ui-strip-win");
+    win.style.left = (span.a / n * 100).toFixed(3) + "%";
+    win.style.width = ((span.b - span.a + 1) / n * 100).toFixed(3) + "%";
+    ["start", "end"].forEach(function (which) {
+        var el = strip.querySelector('[data-edge="' + which + '"]');
+        var e = dashUseEdge(d, span, which);
+        el.style.left = e.left;
+        el.setAttribute("aria-valuenow", String(e.now));
+        el.setAttribute("aria-valuemin", String(e.min));
+        el.setAttribute("aria-valuemax", String(e.max));
+        el.setAttribute("aria-valuetext", e.text);
     });
-    var b = d.series[i];
-    var read = document.getElementById("usage-read");
-    if (read && b) read.innerHTML = "<b>" + esc(dashUseBucketName(d, b)) + "</b> " + esc(dashUseBucketWords(d, b));
-    if (focus) cols[i].focus({ preventScroll: true });
+}
+
+// The strip's edges by keyboard: arrows one bar (Left and Down earlier), Page Up
+// and Page Down a bigger step, Home and End to the ends; applied once, 350ms
+// after the last key (CH-10)
+function dashUseEdgeKey(event, which) {
+    var d = dashUse.shown;
+    if (!d) return;
+    var n = d.series.length;
+    var v = dashUse.keySpan || dashUseSpan(d.series, dashUse.zoom);
+    var big = d.range === "24h" ? 6 : d.range === "30d" ? 7 : 1;
+    var steps = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -big, PageUp: big };
+    var step = Object.prototype.hasOwnProperty.call(steps, event.key) ? steps[event.key] : 0;
+    if (!step && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    var span = { a: v.a, b: v.b };
+    var lo = which === "start" ? 0 : v.a + USAGE_ZOOM_MIN - 1;
+    var hi = which === "start" ? v.b - USAGE_ZOOM_MIN + 1 : n - 1;
+    var cur = which === "start" ? v.a : v.b;
+    var next = event.key === "Home" ? lo : event.key === "End" ? hi : Math.max(lo, Math.min(hi, cur + step));
+    if (which === "start") span.a = next;
+    else span.b = next;
+    dashUse.keySpan = span;
+    dashUse.gesture = "keys";
+    dashUseStripPreview(span);
+    clearTimeout(dashUse.keyTimer);
+    dashUse.keyTimer = setTimeout(function () {
+        dashUse.keySpan = null;
+        dashUse.gesture = null;
+        dashUseZoomTo(span);
+    }, 350);
 }
 
 function dashUseKpi(label, value, sub) {
-    return '<div class="ui-kpi"><small>' + esc(label) + "</small><b>" + value + "</b>" + (sub ? "<span>" + sub + "</span>" : "") + "</div>";
+    return '<div class="ui-kpi"><b>' + value + "</b><small>" + esc(label) + "</small>" + (sub ? "<span>" + sub + "</span>" : "") + "</div>";
+}
+
+// The share of calls denied, or a muted "-" when there were no calls (FB-8)
+function dashUseDeniedSub(totals) {
+    return totals.calls ? esc(t("usage.of-calls", { pct: dashUsePct(totals.denied, totals.calls) })) : '<span class="ui-muted">-</span>';
 }
 
 function dashUseNotices(d) {
@@ -2651,7 +2864,7 @@ function dashUseOverviewHtml(d) {
     var totals = d.totals;
     var html = dashUseNotices(d) + '<div class="ui-kpis">' +
         dashUseKpi(t("usage.calls"), esc(uiNum(totals.calls)), esc(t("usage.in", { range: t(USAGE_RANGES[d.range]) }))) +
-        dashUseKpi(t("usage.denied"), esc(uiNum(totals.denied)), esc(t("usage.of-calls", { pct: dashUsePct(totals.denied, totals.calls) }))) +
+        dashUseKpi(t("usage.denied"), esc(uiNum(totals.denied)), dashUseDeniedSub(totals)) +
         dashUseKpi(t("usage.tokens-with-calls"), esc(uiNum(totals.tokensUsed)) + ' ' + '<span class="ui-muted">' + esc(t("usage.of", { total: uiNum(totals.tokensTotal) })) + "</span>", esc(t("usage.tokens-that-called-in-this-period"))) +
         dashUseKpi(t("usage.unknown-token"), esc(uiNum(totals.unknownCalls)), esc(t("usage.calls-with-a-token-the-service"))) +
         "</div>" + dashUseChartPanel(d);
@@ -2713,7 +2926,7 @@ function dashUseTokenHtml(d) {
     var html = '<div class="ui-usage-title">' + dashUseBackLink() + "<h2>" + uiUserText(tok.name) + " " + dashUseStatusTag(tok.status) + "</h2>" + logs + "</div>" +
         dashUseNotices(d) + '<div class="ui-kpis">' +
         dashUseKpi(t("usage.calls"), esc(uiNum(totals.calls)), esc(t("usage.in", { range: t(USAGE_RANGES[d.range]) }))) +
-        dashUseKpi(t("usage.denied"), esc(uiNum(totals.denied)), esc(t("usage.of-calls", { pct: dashUsePct(totals.denied, totals.calls) }))) +
+        dashUseKpi(t("usage.denied"), esc(uiNum(totals.denied)), dashUseDeniedSub(totals)) +
         dashUseKpi(t("usage.zones"), d.areasCount === null ? "-" : esc(uiNum(d.areasCount)), esc(t("usage.called-at-least-once"))) +
         dashUseKpi(t("usage.addresses"), esc(uiNum(totals.ipCount)), esc(t("usage.the-calls-came-from"))) +
         dashUseKpi(t("usage.last-call"), totals.lastCallAt ? uiTime(totals.lastCallAt) : '<span class="ui-muted">-</span>', totals.grantsChecks ? esc(tn("usage.count-grants-checks", totals.grantsChecks)) : "") +
@@ -2774,7 +2987,22 @@ function dashUseSyncRange() {
     });
 }
 
-// A background refresh (quiet) leaves the page alone while the user works in it
+// The page shown while another period or token loads: kept, dimmed after 200ms (TB-5)
+function dashUseDim(on) {
+    var body = document.getElementById("usage-body");
+    if (!body) return;
+    clearTimeout(dashUse.dimTimer);
+    if (on) {
+        body.setAttribute("aria-busy", "true");
+        dashUse.dimTimer = setTimeout(function () { body.classList.add("is-dim"); }, 200);
+    } else {
+        body.removeAttribute("aria-busy");
+        body.classList.remove("is-dim");
+    }
+}
+
+// A background refresh (quiet) leaves the page alone while the user works in it,
+// and waits for a zoom gesture or strip drag to end (CH-10)
 function dashUseDraw(quiet) {
     var body = document.getElementById("usage-body");
     if (!body) return;
@@ -2782,21 +3010,37 @@ function dashUseDraw(quiet) {
     var mine = dashUse.dataFor === dashUseKey();
     // A failed refresh keeps the figures shown and says so above them (LD-12)
     dashFreshSet("usage-fresh", dashUse.at, mine && dashUse.data ? dashUse.failed : "");
+    if (quiet && dashUse.gesture) {
+        dashUse.redrawAfter = true;
+        return;
+    }
     var html;
+    var kind = "content";
     if (mine && dashUse.notFound) html = dashUseNotFoundHtml();
     else if (mine && dashUse.data) html = dashUse.token ? dashUseTokenHtml(dashUse.data) : dashUseOverviewHtml(dashUse.data);
-    else html = '<div class="ui-panel">' + (dashUse.failed ? dashFailed(t("usage.could-not-load-the-usage"), dashUse.failed, "data-usage-retry") : dashLoading(t("usage.loading-usage"))) + "</div>";
+    else if (dashUse.failed) {
+        html = '<div class="ui-panel">' + dashFailed(t("usage.could-not-load-the-usage"), dashUse.failed, "data-usage-retry") + "</div>";
+        kind = "failed";
+    } else if (dashUse.drawn && dashUse.drawnKind === "content") {
+        dashUseDim(true);
+        return;
+    } else {
+        html = '<div class="ui-panel">' + dashLoading(t("usage.loading-usage")) + "</div>";
+        kind = "loading";
+    }
     if (quiet && uiAreaHeld(body)) return;
+    dashUseDim(false);
     dashUse.shown = mine ? dashUse.data : null;
+    dashUse.drawnKind = kind;
     if (html !== dashUse.drawn) {
         dashUse.drawn = html;
         uiKeepFocus(body, function () { body.innerHTML = html; });
     }
-    if (dashUse.shown) dashUseSelect(dashUse.sel, false);
 }
 
+// A token's page keeps the period and the span shown
 function dashUseOpen(key) {
-    uiGo("usage", dashUseQuery(key, dashUse.range));
+    uiGo("usage", dashUseQuery(key, dashUse.range, dashUse.zoom));
 }
 
 function dashUseBind() {
@@ -2806,7 +3050,9 @@ function dashUseBind() {
         var b = event.target.closest("[data-range]");
         if (!b || b.getAttribute("data-range") === dashUse.range) return;
         dashUse.range = b.getAttribute("data-range");
-        dashUse.sel = -1;
+        // Another period: no picked bar and no zoom
+        dashUse.pick = "";
+        dashUse.zoom = null;
         dashUse.failed = "";
         uiSetPageQuery(new URLSearchParams(dashUseQuery(dashUse.token, dashUse.range)));
         dashUseDraw(false);
@@ -2841,9 +3087,24 @@ function dashUseBind() {
             if (again) again.focus({ preventScroll: true });
             return;
         }
+        if (target.closest("[data-chart-clear]")) {
+            dashUse.pick = "";
+            dashUseDraw(false);
+            var stop = body.querySelector('.ui-chart-col[tabindex="0"]');
+            if (stop) stop.focus({ preventScroll: true });
+            return;
+        }
+        var step = target.closest("[data-zoom-step]");
+        if (step) {
+            dashUseZoomButton(step.getAttribute("data-zoom-step"));
+            return;
+        }
         var col2 = target.closest("[data-chart-i]");
         if (col2) {
-            dashUseSelect(Number(col2.getAttribute("data-chart-i")), false);
+            // The click that ends a drag, a pinch or a strip move picks nothing (CH-9)
+            if (Date.now() < dashUse.swallowUntil) return;
+            var bar = dashUse.shown && dashUse.shown.series[Number(col2.getAttribute("data-chart-i"))];
+            if (bar) dashUsePick(bar.start);
             return;
         }
         var row = target.closest("#usage-table [data-key]");
@@ -2855,14 +3116,21 @@ function dashUseBind() {
         if (!(target instanceof Element)) return;
         var c = target.closest("[data-chart-i]");
         if (c) {
-            var i = Number(c.getAttribute("data-chart-i"));
-            var last = body.querySelectorAll("[data-chart-i]").length - 1;
-            var to = event.key === "ArrowRight" ? i + 1 : event.key === "ArrowLeft" ? i - 1 : event.key === "Home" ? 0 : event.key === "End" ? last : null;
+            // Arrows move between the bars, left to right in every language; Enter
+            // and Space pick (the bar is a button)
+            var bars = Array.prototype.slice.call(body.querySelectorAll("[data-chart-i]"));
+            var i = bars.indexOf(c);
+            var to = event.key === "ArrowRight" ? i + 1 : event.key === "ArrowLeft" ? i - 1 : event.key === "Home" ? 0 : event.key === "End" ? bars.length - 1 : null;
             if (to === null) return;
             event.preventDefault();
-            // The bars follow the reading order of the page
-            if (document.documentElement.dir === "rtl" && (event.key === "ArrowRight" || event.key === "ArrowLeft")) to = 2 * i - to;
-            dashUseSelect(Math.max(0, Math.min(last, to)), true);
+            to = Math.max(0, Math.min(bars.length - 1, to));
+            bars.forEach(function (b, k) { b.setAttribute("tabindex", k === to ? "0" : "-1"); });
+            bars[to].focus({ preventScroll: true });
+            return;
+        }
+        var edge = target.closest("[data-edge]");
+        if (edge) {
+            dashUseEdgeKey(event, edge.getAttribute("data-edge"));
             return;
         }
         if (target.matches("#usage-table [data-key]") && (event.key === "Enter" || event.key === " ")) {
@@ -2870,15 +3138,189 @@ function dashUseBind() {
             dashUseOpen(target.getAttribute("data-key"));
         }
     });
-    // Pointing at a bar shows its numbers; the pick stays when the pointer leaves
-    body.addEventListener("pointerover", function (event) {
-        var c = event.target instanceof Element ? event.target.closest("[data-chart-i]") : null;
-        if (c && event.pointerType !== "touch") dashUseSelect(Number(c.getAttribute("data-chart-i")), false);
+    dashUseGestures(body);
+}
+
+// CH-9 and CH-10 by pointer: a drag across the bars of an unzoomed chart marks a
+// band and zooms to its bars; on a zoomed chart the drag moves it; two fingers
+// pinch; Ctrl+wheel (and a trackpad pinch) zooms around the pointer. On the strip
+// the window moves, an edge resizes, and a press beside the window centres it
+// there. A move under 6px is a click; a mostly vertical one is left to the page.
+// While the bars stretch and slide nothing is drawn; the span is applied, snapped
+// to whole bars, when the gesture ends.
+function dashUseGestures(body) {
+    var g = null;
+    var view = function () { return body.querySelector(".ui-chart-view"); };
+    var preview = function (len, a, L, width) {
+        var bars = body.querySelector(".ui-chart-bars");
+        if (!bars) return;
+        bars.style.transformOrigin = "0 0";
+        bars.style.transform = "translateX(" + (-(a) * width / L).toFixed(1) + "px) scaleX(" + (len / L).toFixed(4) + ")";
+    };
+    var clear = function () {
+        var bars = body.querySelector(".ui-chart-bars");
+        if (bars) bars.style.transform = "";
+        var v = view();
+        if (v) v.classList.remove("is-moving");
+        var strip = body.querySelector(".ui-strip");
+        if (strip) strip.classList.remove("is-held");
+    };
+    var end = function (commit, event) {
+        var gg = g;
+        g = null;
+        dashUse.gesture = null;
+        if (!gg) return;
+        if (gg.band) gg.band.remove();
+        clear();
+        var span = commit ? gg.span || null : null;
+        if (commit && gg.kind === "strip" && !gg.moved && gg.mode === "center" && event) {
+            var r = gg.el.getBoundingClientRect();
+            var at = Math.floor(((event.clientX - r.left) / r.width) * gg.n);
+            var len = gg.v.b - gg.v.a + 1;
+            span = dashUseClamp(at - Math.floor(len / 2), len, gg.n);
+        }
+        if (gg.moved) dashUse.swallowUntil = Date.now() + 400;
+        if (span && (span.a !== gg.v.a || span.b !== gg.v.b)) {
+            dashUseZoomTo(span);
+            return;
+        }
+        if (gg.kind === "strip") dashUseStripPreview(gg.v);
+        settle();
+    };
+    // A refresh that came during the gesture is drawn now, after the click that may
+    // follow this press (drawing first would take that click's bar away)
+    var settle = function () {
+        setTimeout(function () {
+            if (dashUse.gesture || !dashUse.redrawAfter) return;
+            dashUse.redrawAfter = false;
+            dashUseDraw(false);
+        }, 0);
+    };
+    body.addEventListener("pointerdown", function (event) {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        var d = dashUse.shown;
+        var target = event.target instanceof Element ? event.target : null;
+        if (!d || !target || d.series.length <= USAGE_ZOOM_MIN) return;
+        var onView = target.closest(".ui-chart-view");
+        if (g && g.kind === "bars" && onView && event.pointerType === "touch" && !g.pinch && g.pointers.size === 1) {
+            // A second finger: a pinch, keeping the time under the fingers
+            g.pointers.set(event.pointerId, event.clientX);
+            var xs = Array.from(g.pointers.values());
+            if (g.band) { g.band.remove(); g.band = null; }
+            g.pinch = { d0: Math.max(1, Math.abs(xs[0] - xs[1])), m0: (xs[0] + xs[1]) / 2 };
+            g.moved = true;
+            return;
+        }
+        // A gesture whose release was never seen (outside the window) is called off
+        if (g) end(false, null);
+        var strip = target.closest(".ui-strip");
+        if (!onView && !strip) return;
+        var edge = target.closest("[data-edge]");
+        g = {
+            kind: onView ? "bars" : "strip", el: onView || strip, id: event.pointerId, x0: event.clientX, y0: event.clientY,
+            v: dashUseSpan(d.series, dashUse.zoom), n: d.series.length, moved: false, span: null, band: null, pinch: null,
+            pointers: new Map([[event.pointerId, event.clientX]]),
+            mode: edge ? edge.getAttribute("data-edge") : target.closest(".ui-strip-win") ? "move" : "center",
+        };
+        dashUse.gesture = g;
     });
-    body.addEventListener("focusin", function (event) {
-        var c = event.target instanceof Element ? event.target.closest("[data-chart-i]") : null;
-        if (c) dashUseSelect(Number(c.getAttribute("data-chart-i")), false);
+    window.addEventListener("pointermove", function (event) {
+        if (!g || !g.pointers.has(event.pointerId)) return;
+        g.pointers.set(event.pointerId, event.clientX);
+        var r = g.el.getBoundingClientRect();
+        var len = g.v.b - g.v.a + 1;
+        if (g.pinch) {
+            var xs = Array.from(g.pointers.values());
+            var k = Math.max(1, Math.abs(xs[0] - xs[1])) / g.pinch.d0;
+            var L = Math.max(Math.min(USAGE_ZOOM_MIN, g.n), Math.min(g.n, len / k));
+            var p = g.v.a + ((g.pinch.m0 - r.left) / r.width) * len;
+            var a = Math.max(0, Math.min(g.n - L, p - (((xs[0] + xs[1]) / 2 - r.left) / r.width) * L));
+            g.span = dashUseClamp(a, L, g.n);
+            preview(len, a - g.v.a, L, r.width);
+            return;
+        }
+        if (event.pointerId !== g.id) return;
+        var dx = event.clientX - g.x0;
+        var dy = event.clientY - g.y0;
+        if (!g.moved) {
+            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+            // Mostly vertical: the page scrolls, nothing here moves
+            if (Math.abs(dy) > Math.abs(dx) || (g.kind === "strip" && g.mode === "center")) {
+                g = null;
+                dashUse.gesture = null;
+                settle();
+                return;
+            }
+            g.moved = true;
+            try { g.el.setPointerCapture(event.pointerId); } catch (e) { /* the gesture goes on without it */ }
+            if (g.kind === "bars") g.el.classList.add("is-moving");
+            else g.el.classList.add("is-held");
+        }
+        var per = r.width / (g.kind === "bars" ? len : g.n);
+        if (g.kind === "bars" && !g.v.zoomed) {
+            // A band over the bars it covers
+            var x1 = Math.max(0, Math.min(r.width, g.x0 - r.left));
+            var x2 = Math.max(0, Math.min(r.width, event.clientX - r.left));
+            if (!g.band) {
+                g.band = document.createElement("div");
+                g.band.className = "ui-chart-band";
+                g.el.appendChild(g.band);
+            }
+            g.band.style.left = Math.min(x1, x2) + "px";
+            g.band.style.width = Math.abs(x2 - x1) + "px";
+            var i1 = Math.min(len - 1, Math.floor(Math.min(x1, x2) / per));
+            var i2 = Math.min(len - 1, Math.floor(Math.max(x1, x2) / per));
+            g.span = i2 - i1 + 1 >= USAGE_ZOOM_MIN ? { a: g.v.a + i1, b: g.v.a + i2 } : null;
+        } else if (g.kind === "bars") {
+            // A zoomed chart moves with the pointer
+            g.span = dashUseClamp(g.v.a - Math.round(dx / per), len, g.n);
+            preview(len, -dx / per, len, r.width);
+        } else {
+            var shift = Math.round(dx / per);
+            if (g.mode === "move") g.span = dashUseClamp(g.v.a + shift, len, g.n);
+            else if (g.mode === "start") g.span = { a: Math.max(0, Math.min(g.v.b - USAGE_ZOOM_MIN + 1, g.v.a + shift)), b: g.v.b };
+            else g.span = { a: g.v.a, b: Math.max(g.v.a + USAGE_ZOOM_MIN - 1, Math.min(g.n - 1, g.v.b + shift)) };
+            dashUseStripPreview(g.span);
+        }
     });
+    window.addEventListener("pointerup", function (event) {
+        if (!g || !g.pointers.has(event.pointerId)) return;
+        // A pinch ends when the first finger lifts
+        if (g.pinch || event.pointerId === g.id) end(true, event);
+        else g.pointers.delete(event.pointerId);
+    });
+    window.addEventListener("blur", function () { if (g) end(false, null); });
+    window.addEventListener("pointercancel", function (event) {
+        // Called off: the chart and the strip return as they were
+        if (g && g.pointers.has(event.pointerId)) end(false, null);
+    });
+    body.addEventListener("wheel", function (event) {
+        if (!event.ctrlKey) return;
+        var v = event.target instanceof Element ? event.target.closest(".ui-chart-view") : null;
+        var d = dashUse.shown;
+        if (!v || !d || d.series.length <= USAGE_ZOOM_MIN || g) return;
+        event.preventDefault();
+        var n = d.series.length;
+        var w = dashUse.wheel || (dashUse.wheel = { v: dashUseSpan(d.series, dashUse.zoom), factor: 1, timer: null, span: null });
+        var unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+        w.factor *= Math.exp(event.deltaY * unit * 0.004);
+        var r = v.getBoundingClientRect();
+        var f = Math.max(0, Math.min(1, (event.clientX - r.left) / r.width));
+        var len = w.v.b - w.v.a + 1;
+        var L = Math.max(Math.min(USAGE_ZOOM_MIN, n), Math.min(n, len * w.factor));
+        var a = Math.max(0, Math.min(n - L, w.v.a + f * len - f * L));
+        w.span = dashUseClamp(a, L, n);
+        dashUse.gesture = "wheel";
+        preview(len, a - w.v.a, L, r.width);
+        clearTimeout(w.timer);
+        w.timer = setTimeout(function () {
+            dashUse.wheel = null;
+            dashUse.gesture = null;
+            clear();
+            if (w.span.a !== w.v.a || w.span.b !== w.v.b) dashUseZoomTo(w.span);
+            else if (dashUse.redrawAfter) { dashUse.redrawAfter = false; dashUseDraw(false); }
+        }, 220);
+    }, { passive: false });
 }
 
 DASH_PAGE_IMPL.usage = function () {
@@ -2886,7 +3328,7 @@ DASH_PAGE_IMPL.usage = function () {
     var before = dashUseKey();
     dashUseReadQuery();
     if (dashUseKey() !== before) {
-        dashUse.sel = -1;
+        dashUse.pick = "";
         dashUse.failed = "";
     }
     dashUseDraw(false);
@@ -2951,7 +3393,8 @@ function dashListsDbChanged() {
     dashUse.notFound = false;
     dashUse.failed = "";
     dashUse.at = 0;
-    dashUse.sel = -1;
+    dashUse.pick = "";
+    dashUse.zoom = null;
     dashUse.drawn = "";
     dashUse.shown = null;
     dashLimit.seq += 1;
