@@ -219,10 +219,16 @@ var UI_TEXT = {
     "attention.not-checked-yet": "Not checked yet",
     "attention.not-responding": "Not responding",
     "attention.nothing-needs-attention-right-now": "Nothing needs attention right now.",
+    // brief: button on the Needs attention row "Database is not responding"; opens Settings at its Database section where the connection is set; max 3 words
+    "attention.open-database-settings": "",
+    // brief: button on the Needs attention row "Redis is not responding"; opens Settings at its Redis section where the connection is set; max 3 words
+    "attention.open-redis-settings": "",
     "attention.open-tokens": "Open tokens",
     "attention.redis": "Redis",
     "attention.redis-is-not-responding": "Redis is not responding",
     "attention.replace-or-extend-them-before-they": "Replace or extend them before they stop working.",
+    // brief: tooltip and screen-reader name of one row of the sidebar status card (the icon rail shows only its coloured dot); names {service} (Database or Redis) and {state} (Connected, Not responding, Unknown, Not checked yet); max 5 words
+    "attention.service-state": "",
     "attention.retry": "Retry",
     "attention.sessions-and-the-token-cache-need": "Sessions and the token cache need it.",
     "attention.tokens-cannot-be-checked-or-changed": "Tokens cannot be checked or changed until it answers.",
@@ -250,6 +256,8 @@ var UI_TEXT = {
     "common.leave-unsaved": { "one": "You have {n} unsaved change. Leaving drops it.", "other": "You have {n} unsaved changes. Leaving drops them." },
     "common.leave-without-saving": "Leave without saving?",
     "common.page-title": "{page} · {app}",
+    // brief: browser tab title while a page shows one level inside it (one token's usage, a Settings section); names {sub} (that level), {page} and {app}, in that order of importance; max 8 words
+    "common.page-title-sub": "",
     "common.stay": "Stay",
     "common.what-you-changed-in-this-window": "What you changed in this window is not saved.",
 
@@ -265,6 +273,25 @@ var UI_TEXT = {
     "dates.mm-dd-yyyy": "MM/DD/YYYY",
     "dates.pm": "{time} PM",
     "dates.yyyy-mm-dd": "YYYY-MM-DD",
+
+    // brief: the help sheet of the Access Logs page, whole text, paragraphs separated by \n, about 80 to 150 words; facts: one entry per call to /validate with time (app time zone), token name, zone, level and result (allowed or denied) and the caller's IP address; newest first, new entries are offered at the top, older ones load further down; the list reads new entries every 30 seconds; search by token name or zone and filter by result; Usage opens this list for one token; a call refused by the rate limit gets 429 with Retry-After and is not in the list: the Rate limit card above counts those (since the server process started) and names the addresses refused most; entries are deleted after the access log retention set in Settings > General
+    "help.access": "",
+    // brief: the help sheet of the Account page, whole text, paragraphs separated by \n, about 80 to 150 words; facts: lists the passkeys of the signed-in admin with created, last used and backup state (synced or not backed up); a passkey signs in with fingerprint, face, screen lock or a security key in one step; the password and authenticator code always keep working; adding one first asks for the authenticator code (or another passkey), then the browser creates it; passkeys need HTTPS or localhost and a current browser; they work only at the passkey address (shown on Settings > Passkeys), which the first passkey sets to the address the page is open at; a passkey made for another address is marked not usable here; rename and delete from each row's menu; delete asks first and the passkey should also be removed from the device or password manager
+    "help.account": "",
+    // brief: the help sheet of the Activity Log page, whole text, paragraphs separated by \n, about 80 to 150 words; facts: a record of what admins and the system did: tokens created, changed, deleted or copied, zones and API keys created, changed or deleted, API keys copied, passkeys added, renamed, deleted or failed, sign in and sign out; each entry has time (app time zone), actor, action, entity type and name, details of what changed, and IP address; newest first, new entries are offered at the top, older ones load further down; reads new entries every 30 seconds; search by actor or entity name and filter by action; entries are deleted after the activity log retention set in Settings > General
+    "help.activity": "",
+    // brief: the help sheet of the API Keys page, whole text, paragraphs separated by \n, about 80 to 150 words; facts: an API key lets a program (an automation such as n8n) call the service's API, sent as Authorization: Bearer <key>; each key has scopes: validate (validate tokens), tokens:read (list tokens and zones), tokens:write (create, edit and delete tokens), zones:read (list zones), zones:write (create zones); a new key starts with validate, tokens:read and zones:read; the key is shown once after it is created with a Copy button; later Copy key asks for the authenticator code or a passkey; keys created before stored keys were encrypted cannot be copied; Edit changes the name and scopes; Delete asks first and stops the key at once; the ADMIN_API_KEY environment variable adds a master key with every scope, shown locked: change it only in the environment
+    "help.apikeys": "",
+    // brief: the help sheet of the Settings page, whole text, paragraphs separated by \n, about 120 to 200 words; facts: sections General (time zone for every date, how long the activity and access logs are kept, the Secure session cookie, date and time format), Rate limit (requests per address on /validate and /validate/grants, addresses exempt), Database, Redis and Passkeys (the address passkeys work at); every section has its own address; changes are not saved at once: a bar shows how many fields changed, with Discard and Save changes, and leaving asks first; some changes ask to confirm before they apply (a shorter retention deletes older entries, the Secure cookie, restarting the Redis connection, exempting your own address); a field set by an environment variable is locked and shows the variable; changing the database connection is a separate step with its own button and dialog, asks for the authenticator code, can copy the data to the new database and locks the settings while it runs
+    "help.settings": "",
+    // brief: the title of every page's help sheet and the name and tooltip of the help button beside the page title; names the help of {page} (the page name); max 4 words
+    "help.title": "",
+    // brief: the help sheet of the Tokens page, whole text, paragraphs separated by \n, about 120 to 200 words; facts: a token lets a service call the zones it is granted; a service sends it to /validate with a zone and a level (read, write or delete) and is allowed only when the token is enabled, not expired and holds that level in that zone; New token: name, optional description, optional existing token value (empty generates one), the levels per zone, optional expiry in the app time zone; the new token is shown once at the top with Copy; later Copy token asks for the authenticator code or a passkey, and tokens created before stored tokens were encrypted cannot be copied; each row's menu: Edit (can also replace the token value), Usage, Copy token, Enable or Disable (at once, no question), Delete (asks first, permanent); status Active, Disabled or Expired, and Expiring soon within 7 days; the counter beside Tokens and Needs attention count enabled tokens that expire within 7 days, red when one expires within 24 hours; search by name or description, filter by status, zone and level, each option shows how many tokens it lists; sort by name, status or last used; the list reads changes every 30 seconds
+    "help.tokens": "",
+    // brief: the help sheet of the Usage page, whole text, paragraphs separated by \n, about 80 to 150 words; facts: how often each token called /validate in the last 24 hours, 7 days or 30 days, how many calls were denied, in which zones and from how many addresses; the chart shows allowed and denied calls per time step, a step can be picked to read its numbers; opening a token shows its calls, denied share, zones called, addresses, last call and grants checks (/validate/grants, counted apart from calls), with a link to its Access Logs; counts come from the access log, so calls refused by the rate limit or with an invalid level are not counted, and periods older than the access log retention have no data; the page reads new figures by itself
+    "help.usage": "",
+    // brief: the help sheet of the Zones page, whole text, paragraphs separated by \n, about 60 to 120 words; facts: a zone is a named API area; tokens can be granted only the zones listed here, per zone with read, write or delete; without any zone, tokens use the areas the server allows; add a zone with a name and an optional description; names are unique regardless of upper and lower case, and older zones whose names differ only in case are flagged because a token for one passes /validate for the others; each row's menu: Edit (name and description) and Delete (asks first; tokens that still name the zone may need updating); search by name or description and sort by name or creation date
+    "help.zones": "",
 
     "db.a-different-copy-of-this-database": "A different copy of this database",
     "db.a-new-database-file": "A new database file",
@@ -578,6 +605,49 @@ var UI_TEXT = {
     "reveal.verified-the-browser-did-not-let": "Verified. The browser did not let the page copy {what} by itself. Press {button} to copy it.",
     "reveal.verify-copy": "Verify & copy",
 
+    // brief: first tab of the global search results panel, lists every kind of result together; max 1 word
+    "search.all": "",
+    // brief: the global search panel when one kind of result could not be read (tokens, zones or API keys) and nothing else is found; says the search failed and to try again in a moment; max 10 words
+    "search.failed": "",
+    // brief: line at the end of one result kind's tab when it lists only the first {shown} of {n} matches; says the list is cut and how many there are; max 7 words
+    "search.first-of": "",
+    // brief: key hint in the global search panel's footer next to the Esc key cap: what Esc does (closes the search); max 2 words
+    "search.hint-close": "",
+    // brief: key hint in the global search panel's footer next to the Tab key cap: Tab switches to the next kind of result; max 3 words
+    "search.hint-kind": "",
+    // brief: key hint in the global search panel's footer next to the up and down arrow key caps: they move through the results; max 2 words
+    "search.hint-move": "",
+    // brief: key hint in the global search panel's footer next to the Enter key cap: Enter opens the highlighted result; max 2 words
+    "search.hint-open": "",
+    // brief: key cap label in the global search footer for the Enter key, as printed on the keyboard; max 1 word
+    "search.key-enter": "",
+    // brief: key cap label in the global search footer for the Escape key, as printed on the keyboard; max 1 word
+    "search.key-esc": "",
+    // brief: key cap label in the global search footer for the Tab key, as printed on the keyboard; max 1 word
+    "search.key-tab": "",
+    // brief: the global search panel when nothing matches; names the typed text {q}; max 6 words
+    "search.nothing-found": "",
+    // brief: kind of result in the global search: the portal's pages (Tokens, Zones, Settings...); tab label and section heading; max 1 word
+    "search.pages": "",
+    // brief: screen-reader name of the list of results in the global search panel; max 2 words
+    "search.results": "",
+    // brief: screen-reader name of the column of result kinds (All, Pages, Settings, Tokens, Zones, API Keys) in the global search panel; max 3 words
+    "search.result-types": "",
+    // brief: tooltip and screen-reader name of the search button in the phone top bar; opens the search over the whole screen; max 1 word
+    "search.search": "",
+    // brief: screen-reader name of the global search field in the top bar; it finds pages, settings, tokens, zones and API keys; max 4 words
+    "search.search-everything": "",
+    // brief: placeholder of the global search field in the top bar, shown while it is empty; invites to search pages, settings, tokens, zones and API keys; max 4 words
+    "search.search-everything-placeholder": "",
+    // brief: the global search panel while tokens, zones or API keys are still being read and nothing is shown yet; max 3 words
+    "search.searching": "",
+    // brief: heading of one kind's group under All in the global search panel; names the kind {kind} and how many it found {n}; max 4 words
+    "search.section": "",
+    // brief: link at the end of a kind's group heading under All in the global search; opens that kind's tab with all its results; max 2 words
+    "search.see-all": "",
+    // brief: line under the results shown in the global search while tokens, zones or API keys are still being read; max 3 words
+    "search.still-searching": "",
+
     "settings.checked": "This server process enforces version {version}, checked {time}.",
     "settings.could-not-load-the-general-settings": "Could not load the general settings",
     "settings.could-not-load-the-redis-connection": "Could not load the Redis connection",
@@ -846,6 +916,8 @@ var UI_TEXT = {
     "shell.api-keys": "API Keys",
     "shell.auth-service": "Auth Service",
     "shell.close": "Close",
+    // brief: name and tooltip of the toggle beside the brand in the top bar while the sidebar is open; folds the sidebar into a rail of icons; max 2 words
+    "shell.collapse-menu": "",
     "shell.could-not-load-the-portal": "Could not load the portal",
     "shell.could-not-reach-the-server-check": "Could not reach the server. Check your connection and try again.",
     "shell.could-not-sign-out-try-again": "Could not sign out. Try again in a moment.",
@@ -853,6 +925,8 @@ var UI_TEXT = {
     "shell.database": "Database",
     "shell.date-format": "Date Format",
     "shell.example": "Example: {time}",
+    // brief: name and tooltip of the toggle beside the brand in the top bar while the sidebar is folded into icons; opens it with names again; max 2 words
+    "shell.expand-menu": "",
     "shell.failed": "Failed",
     "shell.light": "Light",
     "shell.loading-the-portal": "Loading the portal...",

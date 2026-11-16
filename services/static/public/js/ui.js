@@ -763,9 +763,11 @@ var uiOverlayEntry = false;
 var uiIgnorePop = false;
 var uiLayerQueued = false;
 
+// The phone search over the whole screen (SR-8) is a layer too: Escape and Back
+// close it, and what lies under it is inert
 function uiOpenLayers() {
     if (!uiHasDom()) return [];
-    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop"))
+    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop, .ui-gs.is-sheet"))
         .filter(function (el) { return el.getClientRects().length > 0; })
         .sort(function (a, b) {
             var za = parseInt(getComputedStyle(a).zIndex, 10) || 0;
@@ -817,7 +819,7 @@ function uiLayerFocusBack(opener, below) {
         return;
     }
     if (below) { uiLayerFocusIn(below); return; }
-    var heading = document.querySelector(".ui-page:not(.hidden) h1");
+    var heading = uiPageHeading();
     if (heading) {
         if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
         heading.focus({ preventScroll: true });
@@ -970,15 +972,60 @@ function uiPagePath(id) {
     return basePath() + uiPages[id].path;
 }
 
-function uiPageFromLocation() {
-    var p = window.location.pathname;
+// A part of a page's address after its own path (a Settings section, NL-3)
+var UI_SUB_ID = /^[a-z0-9_-]+$/;
+
+// The page of an address and the part after the page's path:
+// /admin/settings/redis is { id: "settings", sub: "redis" }. A part that is not
+// an id gives the page with no part, so the page opens its first section.
+function uiParsePath(pathname) {
+    var p = pathname;
     var b = basePath();
     if (b && p.indexOf(b) === 0) p = p.slice(b.length);
     if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
     for (var id in uiPages) {
-        if (Object.prototype.hasOwnProperty.call(uiPages, id) && uiPages[id].path === p) return id;
+        if (!Object.prototype.hasOwnProperty.call(uiPages, id)) continue;
+        var own = uiPages[id].path;
+        if (own === p) return { id: id, sub: "" };
+        if (p.indexOf(own + "/") === 0) {
+            var rest = p.slice(own.length + 1);
+            var sub = "";
+            try { sub = decodeURIComponent(rest); } catch (e) { sub = ""; }
+            return { id: id, sub: UI_SUB_ID.test(sub) ? sub : "" };
+        }
     }
-    return "";
+    return { id: "", sub: "" };
+}
+
+function uiPageFromLocation() {
+    return uiParsePath(window.location.pathname).id;
+}
+
+// The open page's part of the address ("" when it has none)
+function uiPageSub() {
+    var at = uiParsePath(window.location.pathname);
+    return at.id === uiPageCurrent ? at.sub : "";
+}
+
+// The address of a page, a part of it, a query and a fragment
+function uiPageUrl(id, sub, query, hash) {
+    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
+    return uiPagePath(id) + (sub && UI_SUB_ID.test(sub) ? "/" + encodeURIComponent(sub) : "") + (qs ? "?" + qs : "") +
+        (hash ? "#" + encodeURIComponent(hash) : "");
+}
+
+// The open page switched to another part (a Settings section): one Back step,
+// or a correction of the address without one (replace)
+function uiSetPageSub(sub, replace) {
+    var url = uiPageUrl(uiPageCurrent, sub, "", "");
+    if (url === window.location.pathname + window.location.search) return;
+    if (replace || uiOverlayEntry) {
+        history.replaceState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    } else {
+        uiSaveScroll();
+        uiHistIdx += 1;
+        history.pushState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    }
 }
 
 function uiPageQuery() {
@@ -993,8 +1040,19 @@ function uiSetPageQuery(params) {
     history.replaceState(history.state, "", url);
 }
 
+// The browser tab names the page, and a level opened in it (the Usage of one
+// token, a Settings section) when the page names one with uiSetSubTitle (NL-3)
+var uiTitleSub = "";
 function uiSetTitle(id) {
-    document.title = uiPages[id] ? t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) }) : t(uiAppTitle);
+    if (!uiPages[id]) { document.title = t(uiAppTitle); return; }
+    var withSub = uiTitleSub ? t("common.page-title-sub", { sub: uiTitleSub, page: t(uiPages[id].title), app: t(uiAppTitle) }) : "";
+    document.title = withSub || t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) });
+}
+function uiSetSubTitle(text) {
+    var next = text ? String(text) : "";
+    if (next === uiTitleSub) return;
+    uiTitleSub = next;
+    uiSetTitle(uiPageCurrent);
 }
 
 function uiMainScroller() {
@@ -1038,7 +1096,7 @@ function uiRouterStart(pages, show) {
     var known = !!id;
     if (!known) id = Object.keys(pages)[0];
     if (history.state && typeof history.state.idx === "number") uiHistIdx = history.state.idx;
-    var url = known ? window.location.pathname + window.location.search : uiPagePath(id);
+    var url = known ? window.location.pathname + window.location.search + window.location.hash : uiPagePath(id);
     history.replaceState({ page: id, idx: uiHistIdx }, "", url);
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     window.addEventListener("popstate", uiOnPopState);
@@ -1053,20 +1111,24 @@ function uiRouterStart(pages, show) {
 }
 
 function uiShowPage(id, info) {
+    if (id !== uiPageCurrent) uiTitleSub = "";
     uiPageCurrent = id;
     uiSetTitle(id);
     if (uiPageShow) uiPageShow(id, info || {});
 }
 
 // Open a page from the app: one Back step when the address changes; the current
-// page clicked again shows it again without a new entry (NL-4)
+// page clicked again shows it again without a new entry (NL-4).
+// opts.sub: a part of the page (a Settings section); opts.hash: a field in it.
+// Resolves true when the page opened, false when the user stayed (unsaved changes).
 function uiGo(id, query, opts) {
     var o = opts || {};
-    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
-    var url = uiPagePath(id) + (qs ? "?" + qs : "");
+    var url = uiPageUrl(id, o.sub, query, "");
+    var hash = o.hash ? "#" + encodeURIComponent(o.hash) : "";
     var here = window.location.pathname + window.location.search;
     var proceed = function () {
         if (id === uiPageCurrent && url === here && !o.force) {
+            if (hash !== window.location.hash) history.replaceState(history.state, "", url + hash);
             uiShowPage(id, { again: true });
             return true;
         }
@@ -1074,10 +1136,10 @@ function uiGo(id, query, opts) {
         if (uiOverlayEntry || o.replace) {
             // Moving from inside a layer takes over its history entry
             uiOverlayEntry = false;
-            history.replaceState({ page: id, idx: uiHistIdx }, "", url);
+            history.replaceState({ page: id, idx: uiHistIdx }, "", url + hash);
         } else {
             uiHistIdx += 1;
-            history.pushState({ page: id, idx: uiHistIdx }, "", url);
+            history.pushState({ page: id, idx: uiHistIdx }, "", url + hash);
         }
         uiScrolls[uiHistIdx] = 0;
         var m = uiMainScroller();
@@ -1178,6 +1240,64 @@ function uiMutationMark() {
 }
 function uiStaleSince(mark) {
     return mark !== uiMutationGen;
+}
+
+// ===========================================================================
+// Shared list data (WP3): tokens, zones and API keys. The pages and the global
+// search read the same rows. Every create, rename, edit or delete marks its kind
+// stale (uiDataStale), so the next reader reads it again; a database change
+// (uiDataReset) marks every kind stale and starts a new data generation, so an
+// answer that started before it is ignored when it arrives.
+// ===========================================================================
+
+var UI_DATA_KINDS = ["tokens", "zones", "apikeys"];
+var uiDataState = {};
+var uiDataGen = 0;
+
+function uiDataEntry(kind) {
+    if (!Object.prototype.hasOwnProperty.call(uiDataState, kind)) uiDataState[kind] = { version: 0, readAt: 0 };
+    return uiDataState[kind];
+}
+
+// kind: "tokens" | "zones" | "apikeys"; called after every create, rename, edit or delete
+function uiDataStale(kind) {
+    var e = uiDataEntry(kind);
+    e.version += 1;
+    e.readAt = 0;
+}
+
+// Never read, marked stale, or read more than maxAge ms ago
+function uiDataNeedsRead(kind, maxAge, now) {
+    var e = uiDataEntry(kind);
+    return !e.readAt || (now === undefined ? Date.now() : now) - e.readAt >= maxAge;
+}
+
+// Taken when a read starts; uiDataRead(kind, mark) when its answer was applied
+function uiDataMark(kind) {
+    return { kind: kind, version: uiDataEntry(kind).version, gen: uiDataGen };
+}
+
+// The answer of a read that started at mark is in: the kind counts as fresh only
+// when nothing marked it stale and the database did not change meanwhile
+function uiDataRead(kind, mark, now) {
+    var e = uiDataEntry(kind);
+    if (!mark || mark.version !== e.version || mark.gen !== uiDataGen) return false;
+    e.readAt = now === undefined ? Date.now() : now;
+    return true;
+}
+
+// True when the database changed after mark was taken
+function uiDataOld(mark) {
+    return !mark || mark.gen !== uiDataGen;
+}
+
+// The database may have changed (the ui:db-changed event): every kind is stale
+// and answers to reads that started before are dropped
+function uiDataReset() {
+    uiDataGen += 1;
+    UI_DATA_KINDS.forEach(uiDataStale);
+    uiMutated();
+    return uiDataGen;
 }
 
 // The page just loaded its data: count its next refresh from now
@@ -1928,6 +2048,160 @@ function uiDbNoteHtml(n) {
 }
 
 // ===========================================================================
+// Shell (WP3): the top bar on wide screens (NL-6), the sidebar folded into the
+// rail (NL-7), the information dialog with its reading gauge (DS-5), showing
+// where an opened search result landed (SR-6) and the window pan the phone
+// keyboard leaves (MO-1)
+// ===========================================================================
+
+var uiTopbarMoves = [];
+var uiTopbarPage = "";
+
+function uiTopbarMove(el, target) {
+    if (!el || !target || !el.parentNode) return;
+    var mark = document.createComment("topbar");
+    el.parentNode.replaceChild(mark, el);
+    target.appendChild(el);
+    uiTopbarMoves.push([el, mark]);
+}
+
+function uiTopbarRestore() {
+    uiTopbarMoves.reverse().forEach(function (pair) {
+        if (pair[1].parentNode) pair[1].parentNode.replaceChild(pair[0], pair[1]);
+    });
+    uiTopbarMoves = [];
+}
+
+// Wide screens: the open page's title (with its help button) and its own action
+// buttons move into the top bar while the page is open. They are the page's own
+// elements, moved and put back when the page is left or the width crosses 760px,
+// so every id, button and listener stays as it was. Phones keep the page head.
+function uiPlaceTopbar(id) {
+    if (id !== undefined) uiTopbarPage = id;
+    if (!uiHasDom() || !document.getElementById("ui-topbar")) return;
+    uiTopbarRestore();
+    var on = !uiIsPhone();
+    document.documentElement.classList.toggle("ui-has-topbar", on);
+    if (!on || !uiTopbarPage) return;
+    var page = document.querySelector('.ui-page[data-page="' + uiTopbarPage + '"]');
+    var head = page ? page.querySelector(".ui-page-head") : null;
+    var title = head ? head.querySelector(".ui-h1") : null;
+    if (!title) return;
+    uiTopbarMove(title, document.getElementById("ui-topbar-title"));
+    Array.prototype.slice.call(head.children).forEach(function (el) {
+        if (el.classList.contains("ui-page-actions")) uiTopbarMove(el, document.getElementById("ui-topbar-actions"));
+    });
+}
+
+// The open page's title, wherever it is now (in its page or in the top bar)
+function uiPageHeading() {
+    var bar = document.querySelector("#ui-topbar-title .ui-h1");
+    if (bar && bar.getClientRects().length) return bar;
+    return document.querySelector(".ui-page:not(.hidden) h1");
+}
+
+// NL-7: the toggle by the brand folds the sidebar into the rail, remembered in
+// this browser (js/head.js applies it before the first paint)
+function uiNavCollapsed() {
+    return uiHasDom() && document.documentElement.classList.contains("ui-nav-collapsed");
+}
+function uiNavToggleSync() {
+    var b = uiHasDom() ? document.getElementById("ui-nav-toggle") : null;
+    if (!b) return;
+    var folded = uiNavCollapsed();
+    var label = folded ? t("shell.expand-menu") : t("shell.collapse-menu");
+    b.setAttribute("aria-label", label);
+    b.setAttribute("title", label);
+    b.setAttribute("aria-expanded", String(!folded));
+}
+function uiNavToggle() {
+    var folded = document.documentElement.classList.toggle("ui-nav-collapsed");
+    try { window.localStorage.setItem("uiNavCollapsed", folded ? "1" : "0"); } catch (e) { /* storage blocked: for this visit only */ }
+    uiNavToggleSync();
+}
+
+// DS-5: the top of an information dialog (the grip on a phone and the head)
+// fills from the start side as the text is read; a text that does not scroll
+// shows no gauge
+function uiReadProgress(d) {
+    // The head sits right above the body that scrolls
+    var head = d.body.previousElementSibling;
+    var scroller = d.body;
+    if (!head || !scroller) return;
+    var bar = document.createElement("span");
+    bar.className = "ui-read-bar";
+    bar.setAttribute("aria-hidden", "true");
+    bar.innerHTML = "<i></i>";
+    d.dialog.appendChild(bar);
+    var update = function () {
+        var room = scroller.scrollHeight - scroller.clientHeight;
+        bar.classList.toggle("hidden", room <= 1);
+        bar.style.height = (head.offsetTop + head.offsetHeight) + "px";
+        bar.firstElementChild.style.width = (room > 1 ? Math.min(100, scroller.scrollTop / room * 100) : 0) + "%";
+    };
+    scroller.addEventListener("scroll", update, { passive: true });
+    update();
+    requestAnimationFrame(update);
+}
+
+// A text to read (help): the shared dialog, closed by its X, Escape, Back, a
+// click outside or a pull down; every opening starts at the top (DS-6).
+// paragraphs: plain texts, one paragraph each.
+function uiInfoDialog(o) {
+    var d = null;
+    var close = function () { if (d) d.backdrop.remove(); };
+    d = uiDialog({
+        title: o.title, size: "md", close: close, backdropClose: close, bodyClass: "ui-help",
+        body: (o.paragraphs || []).map(function (p) { return "<p>" + esc(p) + "</p>"; }).join(""),
+    });
+    d.body.scrollTop = 0;
+    uiReadProgress(d);
+    return d;
+}
+
+// SR-6: wait for what a page draws after it opens (every 100ms, up to 8 seconds)
+function uiWaitFor(find, timeout) {
+    var limit = timeout === undefined ? 8000 : timeout;
+    return new Promise(function (resolve) {
+        var started = Date.now();
+        var look = function () {
+            var found = null;
+            try { found = find(); } catch (e) { found = null; }
+            if (found || Date.now() - started > limit) resolve(found || null);
+            else setTimeout(look, 100);
+        };
+        look();
+    });
+}
+
+// SR-6: bring what was opened into view inside the page's own scroll area (not
+// with scrollIntoView, which can pan the phone window, MO-1) and ring it for a moment
+function uiReveal(el) {
+    if (!el || !el.isConnected) return;
+    var main = uiMainScroller();
+    if (main && main.contains(el)) {
+        var box = main.getBoundingClientRect();
+        var r = el.getBoundingClientRect();
+        var target = main.scrollTop + (r.top - box.top) - Math.max(0, (main.clientHeight - r.height) / 2);
+        main.scrollTop = Math.max(0, target);
+    }
+    el.classList.add("ui-gs-target");
+    el.classList.remove("ui-gs-flash");
+    void el.offsetWidth;
+    el.classList.add("ui-gs-flash");
+    setTimeout(function () { el.classList.remove("ui-gs-flash"); }, 2000);
+}
+
+// MO-1: the app frame never scrolls the window. A phone keyboard can pan the
+// window and leave it panned; once no field is being edited, it goes back.
+function uiResetWindowPan() {
+    var el = document.activeElement;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+    var se = document.scrollingElement;
+    if (window.scrollX || window.scrollY || (se && se.scrollTop)) window.scrollTo(0, 0);
+}
+
+// ===========================================================================
 // Page-wide listeners, installed once by the page
 // ===========================================================================
 
@@ -1950,6 +2224,10 @@ function uiInstallGlobalListeners() {
     window.addEventListener("scroll", uiMenuOnScroll, true);
     window.addEventListener("scroll", uiPickerOnScroll, true);
     window.addEventListener("resize", function () { uiMenuDismiss(false); if (uiPickerState.open) uiPickerPlace(uiPickerState.open); });
+    // MO-1: the window pan the phone keyboard leaves is reset
+    window.addEventListener("scroll", uiResetWindowPan, { passive: true });
+    document.addEventListener("focusout", function () { setTimeout(uiResetWindowPan, 300); });
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", function () { setTimeout(uiResetWindowPan, 100); });
     // Click to copy anywhere; inside a clickable row it does not open the row
     document.addEventListener("click", function (event) {
         var b = event.target instanceof Element ? event.target.closest("[data-copy]") : null;

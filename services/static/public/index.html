@@ -14,27 +14,48 @@
     <div id="boot"><div class="ui-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p data-t="shell.loading-the-portal"></p></div></div>
 
     <div class="ui-shell hidden" id="ui-shell">
-      <!-- Sidebar (wide screens) and icon rail (761 to 1100px) -->
-      <aside class="ui-side" data-t-attr="aria-label:shell.sidebar">
-        <div class="ui-brand">
-          <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
-          <span class="ui-brand-name" data-t="shell.auth-service"></span>
-          <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:shell.needs-attention-not-checked-yet;title:shell.needs-attention">
-            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
-            <span class="ui-bell-badge hidden" aria-hidden="true"></span>
+      <!-- Wide screens: one bar across the top with the brand and the menu toggle, the open
+           page's title and actions (moved up from the page while it is open), the search and
+           the Needs attention bell (NL-6, NL-7, NL-19, SR-1) -->
+      <header class="ui-topbar" id="ui-topbar">
+        <div class="ui-topbar-brand">
+          <div class="ui-brand">
+            <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
+            <span class="ui-brand-name" data-t="shell.auth-service"></span>
+          </div>
+          <button type="button" class="ui-icon-btn ui-nav-toggle" id="ui-nav-toggle" aria-expanded="true" aria-controls="ui-side">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
           </button>
         </div>
-
-        <div class="ui-status-card" role="group" data-t-attr="aria-label:shell.service-status">
-          <div class="ui-status-row" data-status="db" data-inventory="shell.status.db"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.database"></span><b data-t="shell.not-checked-yet"></b></div>
-          <div class="ui-status-row" data-status="redis" data-inventory="shell.status.redis"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.redis"></span><b data-t="shell.not-checked-yet"></b></div>
+        <div class="ui-topbar-title" id="ui-topbar-title"></div>
+        <div class="ui-gs" id="ui-gs" role="search">
+          <div class="ui-gs-box">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+            <input type="search" id="ui-gs-input" autocomplete="off" spellcheck="false" enterkeyhint="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ui-gs-panel" data-t-attr="aria-label:search.search-everything;placeholder:search.search-everything-placeholder" />
+            <kbd class="ui-gs-key" aria-hidden="true"></kbd>
+            <button type="button" class="ui-gs-cancel" id="ui-gs-cancel" data-cancel data-t="common.cancel"></button>
+          </div>
+          <div class="ui-gs-panel" id="ui-gs-panel"></div>
         </div>
+        <div class="ui-topbar-actions" id="ui-topbar-actions"></div>
+        <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:shell.needs-attention-not-checked-yet;title:shell.needs-attention">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+          <span class="ui-bell-badge hidden" aria-hidden="true"></span>
+        </button>
+      </header>
+
+      <!-- Sidebar (wide screens) and icon rail (761 to 1100px, or folded) -->
+      <aside class="ui-side" id="ui-side" data-t-attr="aria-label:shell.sidebar">
+        <button type="button" class="ui-status-card" data-status-card aria-haspopup="dialog">
+          <span class="ui-status-row" role="img" data-status="db" data-inventory="shell.status.db"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.database"></span><b data-t="shell.not-checked-yet"></b></span>
+          <span class="ui-status-row" role="img" data-status="redis" data-inventory="shell.status.redis"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.redis"></span><b data-t="shell.not-checked-yet"></b></span>
+        </button>
 
         <nav class="ui-nav" data-t-attr="aria-label:shell.main">
           <p class="ui-nav-group" data-t="shell.manage"></p>
           <a class="ui-nav-item" data-page-link="tokens" data-inventory="shell.nav.tokens" href="/admin/tokens">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-            <span class="ui-nav-label" data-t="shell.tokens"></span><span class="ui-fly" aria-hidden="true" data-t="shell.tokens"></span>
+            <span class="ui-nav-label" data-t="shell.tokens"></span><span class="ui-nav-count hidden" data-nav-count="tokens"></span><span class="ui-fly" aria-hidden="true" data-t="shell.tokens"></span>
           </a>
           <a class="ui-nav-item" data-page-link="zones" data-inventory="shell.nav.zones" href="/admin/zones">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
@@ -89,6 +110,9 @@
       <header class="ui-mtop">
         <a class="ui-mtop-home" data-go="tokens" data-query="" href="/admin/tokens" data-t-attr="aria-label:shell.tokens"><img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" /></a>
         <div class="ui-mtop-title"><small data-t="shell.auth-service"></small><b id="mtop-page" data-t="shell.tokens"></b></div>
+        <button type="button" class="ui-icon-btn ui-gs-phone" id="ui-gs-phone" data-t-attr="aria-label:search.search;title:search.search">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+        </button>
         <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:shell.needs-attention-not-checked-yet;title:shell.needs-attention">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
           <span class="ui-bell-badge hidden" aria-hidden="true"></span>
@@ -98,10 +122,10 @@
       <main class="ui-main" id="ui-main">
 
         <!-- ─── Tokens ─── -->
-        <section class="ui-page hidden" data-page="tokens" aria-labelledby="h-tokens">
+        <section class="ui-page hidden" data-page="tokens" aria-labelledby="h-tokens-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-tokens" data-t="tokens.tokens"></h1>
+              <h1 class="ui-h1" id="h-tokens"><span id="h-tokens-t" data-t="tokens.tokens"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="tokens" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t="tokens.who-can-call-your-services-in"></p>
             </div>
             <div class="ui-page-actions">
@@ -159,10 +183,10 @@
         </section>
 
         <!-- ─── Zones ─── -->
-        <section class="ui-page hidden" data-page="zones" aria-labelledby="h-zones">
+        <section class="ui-page hidden" data-page="zones" aria-labelledby="h-zones-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-zones" data-t="zones.zones"></h1>
+              <h1 class="ui-h1" id="h-zones"><span id="h-zones-t" data-t="zones.zones"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="zones" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t="zones.zones-define-allowed-api-areas-for"></p>
             </div>
           </div>
@@ -209,10 +233,10 @@
         </section>
 
         <!-- ─── API Keys ─── -->
-        <section class="ui-page hidden" data-page="apikeys" aria-labelledby="h-apikeys">
+        <section class="ui-page hidden" data-page="apikeys" aria-labelledby="h-apikeys-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-apikeys" data-t="apikeys.api-keys-2"></h1>
+              <h1 class="ui-h1" id="h-apikeys"><span id="h-apikeys-t" data-t="apikeys.api-keys-2"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="apikeys" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t="apikeys.api-keys-allow-programmatic-access-to"></p>
             </div>
             <div class="ui-page-actions">
@@ -234,10 +258,10 @@
         </section>
 
         <!-- ─── Activity Log ─── -->
-        <section class="ui-page hidden" data-page="activity" aria-labelledby="h-activity">
+        <section class="ui-page hidden" data-page="activity" aria-labelledby="h-activity-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-activity" data-t="activity.activity-log"></h1>
+              <h1 class="ui-h1" id="h-activity"><span id="h-activity-t" data-t="activity.activity-log"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="activity" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t="activity.history-of-all-administrative-actions-performed"></p>
             </div>
           </div>
@@ -290,10 +314,10 @@
         </section>
 
         <!-- ─── Access Logs ─── -->
-        <section class="ui-page hidden" data-page="access" aria-labelledby="h-access">
+        <section class="ui-page hidden" data-page="access" aria-labelledby="h-access-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-access" data-t="access.access-logs"></h1>
+              <h1 class="ui-h1" id="h-access"><span id="h-access-t" data-t="access.access-logs"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="access" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t-tpl="access.history-of-all-token-validation-requests"><code data-t-slot="code" data-t="access.validate"></code></p>
             </div>
           </div>
@@ -332,10 +356,10 @@
         </section>
 
         <!-- ─── Usage ─── -->
-        <section class="ui-page hidden" data-page="usage" aria-labelledby="h-usage">
+        <section class="ui-page hidden" data-page="usage" aria-labelledby="h-usage-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-usage" data-t="usage.usage"></h1>
+              <h1 class="ui-h1" id="h-usage"><span id="h-usage-t" data-t="usage.usage"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="usage" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t-tpl="usage.how-often-each-token-calls-in"><code data-t-slot="code" data-t="usage.validate"></code></p>
             </div>
             <div class="ui-page-actions">
@@ -351,10 +375,10 @@
         </section>
 
         <!-- ─── Settings ─── -->
-        <section class="ui-page hidden" data-page="settings" aria-labelledby="h-settings">
+        <section class="ui-page hidden" data-page="settings" aria-labelledby="h-settings-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-settings" data-t="settings.settings"></h1>
+              <h1 class="ui-h1" id="h-settings"><span id="h-settings-t" data-t="settings.settings"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="settings" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t-tpl="settings.the-time-zone-how-long-the"><code data-t-slot="code" data-t="settings.validate"></code><code data-t-slot="code2" data-t="settings.validate-grants"></code></p>
             </div>
           </div>
@@ -384,10 +408,10 @@
         </section>
 
         <!-- ─── Account ─── -->
-        <section class="ui-page hidden" data-page="account" aria-labelledby="h-account">
+        <section class="ui-page hidden" data-page="account" aria-labelledby="h-account-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-account" data-t="account.account"></h1>
+              <h1 class="ui-h1" id="h-account"><span id="h-account-t" data-t="account.account"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="account" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
               <p data-t="account.how-you-sign-in-a-passkey"></p>
             </div>
             <div class="ui-page-actions">
@@ -416,7 +440,7 @@
       <nav class="ui-tabbar" data-t-attr="aria-label:shell.main-tabs">
         <a class="ui-tab" data-page-link="tokens" href="/admin/tokens">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-          <span data-t="shell.tokens"></span>
+          <span data-t="shell.tokens"></span><span class="ui-tab-pip hidden" data-nav-count="tokens" aria-hidden="true"></span>
         </a>
         <a class="ui-tab" data-page-link="zones" href="/admin/zones">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
@@ -426,7 +450,7 @@
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
           <span data-t="shell.api-keys"></span>
         </a>
-        <button type="button" class="ui-tab" id="tab-more" aria-haspopup="dialog">
+        <button type="button" class="ui-tab" id="tab-more" aria-haspopup="dialog" aria-expanded="false">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
           <span data-t="shell.more"></span>
         </button>

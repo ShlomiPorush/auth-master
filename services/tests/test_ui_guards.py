@@ -194,6 +194,7 @@ BUILDERS = {
     ("js/ui.js", "uiLayerFocusIn"): "the layer manager moves the focus into the top dialog",
     ("js/ui.js", "uiLayerApplyInert"): "the layer manager keeps toasts and menus usable above the inert page",
     ("js/ui.js", "uiAreaHeld"): "a refresh waits while a menu is open",
+    ("js/dashboard.js", "dashSearchSheet"): "the phone search over the whole screen (SR-8, a listed DS-24 exception), a layer of uiOpenLayers",
 }
 
 # CSS selectors that may float (position: fixed, or z-index of 10 or more)
@@ -205,6 +206,10 @@ FLOATING_CSS = {
     ".ui-popover": "picker panels (uiPicker)",
     ".ui-tabbar": "the phone tab bar (NL-9), part of the page",
     ".ui-fly": "the page name beside a rail icon (NL-8)",
+    "html.ui-nav-collapsed .ui-fly": "the page name beside a rail icon when the wide sidebar is folded (NL-7, NL-8)",
+    ".ui-gs-panel": "the global search results under the top bar search field (SR-3)",
+    ".ui-gs.is-sheet": "the phone search over the whole screen (SR-8, a listed DS-24 exception)",
+    "html:has(.ui-dialog-backdrop) .ui-gs.is-sheet": "a question asked from the phone search comes over it (SR-7, SR-8)",
 }
 
 HTML_LAYER_PATTERNS = {
@@ -236,7 +241,9 @@ def popup_problems(sources: dict[str, str]) -> list[str]:
                 cls = "." + m.group(1)
                 if any(cls == sel or sel.endswith(cls) for sel in FLOATING_CSS):
                     owner = js_owner(funcs, m.start())
-                    if (name, owner) not in BUILDERS:
+                    if (name, owner) in BUILDERS:
+                        used.add((name, owner))
+                    else:
                         problems.append(f"{name}:{owner}: adds the floating class {cls}")
             # Every uiDialog call names its size, and a close function unless it is a question
             for m in re.finditer(r"\buiDialog\(\s*\{", masked):
@@ -1315,6 +1322,7 @@ def test_date_guard_allows_number_formatting():
 # ---------------------------------------------------------------------------
 
 SPACING_PROPS = re.compile(r"^(?:padding|margin|gap|row-gap|column-gap)(?:-[a-z-]+)?$")
+RADIUS_PROPS = re.compile(r"^border(?:-[a-z-]+)?-radius$")
 
 
 def token_problems(css: str) -> list[str]:
@@ -1339,6 +1347,10 @@ def token_problems(css: str) -> list[str]:
                     if tok not in ("0", "auto", "-1") and not re.fullmatch(r"-?0(?:px)?", tok):
                         problems.append(f"{selector}: spacing literal in {prop}: {value}")
                         break
+            if RADIUS_PROPS.match(prop):
+                rest = re.sub(r"var\([^()]*\)", " ", value)
+                if any(tok not in ("0", "inherit") for tok in rest.replace("/", " ").split()):
+                    problems.append(f"{selector}: radius literal in {prop}: {value}")
     return problems
 
 
@@ -1351,6 +1363,8 @@ def test_ui_css_uses_only_tokens():
     ".x { font-size: 13px; }",
     ".x { padding: 7px 10px; }",
     ".x { margin-inline-start: calc(var(--ui-sp-2) + 3px); }",
+    ".x { border-radius: 14px; }",
+    ".x { border-start-end-radius: var(--ui-radius-xs) 3px; }",
 ])
 def test_token_guard_catches(extra):
     assert token_problems(SOURCES["css/ui.css"] + "\n" + extra)
