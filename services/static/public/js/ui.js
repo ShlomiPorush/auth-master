@@ -1126,6 +1126,64 @@ function uiStaleSince(mark) {
     return mark !== uiMutationGen;
 }
 
+// ===========================================================================
+// Shared list data (WP3): tokens, zones and API keys. The pages and the global
+// search read the same rows. Every create, rename, edit or delete marks its kind
+// stale (uiDataStale), so the next reader reads it again; a database change
+// (uiDataReset) marks every kind stale and starts a new data generation, so an
+// answer that started before it is ignored when it arrives.
+// ===========================================================================
+
+var UI_DATA_KINDS = ["tokens", "zones", "apikeys"];
+var uiDataState = {};
+var uiDataGen = 0;
+
+function uiDataEntry(kind) {
+    if (!Object.prototype.hasOwnProperty.call(uiDataState, kind)) uiDataState[kind] = { version: 0, readAt: 0 };
+    return uiDataState[kind];
+}
+
+// kind: "tokens" | "zones" | "apikeys"; called after every create, rename, edit or delete
+function uiDataStale(kind) {
+    var e = uiDataEntry(kind);
+    e.version += 1;
+    e.readAt = 0;
+}
+
+// Never read, marked stale, or read more than maxAge ms ago
+function uiDataNeedsRead(kind, maxAge, now) {
+    var e = uiDataEntry(kind);
+    return !e.readAt || (now === undefined ? Date.now() : now) - e.readAt >= maxAge;
+}
+
+// Taken when a read starts; uiDataRead(kind, mark) when its answer was applied
+function uiDataMark(kind) {
+    return { kind: kind, version: uiDataEntry(kind).version, gen: uiDataGen };
+}
+
+// The answer of a read that started at mark is in: the kind counts as fresh only
+// when nothing marked it stale and the database did not change meanwhile
+function uiDataRead(kind, mark, now) {
+    var e = uiDataEntry(kind);
+    if (!mark || mark.version !== e.version || mark.gen !== uiDataGen) return false;
+    e.readAt = now === undefined ? Date.now() : now;
+    return true;
+}
+
+// True when the database changed after mark was taken
+function uiDataOld(mark) {
+    return !mark || mark.gen !== uiDataGen;
+}
+
+// The database may have changed (the ui:db-changed event): every kind is stale
+// and answers to reads that started before are dropped
+function uiDataReset() {
+    uiDataGen += 1;
+    UI_DATA_KINDS.forEach(uiDataStale);
+    uiMutated();
+    return uiDataGen;
+}
+
 // The page just loaded its data: count its next refresh from now
 function uiRefreshLoaded(id) {
     if (uiPageRefreshers[id]) uiPageRefreshers[id].last = Date.now();

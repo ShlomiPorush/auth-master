@@ -899,6 +899,7 @@ function dashTokToggle(tok, button) {
         button.setAttribute("aria-busy", "true");
     }
     uiMutated();
+    uiDataStale("tokens");
     api("PATCH", "/admin/api/tokens/" + encodeURIComponent(tok.id), { isActive: next }).then(function (res) {
         if (button) {
             button.disabled = false;
@@ -910,6 +911,7 @@ function dashTokToggle(tok, button) {
         }
         showToast(next ? t("tokens.is-enabled", { name: tok.name }) : t("tokens.is-disabled", { name: tok.name }), "success");
         uiMutated();
+        uiDataStale("tokens");
         dashTokLoad(true);
     });
 }
@@ -918,6 +920,7 @@ function dashTokDelete(tok) {
     uiConfirm({ title: t("tokens.delete-token"), message: t("tokens.delete-this-token-permanently"), confirmText: t("tokens.delete"), danger: true }).then(function (ok) {
         if (!ok) return;
         uiMutated();
+        uiDataStale("tokens");
         api("DELETE", "/admin/api/tokens/" + encodeURIComponent(tok.id)).then(function (res) {
             if (!res.ok) {
                 if (res.status !== 401) showToast(t("tokens.delete-failed"), "error");
@@ -925,6 +928,7 @@ function dashTokDelete(tok) {
             }
             showToast(t("tokens.deleted", { name: tok.name }), "success");
             uiMutated();
+            uiDataStale("tokens");
             dashTokLoad(true);
         });
     });
@@ -998,7 +1002,7 @@ function dashPermGrants(root) {
 }
 
 // Create (t null) or edit a token. Every field of the old dialogs is kept.
-function dashTokenDialog(type) {
+function dashTokenDialog(tok) {
     var editing = !!tok;
     var d = null;
     var close = function () { if (d) d.backdrop.remove(); };
@@ -1108,6 +1112,7 @@ function dashTokenDialog(type) {
         var submitBtn = d.foot.querySelector("[type=submit]");
         submitBtn.disabled = true;
         uiMutated();
+        uiDataStale("tokens");
         var req = editing
             ? api("PATCH", "/admin/api/tokens/" + encodeURIComponent(tok.id), payload)
             : api("POST", "/admin/api/tokens", payload);
@@ -1120,6 +1125,7 @@ function dashTokenDialog(type) {
             }
             close();
             uiMutated();
+            uiDataStale("tokens");
             if (editing) {
                 showToast(t("tokens.token-updated"), "success");
             } else {
@@ -1379,6 +1385,7 @@ function dashZonesBind() {
         var btn = form.querySelector("[type=submit]");
         btn.disabled = true;
         uiMutated();
+        uiDataStale("zones");
         api("POST", "/admin/api/zones", { name: name, description: form.querySelector('[name="description"]').value.trim() }).then(function (res) {
             btn.disabled = false;
             if (!res.ok) {
@@ -1391,6 +1398,7 @@ function dashZonesBind() {
             form.reset();
             showToast(t("zones.added", { name: name }), "success");
             uiMutated();
+            uiDataStale("zones");
             dashZonesLoadPage(false);
         });
     });
@@ -1424,6 +1432,8 @@ function dashZoneDelete(z) {
     uiConfirm({ title: t("zones.delete-zone"), message: t("zones.delete-this-zone-tokens-referencing-it"), confirmText: t("zones.delete"), danger: true }).then(function (ok) {
         if (!ok) return;
         uiMutated();
+        uiDataStale("zones");
+        uiDataStale("tokens");
         api("DELETE", "/admin/api/zones/" + encodeURIComponent(z.id)).then(function (res) {
             if (!res.ok) {
                 if (res.status !== 401) showToast(apiError(res, t("zones.delete-failed")), "error");
@@ -1431,6 +1441,8 @@ function dashZoneDelete(z) {
             }
             showToast(t("zones.deleted", { name: z.name }), "success");
             uiMutated();
+            uiDataStale("zones");
+            uiDataStale("tokens");
             dashZonesLoadPage(false);
             dashTokenStore.at = 0;
         });
@@ -1464,6 +1476,8 @@ function dashZoneDialog(z) {
         var btn = d.foot.querySelector("[type=submit]");
         btn.disabled = true;
         uiMutated();
+        uiDataStale("zones");
+        uiDataStale("tokens");
         api("PATCH", "/admin/api/zones/" + encodeURIComponent(z.id), { name: name, description: descEl.value.trim() }).then(function (res) {
             btn.disabled = false;
             if (!res.ok) {
@@ -1472,6 +1486,8 @@ function dashZoneDialog(z) {
             }
             close();
             uiMutated();
+            uiDataStale("zones");
+            uiDataStale("tokens");
             showToast(t("zones.zone-updated"), "success");
             dashZonesLoadPage(false);
             dashTokenStore.at = 0;
@@ -1590,10 +1606,12 @@ function dashKeyDelete(k) {
     uiConfirm({ title: t("apikeys.delete-api-key"), message: t("apikeys.delete-api-key-2", { name: k.name }), confirmText: t("apikeys.delete"), danger: true }).then(function (ok) {
         if (!ok) return;
         uiMutated();
+        uiDataStale("apikeys");
         api("DELETE", "/admin/api/api-keys/" + encodeURIComponent(k.id)).then(function (res) {
             if (res.ok) {
                 showToast(t("apikeys.api-key-deleted"), "success");
                 uiMutated();
+                uiDataStale("apikeys");
                 dashKeysLoad(false);
             } else if (res.status !== 401) {
                 showToast(t("apikeys.failed-to-delete-key"), "error");
@@ -1637,6 +1655,7 @@ function dashKeyDialog(k) {
         var btn = d.foot.querySelector("[type=submit]");
         btn.disabled = true;
         uiMutated();
+        uiDataStale("apikeys");
         var req = editing
             ? api("PATCH", "/admin/api/api-keys/" + encodeURIComponent(k.id), { name: name, scopes: scopes })
             : api("POST", "/admin/api/api-keys", { name: name, scopes: scopes });
@@ -1648,6 +1667,7 @@ function dashKeyDialog(k) {
             }
             close();
             uiMutated();
+            uiDataStale("apikeys");
             if (editing) showToast(t("apikeys.api-key-updated"), "success");
             else dashKeyCreated((res.data && res.data.key) || "");
             dashKeysLoad(false);
