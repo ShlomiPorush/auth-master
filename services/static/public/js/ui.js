@@ -373,11 +373,19 @@ function uiTextHeld(el) {
 }
 
 // ===========================================================================
-// Toast (FB-2): one at a time, 4 seconds, waits while hovered or focused
+// Toast (FB-2): one at a time, 4 seconds, waits while hovered or focused, and
+// may carry one action
 // ===========================================================================
 
-function showToast(message, type) {
+// opts: { action: { label, ariaLabel, run }, duration }
+//   action: one button; a click runs run() and closes the toast. When run()
+//     returns a promise the toast stays until it settles (further clicks do
+//     nothing), so the message that follows takes its place.
+//   duration: milliseconds before it fades (4000); Infinity keeps it until closed
+function showToast(message, type, opts) {
     if (!uiHasDom()) return null;
+    var o = opts || {};
+    var action = o.action && o.action.label && typeof o.action.run === "function" ? o.action : null;
     var icons = { success: "✓", error: "✗", warning: "!", info: "i" };
     var kind = icons[type] ? type : "info";
     var old = document.getElementById("ui-toast");
@@ -388,19 +396,64 @@ function showToast(message, type) {
     toast.id = "ui-toast";
     toast.className = "ui-toast ui-toast-" + kind;
     toast.setAttribute("role", kind === "error" ? "alert" : "status");
-    toast.innerHTML = '<span class="ui-toast-icon" aria-hidden="true">' + icons[kind] + "</span>" +
-        "<p>" + esc(message) + "</p>" +
-        '<button type="button" class="ui-icon-btn" data-toast-x title="' + esc(t("common.close")) + '" aria-label="' + esc(t("common.close")) + '">' + UI_CLOSE_ICON + "</button>";
-    toast.querySelector("[data-toast-x]").addEventListener("click", function () { toast.remove(); });
+    var icon = document.createElement("span");
+    icon.className = "ui-toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = icons[kind];
+    var text = document.createElement("p");
+    text.textContent = String(message === null || message === undefined ? "" : message);
+    toast.appendChild(icon);
+    toast.appendChild(text);
+    var actionBtn = null;
+    if (action) {
+        actionBtn = document.createElement("button");
+        actionBtn.type = "button";
+        actionBtn.className = "ui-btn ui-btn-sm ui-toast-action";
+        actionBtn.textContent = action.label;
+        if (action.ariaLabel) actionBtn.setAttribute("aria-label", action.ariaLabel);
+        toast.appendChild(actionBtn);
+    }
+    var x = document.createElement("button");
+    x.type = "button";
+    x.className = "ui-icon-btn";
+    x.setAttribute("data-toast-x", "");
+    x.setAttribute("title", t("common.close"));
+    x.setAttribute("aria-label", t("common.close"));
+    x.innerHTML = UI_CLOSE_ICON;
+    toast.appendChild(x);
+    x.addEventListener("click", function () { toast.remove(); });
     document.body.appendChild(toast);
-    if (focusWasInIt) toast.querySelector("button").focus({ preventScroll: true });
+    // The keyboard was in the toast this one replaces: it moves to this one
+    if (focusWasInIt) (actionBtn || x).focus({ preventScroll: true });
 
-    var left = 4000;
+    var duration = typeof o.duration === "number" && o.duration > 0 ? o.duration : 4000;
+    var left = duration;
     var started = Date.now();
     var timer = null;
     var fading = false;
     var removing = null;
-    var hold = function () { return toast.matches(":hover") || toast.contains(document.activeElement); };
+    var busy = false;
+    var hold = function () { return busy || toast.matches(":hover") || toast.contains(document.activeElement); };
+    if (actionBtn) {
+        actionBtn.addEventListener("click", function () {
+            if (busy) return;
+            var result;
+            try { result = action.run(); } catch (e) { result = null; }
+            if (!result || typeof result.then !== "function") {
+                toast.remove();
+                return;
+            }
+            // Running: the toast stays and keeps the keyboard; its button says it is busy
+            busy = true;
+            pause();
+            actionBtn.setAttribute("aria-disabled", "true");
+            var done = function () {
+                busy = false;
+                if (toast.isConnected) toast.remove();
+            };
+            result.then(done, done);
+        });
+    }
     var fade = function () {
         if (!toast.isConnected) return;
         fading = true;
@@ -410,7 +463,8 @@ function showToast(message, type) {
     var run = function () {
         clearTimeout(timer);
         started = Date.now();
-        timer = setTimeout(fade, left);
+        // Infinity: it stays until closed
+        timer = isFinite(left) ? setTimeout(fade, left) : null;
     };
     var pause = function () {
         if (fading) {

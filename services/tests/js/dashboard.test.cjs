@@ -305,11 +305,6 @@ test("R8: with storage blocked, a Light or Dark choice holds for this visit", ()
     assert.equal(ctx.uiThemeGet(), "system");
 });
 
-test("R11: the toast takes no action, busy state or duration", () => {
-    const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../../static/public/js/ui.js"), "utf8");
-    assert.ok(!/opts\.(action|duration)|onAction|ui-toast-action/.test(src));
-});
-
 test("a 413 says the item is too large; other answers keep the server's reason", () => {
     const ctx = load();
     const big = "This is too large to save. Shorten the text or remove some items, then try again.";

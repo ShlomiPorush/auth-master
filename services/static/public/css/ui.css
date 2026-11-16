@@ -666,6 +666,10 @@ body.ui-app { overflow: hidden; }
 .ui-toast-warning { border-inline-start-color: var(--ui-warn); }
 .ui-toast-warning .ui-toast-icon { color: var(--ui-warn); }
 
+/* WP4, feedback: the toast's one action (FB-2); it stays while the action runs */
+.ui-toast .ui-toast-action { flex: none; align-self: center; margin-block: calc(-1 * var(--ui-sp-2)); }
+.ui-toast .ui-toast-action[aria-disabled="true"] { cursor: progress; }
+
 /* ---------- Rail: 761 to 1100px (NL-7, NL-8) ---------- */
 
 @media (max-width: 1100px) and (min-width: 761px) {
