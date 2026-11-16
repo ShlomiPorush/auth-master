@@ -2802,8 +2802,7 @@ function dashLogSettings(fields, det) {
     var items = fields.filter(function (f) { return JSON.stringify(from[f[0]]) !== JSON.stringify(to[f[0]]); }).map(function (f) {
         return esc(t("logs.setting-change", { name: t(f[1]), from: dashLogSettingValue(from[f[0]], f[2]), to: dashLogSettingValue(to[f[0]], f[2]) }));
     });
-    var version = det.version ? "<b>" + esc(t("logs.version", { version: uiNum(det.version) })) + "</b> " : "";
-    return version + (items.length ? items.join(", ") : '<span class="ui-muted">' + esc(t("logs.no-modifications")) + '</span>');
+    return (items.length ? items.join(", ") : '<span class="ui-muted">' + esc(t("logs.no-modifications")) + '</span>');
 }
 
 var DASH_STEP_UP_METHODS = { passkey: "logs.passkey", code: "logs.authenticator-code" };
@@ -4225,7 +4224,7 @@ function dashSetSavedLine(s, none) {
         : none;
 }
 
-// The version this server process uses, for panels that reload every 15 seconds
+// Alerts when this server process failed to reload or still uses an older version
 function dashSetAppliedAlerts(s, alerts) {
     var a = s.applied || {};
     if (a.lastReloadError) {
@@ -4234,8 +4233,6 @@ function dashSetAppliedAlerts(s, alerts) {
     } else if (a.version < s.version) {
         alerts.push(dashSetAlert(" is-warn", t("settings.this-server-process-still-uses-version", { version: uiNum(a.version) }), esc(t("settings.it-reloads-the-settings-every-15"))));
     }
-    return a.lastReload ? tHtml("settings.checked", { version: uiNum(a.version || 0), time: tRaw(uiTime(a.lastReload)) })
-        : esc(t("settings.this-server-process-enforces-version", { version: uiNum(a.version || 0) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -4592,9 +4589,9 @@ function dashGenAlerts(s, alerts) {
                     : esc(t("settings.general.the-cleanup-runs-again-every-minute", { reason: p.reason || t("settings.general.this-server-process-skipped-the-cleanup") }))));
         }
     });
-    var applied = dashSetAppliedAlerts(s, alerts);
+    dashSetAppliedAlerts(s, alerts);
     var saved = dashSetSavedLine(s, esc(t("settings.general.nothing-saved-here-yet-the-values")));
-    alerts.push(dashSetAlert("", t("settings.general.saved-settings"), tHtml("settings.general.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
+    alerts.push(dashSetAlert("", t("settings.general.saved-settings"), tHtml("settings.general.changes-apply-at-once-in-this", { saved: tRaw(saved) })));
 }
 
 function dashGenConflictText(c) {
@@ -4847,10 +4844,10 @@ function dashDispAlerts(s, alerts) {
     if (s.storedInvalid) {
         alerts.push(dashSetAlert(" is-warn", t("settings.display.stored-invalid-title"), esc(t("settings.display.stored-invalid"))));
     }
-    var applied = dashSetAppliedAlerts(s, alerts);
+    dashSetAppliedAlerts(s, alerts);
     var saved = s.version ? tHtml("settings.version", { version: uiNum(s.version), user: tRaw(uiUserText(s.savedBy || "?")), time: tRaw(uiTime(s.savedAt)) })
         : esc(t("settings.general.nothing-saved-here-yet-the-values"));
-    alerts.push(dashSetAlert("", t("settings.display.saved-formats"), tHtml("settings.display.changes-apply", { saved: tRaw(saved), applied: tRaw(applied) })));
+    alerts.push(dashSetAlert("", t("settings.display.saved-formats"), tHtml("settings.display.changes-apply", { saved: tRaw(saved) })));
 }
 
 function dashDispConflictText(c) {
@@ -5026,9 +5023,9 @@ function dashSettingsDraw() {
 }
 
 function dashSettingsAlerts(s, alerts) {
-    var applied = dashSetAppliedAlerts(s, alerts);
+    dashSetAppliedAlerts(s, alerts);
     var saved = dashSetSavedLine(s, esc(t("settings.ratelimit.nothing-saved-here-yet-the-values")));
-    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), tHtml("settings.ratelimit.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
+    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), tHtml("settings.ratelimit.changes-apply-at-once-in-this", { saved: tRaw(saved) })));
 }
 
 function dashSettingsConflictText(c) {

@@ -506,7 +506,6 @@ var UI_TEXT = {
     "logs.updated": "Updated:",
     "logs.updated-description": "Description: \"{description}\"",
     "logs.updated-name": "Name: \"{name}\"",
-    "logs.version": "Update:",
     "logs.where": "Where:",
 
     "passkey.android": "Android",
@@ -621,7 +620,6 @@ var UI_TEXT = {
     "settings.check.fields-problem": { "one": "{n} field needs a valid value: {label}.", "other": "{n} fields need valid values, starting with {label}." },
     "settings.check.too-many-lines": "Use at most {max} lines.",
     "settings.check.whole-number-from": "Enter a whole number from {min} to {max}.",
-    "settings.checked": "Settings are active.",
     "settings.confirm.delete-and-save": "Delete and save",
     "settings.confirm.save-and-restart-later": "Save; restart later",
     "settings.could-not-load-the-general-settings": "Could not load general settings. Try again.",
@@ -861,7 +859,6 @@ var UI_TEXT = {
     "settings.the-time-zone-how-long-the": "How should the service run, connect, and limit calls to {code} and {code2}?",
     "settings.they-are-checked-again-every-30": "{reason} Retrying every 30 seconds.",
     "settings.this-server-process-could-not-reload": "Could not apply saved settings",
-    "settings.this-server-process-enforces-version": "Settings are active.",
     "settings.this-server-process-still-uses-version": "Previous settings are still active",
     "settings.validate": "/validate",
     "settings.validate-grants": "/validate/grants",
