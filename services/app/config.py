@@ -104,7 +104,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     port: int = Field(default=8080, validation_alias="PORT")
-    database_url: str = Field(default="sqlite:///data/auth.db", validation_alias="DATABASE_URL")
+    # The database connection.  When set, it overrides the connection saved by setup or on
+    # the Settings page (data/database.json), which the page then shows locked.  Empty or
+    # unset: app.db_config resolves the database (see README.md, "Database").
+    database_url: str | None = Field(default=None, validation_alias="DATABASE_URL")
     # The Redis connection: REDIS_URL overrides the URL saved on the Settings page, and
     # REDIS_DEFAULT_URL (set by the bundled compose file) is used when neither is set.
     # Empty means not set.  app.redis_settings resolves and checks the effective URL.
@@ -172,8 +175,9 @@ class Settings(BaseSettings):
                 "REDIS_PASSWORD uses a publicly known value. Set it to a new random value."
             )
 
-        if not self.database_url.startswith("sqlite"):
-            if problem := _postgres_url_problem(self.database_url):
+        database_url = self.env_value("database_url")
+        if database_url is not None and not database_url.startswith("sqlite"):
+            if problem := _postgres_url_problem(database_url):
                 problems.append(problem)
             # asyncpg reads PGPASSWORD from the process environment when the URL has no password.
             pg_password = os.environ.get("PGPASSWORD")

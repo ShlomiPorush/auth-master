@@ -5,7 +5,9 @@ from html import escape as html_escape
 from pathlib import Path
 from typing import Any
 
-import redis.asyncio as redis
+# Not used here since app.db_runtime builds the clients; tests replace redis.from_url
+# through this name (main_mod.redis), which is the same module object.
+import redis.asyncio as redis  # noqa: F401
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -15,13 +17,12 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from app.config import get_settings
 from app.datetime_utils import is_expired
-from app.db import create_database, open_settings_database
-from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage, admin_passkeys
-from app.schema import ensure_database_schema
-from app import general_settings, login_limit, rate_limit_settings, redis_settings, usage_rollup
-from app.logger import init_purged_before, purge_old_logs
+from app.db import create_database
+from app.db_gate import DatabaseGateMiddleware
+from app.routers import admin_api_keys, admin_auth, admin_bootstrap, admin_tokens, admin_zones, health, tokens, validate, admin_logs, admin_rate_limit, admin_settings, admin_usage, admin_passkeys, admin_database
+from app import db_runtime, general_settings, rate_limit_settings, redis_settings, usage_rollup
+from app.logger import purge_old_logs
 from app.security_headers import AntiFramingMiddleware
-from app.zones import copy_allowed_areas_once
 from app import request_log
 
 request_log.install()
@@ -105,68 +106,36 @@ async def settings_reload_loop(settings_db, db) -> None:
         await redis_settings.retry_sync(settings_db, db)
 
 
-async def _stop(task: asyncio.Task) -> None:
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+def start_background(app: FastAPI, db, settings_db) -> list[asyncio.Task]:
+    """The background work on the attached database (app.db_runtime starts and stops it
+    at start-up, at shutdown and around every database switch)."""
+    cleanup_task = asyncio.create_task(expired_tokens_cleanup_loop(db, settings_db))
+    app.state.cleanup_task = cleanup_task
+    # One cleanup now. Its first summary of the access log can take minutes; it is
+    # stopped (between batches) before the database closes or is switched.
+    first_cleanup_task = asyncio.create_task(cleanup_expired_tokens(db, settings_db))
+    settings_reload_task = asyncio.create_task(settings_reload_loop(settings_db, db))
+    return [settings_reload_task, first_cleanup_task, cleanup_task]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    s = get_settings()
-    app.state.db = await create_database(s.database_url)
+    runtime = db_runtime.Runtime(start_background=start_background)
     try:
-        await ensure_database_schema(app.state.db)
-        settings_db, close_settings_db = await open_settings_database(app.state.db)
-        try:
-            app.state.settings_db = settings_db
-            # Before serving: invalid stored settings stop the start (the limits are unknown).
-            await rate_limit_settings.load(settings_db)
-            # Copies the values the environment sets, before the first purge.
-            await general_settings.load(settings_db, app.state.db)
-            # One-time steps, each recorded in app_state.
-            await copy_allowed_areas_once(app.state.db)
-            await init_purged_before(settings_db, general_settings.current().access_log_retention_days)
-            # The Redis client is built once, from the URL in effect now.
-            redis_settings.reset_state()
-            connection = redis_settings.resolve(await redis_settings.read_current(settings_db))
-            app.state.redis = redis.from_url(connection.url, decode_responses=True)
-            app.state.login_redis = redis.from_url(
-                connection.url, decode_responses=True, **login_limit.COUNTER_CLIENT_OPTIONS
-            )
-            redis_settings.state.connection = connection
-            await redis_settings.sync_from_environment(settings_db, app.state.db)
-
-            # Start cleanup background task
-            cleanup_task = asyncio.create_task(
-                expired_tokens_cleanup_loop(app.state.db, settings_db)
-            )
-            app.state.cleanup_task = cleanup_task
-            # Trigger one cleanup immediately in the background. Its first summary of the
-            # access log can take minutes, so it is stopped before the database closes.
-            first_cleanup_task = asyncio.create_task(cleanup_expired_tokens(app.state.db, settings_db))
-            settings_reload_task = asyncio.create_task(settings_reload_loop(settings_db, app.state.db))
-
-            yield
-
-            await _stop(settings_reload_task)
-            await _stop(first_cleanup_task)
-            await _stop(cleanup_task)
-            await app.state.login_redis.aclose()
-            await app.state.redis.aclose()
-        finally:
-            if close_settings_db:
-                await settings_db.close()
+        # create_database is looked up here at call time (tests replace it).
+        await runtime.start(app, lambda url: create_database(url))
+        yield
     finally:
-        await app.state.db.close()
+        await runtime.stop(app)
 
 
 app = FastAPI(title="Auth token service", root_path=ROOT_PATH, lifespan=lifespan, docs_url=None, redoc_url=None)
 # Middleware added later wraps the earlier ones. The body limit is added first,
 # so the anti-framing headers also cover the 413 replies it sends on its own.
 app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES)
+# Holds requests while the database is switched, and limits what works in setup and
+# recovery mode (app.db_gate).
+app.add_middleware(DatabaseGateMiddleware)
 # Keep this the last add_middleware call: the last one added is the outermost, so
 # responses that other middleware sends on its own carry the headers too.
 app.add_middleware(AntiFramingMiddleware)
@@ -230,6 +199,7 @@ app.include_router(admin_rate_limit.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_usage.router)
 app.include_router(admin_passkeys.router)
+app.include_router(admin_database.router)
 
 
 def _safe_static_file(rel: str) -> Path:
@@ -354,6 +324,11 @@ async def static_images(filename: str):
 @app.get("/setup")
 async def page_setup():
     return _serve_html("setup.html")
+
+
+@app.get("/recovery")
+async def page_recovery():
+    return _serve_html("recovery.html")
 
 
 @app.get("/setup-mfa")

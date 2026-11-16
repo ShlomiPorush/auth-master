@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Initial Setup · Auth Service</title>
-    <meta name="description" content="Create the first administrator account for Auth Service" />
+    <meta name="description" content="Choose the database and create the first administrator account for Auth Service" />
     <style>.hidden{display:none}</style>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
@@ -16,14 +16,33 @@
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
             <h1 class="ui-h1">Initial Setup</h1>
-            <p>Create the first administrator account</p>
+            <p id="setup-sub">Create the first administrator account</p>
           </div>
         </div>
         <div class="ui-banner ui-banner-warn"><div>This page is only available when no admin account exists yet.</div></div>
-        <form id="f" class="ui-form" novalidate>
+        <div class="ui-loading" role="status" id="setup-loading"><span class="ui-spin" aria-hidden="true"></span><p>Loading...</p></div>
+        <form id="db-form" class="ui-form hidden" novalidate autocomplete="off">
+          <div class="ui-field">
+            <span class="ui-label" id="db-kind-label">Where the service keeps its data</span>
+            <div class="ui-seg" role="group" aria-labelledby="db-kind-label">
+              <button type="button" data-db-kind="sqlite" aria-pressed="true" data-inventory="setup.database.sqlite">SQLite file</button>
+              <button type="button" data-db-kind="postgres" aria-pressed="false" data-inventory="setup.database.postgres">PostgreSQL server</button>
+            </div>
+          </div>
+          <p class="ui-hint" id="db-sqlite-note">A file in the service's data directory (data/auth.db). Nothing else to set up; back up the data directory.</p>
+          <div class="hidden" id="db-pg-fields"></div>
+          <div id="db-result" aria-live="polite"></div>
+          <label class="ui-check-label hidden" id="db-adopt-row"><input type="checkbox" class="ui-check" id="db-adopt" /> <span>Adopt this database and keep its data</span></label>
+          <p class="ui-error hidden" id="db-err" role="alert"></p>
+          <div class="ui-form-row">
+            <button type="button" class="ui-btn" id="db-check" data-inventory="setup.database.check">Check connection</button>
+            <button type="submit" class="ui-btn ui-btn-primary" id="db-continue">Continue</button>
+          </div>
+        </form>
+        <form id="f" class="ui-form hidden" novalidate>
           <div class="ui-field">
             <label class="ui-label" for="username">Username</label>
-            <input class="ui-input" id="username" name="username" required minlength="2" autofocus autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="admin" data-inventory="setup.username" />
+            <input class="ui-input" id="username" name="username" required minlength="2" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="admin" data-inventory="setup.username" />
           </div>
           <div class="ui-field">
             <label class="ui-label" for="password">Password (min 8 characters)</label>

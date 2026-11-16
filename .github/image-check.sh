@@ -93,8 +93,10 @@ docker run -d --label "$RUN" --name "$RUN-redis" --network "$RUN" --network-alia
     -e REDIS_PASSWORD redis:7-alpine sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD"' >/dev/null
 
 marker=$(openssl rand -hex 8)
-put_marker='python -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"CREATE TABLE ci_marker (v TEXT)\"); c.execute(\"INSERT INTO ci_marker VALUES (?)\", (sys.argv[2],)); c.commit()"'
-get_marker='python -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT v FROM ci_marker\").fetchone()[0])"'
+# A row in the service's own key-value table: an extra table would make the database
+# look like another application's, which the service refuses to adopt.
+put_marker='python -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"INSERT INTO app_state (key, value) VALUES (?, ?)\", (\"ci_marker\", sys.argv[2])); c.commit()"'
+get_marker='python -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM app_state WHERE key = ?\", (\"ci_marker\",)).fetchone()[0])"'
 
 echo "A. upgrade data that $OLD_IMAGE wrote as root"
 a=$(volume a)

@@ -28,9 +28,9 @@ See [docker-compose.yml](docker-compose.yml)
 
    The script writes `SESSION_SECRET`, `APP_ENCRYPTION_KEY` and `REDIS_PASSWORD`, makes the file readable by you only, and never replaces an existing `.env`. Keep the file private and out of version control. Optional settings are listed in [.env.example](.env.example).
 2. Start the containers: `docker compose up -d`
-3. Open `http://localhost:8080` — you'll be redirected to the setup wizard
+3. Open `http://localhost:8080`. You are redirected to the setup wizard. Choose where the service keeps its data: the SQLite file (nothing else to set up) or a PostgreSQL server. See [Database connection](#database-connection)
 4. Create your admin account and set up MFA (TOTP). The service starts with no accounts, and the first person who completes this setup becomes the admin, so complete it before the service can be reached from other machines
-5. Log in and start managing tokens and zones. The time zone, log retention, the Secure cookie, the rate limit and the Redis connection are on the Settings page.
+5. Log in and start managing tokens and zones. The time zone, log retention, the Secure cookie, the rate limit, and the database and Redis connections are on the Settings page.
 
 The service refuses to start while a required secret is missing, empty, or has a value that was ever published in this repository, and its log names each setting and how to fix it.
 
@@ -44,7 +44,7 @@ page field.
 
 | Variable | Default | Description | Why it is not on the Settings page |
 |---|---|---|---|
-| `DATABASE_URL` | `sqlite:///data/auth.db` | Database connection string. Use `postgres://…` for PostgreSQL. A password in it must not be a published value, and a URL with more than one `@` before the host is refused (write `@` as `%40`) | The settings are stored in this database |
+| `DATABASE_URL` | _(empty)_ | Optional. Overrides the database chosen in setup or on the Settings page (`data/database.json`), which the page then shows locked. `sqlite:///path` or `postgres://…`. A password in it must not be a published value, and a URL with more than one `@` before the host is refused (write `@` as `%40`). See [Database connection](#database-connection) | The settings are stored in the database |
 | `PGPASSWORD` | _(empty)_ | Optional PostgreSQL password when `DATABASE_URL` has none; checked like the others | Part of the database connection |
 | `SESSION_SECRET` | _(required)_ | Together with `APP_ENCRYPTION_KEY`, derives the key that encrypts stored MFA secrets, revealable token and API key values, and the saved Redis URL. Alone, it also protects admin sessions and unfinished MFA setups in Redis. Use a different value for every installation | The key that encrypts stored secrets |
 | `APP_ENCRYPTION_KEY` | _(required)_ | See `SESSION_SECRET` | The key that encrypts stored secrets |
@@ -239,6 +239,98 @@ A saved Redis URL (table `redis_settings`) that cannot be read does not need a m
 repair: set `REDIS_URL` in the environment, which overrides it, start the service, and
 save the URL again on the Settings page.
 
+### Database connection
+
+The service keeps its data in SQLite or PostgreSQL. First-time setup asks which one:
+
+- **SQLite file:** the file `data/auth.db` in the service's data directory. Nothing else to
+  set up. Back up the data directory.
+- **PostgreSQL server:** the host, port, database, user, password and TLS mode of an existing
+  database. **Check connection** shows what the database holds before anything changes: an
+  empty database gets the service's tables; a database that already holds an installation of
+  this service is used as it is, and you sign in with its admin account; a database with other
+  tables is refused.
+
+The choice is saved in `data/database.json`, readable by its owner only. The password in it is
+encrypted with the key that `SESSION_SECRET` and `APP_ENCRYPTION_KEY` derive. Keep the data
+directory: without `data/database.json`, the service does not know its database and starts
+first-time setup again.
+
+`DATABASE_URL` in the environment overrides the saved choice, as in earlier versions. The
+Settings page then shows the connection locked.
+
+#### Change the connection
+
+The **Database** panel of the Settings page shows the connection, never the password. For a
+PostgreSQL database chosen in setup, it takes a new host, port, database name, user, password
+or TLS mode for the same installation, for example after you changed the database user's
+password. Leave the password empty to keep the saved one; for another host or port, enter it
+again, so the saved password never goes to a server it was not saved for.
+
+After a password change on the server, connections the service already has keep working, but
+new ones fail until you save the new password here. To change it without that gap, create a new
+user (a member of the role that owns the tables), switch to it here, then remove the old one.
+
+**Check connection** connects with the new values and changes nothing. Before saving, the
+server also checks that:
+
+- the server is the primary, not a standby, and the user's sessions can write;
+- the user may read, insert, update and delete in every table of the service, is a member of
+  the role that owns them, and may create tables in the schema;
+- row-level security does not apply to the user;
+- the new connection reaches the same live database: the service writes a random value through
+  each connection and reads it back through the other.
+
+Saving needs your authenticator code or a passkey. The service then switches to the new
+connection while it runs: requests wait a few seconds and then continue, and nothing is lost.
+If a check fails, or requests do not finish in time, nothing is saved and the old connection
+stays in use. If the service cannot start on the new connection after it was saved, it enters
+recovery mode and the page opens the recovery page. Each change is an
+entry in the Activity Log, without the password.
+
+**Use a restored backup:** a database that holds the same installation but is a different
+copy, such as a backup restored to another server or database, is shown as "A different copy
+of this database". To use it, tick the confirmation: changes made after the copy was taken are
+lost. You can also restore into the database the service already uses, for example with
+`pg_restore --clean`; then nothing changes in the service.
+
+**TLS:** `prefer` (the default, as in `DATABASE_URL`) uses TLS when the server offers it, and
+connects without it otherwise; it does not check the server's identity. `disable` never uses
+TLS. `require` always uses TLS without checking the server's certificate. `verify-full`
+checks the server's certificate and host name against the system's trusted certificates, or a
+CA certificate (PEM) that you paste.
+
+#### Recovery mode
+
+When the saved database cannot be used at start, for example because the password changed,
+the server is unreachable, or the database was emptied or replaced, the service does not start
+first-time setup. It starts in recovery mode: `/health` answers 503, the API answers 503 with
+a code, and the dashboard opens the recovery page, `/recovery`.
+
+The recovery page needs the master key, `ADMIN_API_KEY`. Without one, set it in `.env`, run
+`docker compose up -d`, and open the page again. After 10 wrong keys from one address in 15
+minutes, the page waits before it accepts another try. The page shows why the database cannot
+be used and the saved connection without its password, and takes a corrected connection, or
+the SQLite file after you restored it. The service cannot tell there whether the database is
+the latest copy, so saving asks you to confirm it.
+
+When the server could not be reached, the service tries the saved connection again every 10
+seconds and leaves recovery mode by itself once the database answers.
+
+#### Older installations and backups
+
+A database that holds this service's tables without the `installation` table comes from a
+version before this one, or from a backup of one. Setup and the recovery page offer to adopt
+it after you confirm: the service adds the tables and columns of this version and keeps the
+data.
+
+#### Limits
+
+- Changing the connection needs a single service process for the data directory, as in the
+  bundled `docker-compose.yml`. With several processes, the page says so and changes nothing.
+- An image older than this version ignores `data/database.json`. See
+  [Roll back to 2.2.x](#roll-back-to-22x).
+
 ### Redis connection
 
 Admin sessions and the first-admin setup live in Redis. The **Redis connection** panel of the
@@ -354,7 +446,34 @@ environment the containers were created with, so a changed or removed variable h
 |---|---|
 | `ADMIN_API_KEY` | Update every integration that uses the master key. Nothing stored is affected. To remove the master key, remove the variable and run `docker compose up -d`. |
 | `REDIS_PASSWORD` of the bundled Redis | Once a Redis URL is saved on the Settings page, it wins over `REDIS_DEFAULT_URL`, so changing `REDIS_PASSWORD` alone breaks the connection. Set the new `REDIS_PASSWORD` and also `REDIS_URL=redis://:<new password>@redis:6379` in `.env`, then run `docker compose up -d`, which creates Redis and the service again with the new values. The service saves the new URL on the Settings page once its check passes. When the page no longer says that the environment value is not saved yet, you can remove `REDIS_URL`. Admins sign in again. |
-| `SESSION_SECRET`, `APP_ENCRYPTION_KEY` | Stored MFA secrets and revealable token and API key values become unreadable: admins can no longer pass MFA, and existing tokens and API keys can no longer be revealed. Token validation and API key authentication keep working. There is no conversion tool, so change these only on a new installation. The saved Redis URL also becomes unreadable, and the service refuses to start until `REDIS_URL` is set in the environment. Set it, start the service, and save the URL on the Settings page again. `REDIS_URL` does not make the MFA secrets readable again. Changing `SESSION_SECRET` also signs every admin out and cancels an unfinished first-admin setup. |
+| `SESSION_SECRET`, `APP_ENCRYPTION_KEY` | Stored MFA secrets and revealable token and API key values become unreadable: admins can no longer pass MFA, and existing tokens and API keys can no longer be revealed. Token validation and API key authentication keep working. There is no conversion tool, so change these only on a new installation. The saved Redis URL also becomes unreadable, and the service refuses to start until `REDIS_URL` is set in the environment. Set it, start the service, and save the URL on the Settings page again. `REDIS_URL` does not make the MFA secrets readable again. The PostgreSQL password saved in `data/database.json` becomes unreadable too: the service starts in recovery mode, where you enter it again. Changing `SESSION_SECRET` also signs every admin out and cancels an unfinished first-admin setup. |
+
+### Upgrade from 2.2.x
+
+- **SQLite:** on the first start, the service keeps using `data/auth.db`. It marks the
+  database with an installation id and writes `data/database.json`. Nothing else changes.
+- **`DATABASE_URL`:** keeps working as before, and the Settings page shows the connection
+  locked. To manage the connection on the Settings page instead, remove `DATABASE_URL` and run
+  `docker compose up -d` while the service cannot be reached from other machines: setup opens,
+  and when you enter the same database it finds the existing installation and leads to sign-in.
+- **Data directory:** the service must be able to write to `data/`, also when `DATABASE_URL` is
+  set: each process registers itself there, so that changing the database can make sure no
+  other process still uses the old one. A process that cannot write there does not start. The
+  bundled `docker-compose.yml` mounts `./data`, and at start the container gives it to the
+  service user, uid 10001. See "Data directory and file ownership" below.
+- **`/health`:** while setup waits for a database or the service is in recovery mode, the answer
+  has a `status` field. See [API.md](API.md#health-check).
+
+### Roll back to 2.2.x
+
+Version 2.2.x ignores `data/database.json`. It uses `DATABASE_URL`, or else `data/auth.db`.
+
+- With the SQLite file chosen in setup, 2.2.x keeps using `data/auth.db`.
+- With PostgreSQL chosen in setup, set `DATABASE_URL` in `.env` to that database before you
+  start 2.2.x. Otherwise 2.2.x creates a new, empty `data/auth.db` and shows first-time setup to
+  whoever opens it first.
+
+The `installation` table stays in the database; 2.2.x does not use it.
 
 ### Data directory and file ownership
 

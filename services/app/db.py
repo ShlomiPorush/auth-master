@@ -166,6 +166,10 @@ class PgDatabase(Database):
     async def close(self) -> None:
         await self._pool.close()
 
+    def terminate(self) -> None:
+        """Close every connection now (asyncpg Pool.terminate), when close() takes too long."""
+        self._pool.terminate()
+
     @asynccontextmanager
     async def transaction(self):
         """Provide a connection-level transaction context.

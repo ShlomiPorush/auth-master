@@ -49,6 +49,18 @@ GET /health
 
 The status is `200` when the database and Redis both respond. When either does not respond within 2 seconds, the status is `503` and the matching field is `false`.
 
+Before first-time setup has chosen a database, the status is `200` (while Redis responds) and the
+body is `{"ok": false, "status": "setup_required", "db": false, "redis": true}`. When the saved
+database cannot be used, the service is in recovery mode: the status is `503` and the body is
+`{"ok": false, "status": "database_unavailable", "code": "<reason>", "db": false, "redis": true}`.
+Every other endpoint then answers `503` with `{"detail": "...", "code": "<reason>"}`, where
+`code` is `setup_required` or the recovery reason, such as `auth_failed` or `unreachable`. See
+"Database connection" in README.md.
+
+While an admin switches the database connection, requests wait up to 10 seconds and then
+continue. A request that would wait longer gets `503` with `"code": "database_switching"` and a
+`Retry-After` header.
+
 ---
 
 ### Validate Token

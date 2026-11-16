@@ -3864,18 +3864,360 @@ function dashPkSetBind() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Database connection: shown here; a PostgreSQL connection saved by setup can be
+// changed (host, user, password, TLS) for the same installation. The server checks
+// the new connection, switches while requests wait a moment, and keeps the old one
+// on any failure. Saving needs an authenticator code or a passkey.
+// ---------------------------------------------------------------------------
+
+var dashDb = { snap: null, failed: "", refreshFailed: "", check: null, checkedFor: "", error: "", confirm: false, askConfirm: "",
+    busy: "", dirty: false, seq: 0, bound: false };
+
+function dashDbLoad(isCurrent) {
+    var seq = ++dashDb.seq;
+    return api("GET", "/admin/api/settings/database").then(function (res) {
+        if (seq !== dashDb.seq || dashDb.busy || (isCurrent && !isCurrent())) return;
+        var d = res.data;
+        if (!res.ok || !d || !d.connection) {
+            var why = apiError(res, "The server did not answer.");
+            if (dashDb.snap) dashDb.refreshFailed = why;
+            else dashDb.failed = why;
+            dashDbDraw(false);
+            return;
+        }
+        var changed = !dashDb.snap || JSON.stringify(dashDb.snap.connection) !== JSON.stringify(d.connection) || dashDb.snap.editable !== d.editable;
+        dashDb.failed = "";
+        dashDb.refreshFailed = "";
+        dashDb.snap = d;
+        dashDbDraw(changed && !dashDb.dirty);
+    });
+}
+
+function dashDbSummary(c) {
+    if (!c) return "";
+    if (c.backend === "sqlite") return "The SQLite file <code>" + esc(c.path || "") + "</code>.";
+    var where = esc((c.user || "?") + "@" + (c.host || "?") + ":" + (c.port || "") + "/" + (c.database || "?"));
+    return "PostgreSQL <code>" + where + "</code>" + (c.sslmode ? ", TLS " + esc(c.sslmode) + (c.caPem ? " with a CA certificate" : "") : "") + ".";
+}
+
+function dashDbFormHtml() {
+    var s = dashDb.snap;
+    var c = s.connection;
+    var now = '<p class="ui-hint">' + dashDbSummary(c) + " Passwords are never shown.</p>";
+    if (s.locked) {
+        return '<div class="ui-form"><div class="ui-field"><span class="ui-label">Current connection</span>' + now +
+            dashSetLocked({ envName: s.envName }, c.backend === "sqlite" ? "SQLite" : "PostgreSQL") + "</div></div>";
+    }
+    if (!s.editable) {
+        return '<div class="ui-form"><div class="ui-field"><span class="ui-label">Current connection</span>' + now +
+            '<p class="ui-hint">Chosen in setup. Back up the service\'s data directory, which holds this file.</p></div></div>';
+    }
+    return '<form class="ui-form" id="db-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="db-fields">' +
+        '<div class="ui-field"><span class="ui-label">Current connection</span>' + now +
+        '<p class="ui-hint">Change it for a new password, user, host or TLS setting of the same database, or to use a restored copy of it. ' +
+        "The service checks the new connection first; requests wait a few seconds while it switches.</p></div>" +
+        uiDbFieldsHtml("dbs-", { host: c.host, port: c.port, database: c.database, user: c.user, sslmode: c.sslmode, caSaved: c.caPem }, true) +
+        '<div id="dbs-result" aria-live="polite"></div>' +
+        '<label class="ui-check-label hidden" id="dbs-confirm-row"><input type="checkbox" class="ui-check" id="dbs-confirm" /> <span id="dbs-confirm-text"></span></label>' +
+        '<p class="ui-error hidden" id="dbs-err" role="alert"></p>' +
+        '<div class="ui-settings-actions"><button type="button" class="ui-btn" id="dbs-check" data-inventory="settings.database.check">Check connection</button>' +
+        '<button type="submit" class="ui-btn ui-btn-primary" id="dbs-save" data-inventory="settings.database.save">Save</button>' +
+        '<button type="button" class="ui-btn hidden" id="dbs-discard">Discard changes</button></div>' +
+        "</fieldset></form>";
+}
+
+function dashDbDraw(redraw) {
+    var body = document.getElementById("db-body");
+    if (!body) return;
+    if (!dashDb.snap) {
+        body.innerHTML = dashDb.failed ? dashFailed("Could not load the database connection", dashDb.failed, "data-db-retry") : dashLoading("Loading the database connection...");
+        return;
+    }
+    if (redraw || !body.firstChild || body.querySelector(".ui-loading, .ui-failed")) body.innerHTML = dashDbFormHtml();
+    var form = document.getElementById("db-form");
+    if (!form) return;
+    document.getElementById("db-fields").disabled = !!dashDb.busy;
+    document.getElementById("dbs-check").textContent = dashDb.busy === "check" ? "Checking..." : "Check connection";
+    document.getElementById("dbs-save").textContent = dashDb.busy === "save" ? "Saving..." : "Save";
+    document.getElementById("dbs-discard").classList.toggle("hidden", !dashDb.dirty || !!dashDb.busy);
+    document.getElementById("dbs-result").innerHTML = uiDbNoteHtml(uiDbCheckNote(dashDb.check, "settings"));
+    var row = document.getElementById("dbs-confirm-row");
+    row.classList.toggle("hidden", !dashDb.askConfirm);
+    document.getElementById("dbs-confirm-text").textContent = dashDb.askConfirm;
+    document.getElementById("dbs-confirm").checked = dashDb.confirm;
+    var err = document.getElementById("dbs-err");
+    var text = dashDb.error || (dashDb.refreshFailed ? "Could not refresh the database connection: " + dashDb.refreshFailed : "");
+    err.textContent = text;
+    err.classList.toggle("hidden", !text);
+}
+
+// What the confirmation box says for a check result ("" when none is needed)
+function dashDbConfirmText(r) {
+    if (r && r.ok && r.identity === "different_copy") return "Use this copy. Changes made after it was taken are lost.";
+    if (r && r.ok && r.state === "older") return "Adopt this database. Changes made after it was taken are lost.";
+    return "";
+}
+
+function dashDbFail(text, field) {
+    dashDb.error = text;
+    dashDbDraw(false);
+    if (field) uiDbFieldError("dbs-", field);
+}
+
+function dashDbCheck() {
+    var fields = uiDbFieldsRead("dbs-");
+    var key = JSON.stringify(fields) + "|" + !!document.getElementById("dbs-password").value;
+    dashDb.busy = "check";
+    dashDb.error = "";
+    dashDbDraw(false);
+    return api("POST", "/admin/api/settings/database/check", { postgres: fields }).then(function (res) {
+        dashDb.busy = "";
+        if (!res.ok) {
+            dashDb.check = null;
+            if (res.status !== 401) dashDbFail(apiError(res, "The check failed."), res.data && res.data.field);
+            return null;
+        }
+        dashDb.check = res.data;
+        dashDb.checkedFor = key;
+        var ask = dashDbConfirmText(res.data);
+        if (ask !== dashDb.askConfirm) dashDb.confirm = false;
+        dashDb.askConfirm = ask;
+        dashDbDraw(false);
+        return res.data;
+    });
+}
+
+function dashDbSave() {
+    if (dashDb.busy || !dashDb.snap || !dashDb.snap.editable) return;
+    var fields = uiDbFieldsRead("dbs-");
+    var key = JSON.stringify(fields) + "|" + !!document.getElementById("dbs-password").value;
+    var checked = dashDb.check && dashDb.checkedFor === key ? Promise.resolve(dashDb.check) : dashDbCheck();
+    checked.then(function (r) {
+        if (!r) return;
+        var note = uiDbCheckNote(r, "settings");
+        if (!r.ok || (note && note.tone === " is-fail")) {
+            dashDbFail("Nothing was saved: " + (note ? note.title.toLowerCase() : "the check failed") + ".");
+            return;
+        }
+        if (dashDb.askConfirm && !dashDb.confirm) {
+            dashDbFail("Tick the box to confirm, then save.");
+            document.getElementById("dbs-confirm").focus();
+            return;
+        }
+        var body = { postgres: fields };
+        if (dashDb.askConfirm) body.confirmCopy = true;
+        dashStepUpDialog({
+            title: "Confirm the change",
+            text: "Enter your 6-digit authenticator code to save the database connection.",
+            pkText: "Use a passkey or your 6-digit authenticator code to save the database connection.",
+            submitText: "Verify & save",
+            send: function (proof) {
+                var b = {};
+                Object.keys(body).forEach(function (k) { b[k] = body[k]; });
+                Object.keys(proof).forEach(function (k) { b[k] = proof[k]; });
+                return api("PUT", "/admin/api/settings/database", b);
+            },
+            done: function (res) { dashDbRun(res.data.job); },
+        });
+    });
+}
+
+// The operation runs on the server; follow it until it ends
+function dashDbRun(job) {
+    dashDb.busy = "save";
+    dashDb.error = "";
+    dashDbDraw(false);
+    uiMutated();
+    var poll = function () {
+        api("GET", "/admin/api/settings/database/jobs/" + encodeURIComponent(job.id)).then(function (res) {
+            var j = res.ok && res.data && res.data.job;
+            // Saved, but the service could not start on the new connection: recovery mode
+            if (res.status === 503 && res.data && res.data.code && res.data.code !== "database_switching") {
+                window.location.href = basePath() + "/recovery";
+                return;
+            }
+            if (!j || j.state === "running") {
+                if (res.status === 401) { dashDb.busy = ""; return; }
+                setTimeout(poll, 500);
+                return;
+            }
+            dashDb.busy = "";
+            if (j.state === "done") {
+                dashDb.dirty = false;
+                dashDb.check = null;
+                dashDb.askConfirm = "";
+                dashDb.confirm = false;
+                dashDb.snap = null;
+                dashDbDraw(true);
+                dashDbLoad();
+                showToast(j.result && j.result.warning ? j.result.warning : "Database connection saved", j.result && j.result.warning ? "warning" : "success");
+                return;
+            }
+            if (j.code === "confirm_copy") {
+                dashDb.askConfirm = "Use it anyway. Changes made after it was taken are lost.";
+                dashDb.confirm = false;
+            }
+            dashDbFail("Nothing was changed: " + uiDbCodeText(j.code, j.error));
+        });
+    };
+    poll();
+}
+
+// The second check before a sensitive change: an authenticator code or a passkey.
+// o: title, text, pkText, submitText, send(proof) -> api promise, done(res)
+function dashStepUpDialog(o) {
+    var d = null;
+    var closed = false;
+    var close = function () {
+        closed = true;
+        if (d) d.backdrop.remove();
+    };
+    var formId = "stepup-form";
+    d = uiDialog({
+        title: o.title, size: "sm", close: close,
+        body: '<div class="ui-form"><p id="stepup-text">' + esc(o.text) + "</p>" +
+            '<div class="ui-field hidden" id="stepup-pk"><button type="button" class="ui-btn ui-btn-block" id="stepup-pk-btn">Use a passkey</button>' +
+            '<p class="ui-hint">Or enter your 6-digit code below.</p></div>' +
+            '<div class="ui-field"><label class="ui-label" for="stepup-code">6-digit code</label>' +
+            '<input id="stepup-code" class="ui-input ui-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="000000" required></div></div>',
+        foot: '<p class="ui-error hidden" id="stepup-err" role="alert"></p><button type="button" class="ui-btn" data-cancel>Cancel</button>' +
+            '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '">' + esc(o.submitText) + "</button>",
+        form: { id: formId, onSubmit: function () { submit(); } },
+    });
+    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    d.backdrop.addEventListener("ui-drop", function () { closed = true; });
+    var code = d.body.querySelector("#stepup-code");
+    var err = d.foot.querySelector("#stepup-err");
+    var btn = d.foot.querySelector("[type=submit]");
+    var pkBtn = d.body.querySelector("#stepup-pk-btn");
+    var busy = false;
+    var setBusy = function (on) {
+        busy = on;
+        btn.disabled = on;
+        pkBtn.disabled = on;
+    };
+    var fail = function (text) {
+        if (!text) return;
+        err.textContent = text;
+        err.classList.remove("hidden");
+    };
+    var live = function () { return !closed && d.backdrop.isConnected; };
+    if (!uiPasskeyBlocked(window, false)) {
+        dashPkLoad(false).then(function () {
+            if (!live() || !dashPkUsable()) return;
+            d.body.querySelector("#stepup-pk").classList.remove("hidden");
+            d.body.querySelector("#stepup-text").textContent = o.pkText;
+        });
+    }
+    var send = function (proof, withCode) {
+        o.send(proof).then(function (res) {
+            if (!live()) return;
+            setBusy(false);
+            if (!res.ok) {
+                if (res.status === 401) return;
+                fail(apiError(res, "Verification failed"));
+                if (withCode) code.select();
+                return;
+            }
+            close();
+            o.done(res);
+        });
+    };
+    pkBtn.addEventListener("click", function () {
+        if (busy) return;
+        err.classList.add("hidden");
+        setBusy(true);
+        dashPkStepUp().then(function (r) {
+            if (!live()) return;
+            if (!r.passkey) {
+                setBusy(false);
+                fail(r.error);
+                return;
+            }
+            send({ passkey: r.passkey, ceremony: r.ceremony }, false);
+        });
+    });
+    function submit() {
+        if (busy) return;
+        var value = code.value.trim();
+        if (!value) { fail("Enter the code from your authenticator app."); code.focus(); return; }
+        err.classList.add("hidden");
+        setBusy(true);
+        send({ code: value }, true);
+    }
+}
+
+function dashDbBind() {
+    if (dashDb.bound) return;
+    dashDb.bound = true;
+    var panel = document.getElementById("db-panel");
+    var edited = function (event) {
+        var t = event.target;
+        if (t.id === "dbs-confirm") {
+            dashDb.confirm = t.checked;
+            return;
+        }
+        if (!t.closest("#db-form")) return;
+        if (t.id === "dbs-sslmode") uiDbFieldsSync("dbs-");
+        dashDb.dirty = true;
+        dashDb.error = "";
+        if (dashDb.check) {
+            dashDb.check = null;
+            dashDb.askConfirm = "";
+            dashDb.confirm = false;
+        }
+        dashDbDraw(false);
+    };
+    panel.addEventListener("input", edited);
+    panel.addEventListener("change", edited);
+    panel.addEventListener("submit", function (event) {
+        if (event.target.id !== "db-form") return;
+        event.preventDefault();
+        dashDbSave();
+    });
+    panel.addEventListener("click", function (event) {
+        var t = event.target;
+        if (t.closest("[data-db-retry]")) {
+            dashDb.failed = "";
+            dashDbDraw(false);
+            dashDbLoad();
+        } else if (t.closest("#dbs-check")) {
+            if (!dashDb.busy) dashDbCheck();
+        } else if (t.closest("#dbs-discard")) {
+            dashDb.dirty = false;
+            dashDb.check = null;
+            dashDb.askConfirm = "";
+            dashDb.confirm = false;
+            dashDb.error = "";
+            dashDbDraw(true);
+        }
+    });
+    uiUnsavedRegister(function () {
+        return dashDb.dirty ? 1 : 0;
+    }, function () {
+        if (!dashDb.snap) return;
+        dashDb.dirty = false;
+        dashDb.check = null;
+        dashDb.askConfirm = "";
+        dashDbDraw(true);
+    });
+}
+
 DASH_PAGE_IMPL.settings = function () {
     dashSettingsBind();
     dashGenDraw();
     dashSettingsDraw();
+    dashDbBind();
+    dashDbDraw(false);
     dashRedisDraw();
     dashPkSetBind();
     dashPkSetDraw(false);
-    Promise.all([dashSettingsLoadAll(), dashPkSetLoad()]).then(function () { uiRefreshLoaded("settings"); });
+    Promise.all([dashSettingsLoadAll(), dashDbLoad(), dashPkSetLoad()]).then(function () { uiRefreshLoaded("settings"); });
 };
 
 registerPageRefresh("settings", 30000, function (isCurrent) {
-    return Promise.all([dashSettingsLoadAll(isCurrent), dashPkSetLoad(isCurrent)]);
+    return Promise.all([dashSettingsLoadAll(isCurrent), dashDbLoad(isCurrent), dashPkSetLoad(isCurrent)]);
 });
 
 // ===========================================================================

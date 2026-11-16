@@ -1688,6 +1688,154 @@ function uiPasskeyDefaultName(nav) {
 }
 
 // ===========================================================================
+// The PostgreSQL connection fields of setup, the recovery page and Settings.
+// The password is never filled in: the server never sends it back.
+// ===========================================================================
+
+var UI_DB_SSLMODES = [
+    ["prefer", "prefer: TLS if offered (default)"],
+    ["disable", "disable: no TLS"],
+    ["require", "require: always TLS"],
+    ["verify-full", "verify-full: TLS and certificate check"],
+];
+var UI_DB_SSL_HINT = {
+    prefer: "Encrypted when the server supports TLS, plain otherwise. The server's identity is not checked. Fits a database on the same private network.",
+    disable: "Not encrypted. Use it only on a private network you trust, such as the Docker network of this service.",
+    require: "Always encrypted, but the server's identity is not checked.",
+    "verify-full": "Always encrypted, and the server must prove its name with a certificate your system trusts, or the CA certificate below.",
+};
+// Short texts for the server's fixed codes, when it sends no text of its own
+var UI_DB_CODES = {
+    unreachable: "The database server cannot be reached. Check the host and port, and that the server runs.",
+    timeout: "The database server did not answer in time.",
+    tls_failed: "The TLS connection failed. If the server does not use TLS, choose prefer or disable.",
+    auth_failed: "The server refused the user name or password.",
+    database_missing: "This database does not exist on the server.",
+    permission_denied: "The database user lacks a permission the service needs.",
+    read_only: "This server is a standby, or the user's sessions are read-only. Connect to the primary server with a user that can write.",
+    other: "The connection failed.",
+};
+
+function uiDbCodeText(code, detail) {
+    return detail || UI_DB_CODES[code] || UI_DB_CODES.other;
+}
+
+// p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists
+function uiDbFieldsHtml(p, v, keepPassword) {
+    v = v || {};
+    var mode = v.sslmode || "prefer";
+    var opts = UI_DB_SSLMODES.map(function (m) {
+        return '<option value="' + m[0] + '"' + (m[0] === mode ? " selected" : "") + ">" + esc(m[1]) + "</option>";
+    }).join("");
+    var input = function (id, label, value, extra) {
+        return '<div class="ui-field"><label class="ui-label" for="' + p + id + '">' + label + "</label>" +
+            '<input class="ui-input" id="' + p + id + '" value="' + esc(value == null ? "" : String(value)) + '" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr"' +
+            (extra || "") + " /></div>";
+    };
+    return '<div class="ui-form-row">' + input("host", "Host", v.host, ' placeholder="postgres"') +
+        input("port", "Port", v.port || 5432, ' inputmode="numeric" maxlength="5"') + "</div>" +
+        '<div class="ui-form-row">' + input("database", "Database", v.database, ' placeholder="authdb"') +
+        input("user", "User", v.user, ' placeholder="auth"') + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'password">Password</label>' +
+        '<input class="ui-input" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
+        (keepPassword ? ' placeholder="Empty keeps the saved password"' : "") + " /></div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">TLS</label>' +
+        '<select class="ui-select" id="' + p + 'sslmode" aria-describedby="' + p + 'ssl-hint">' + opts + "</select>" +
+        '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] || "") + "</span></div>" +
+        '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">CA certificate (PEM, optional)</label>' +
+        '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>' +
+        '<span class="ui-hint">Only when the server\'s certificate comes from your own certificate authority.' +
+        (v.caSaved ? " Leave empty to keep the saved certificate." : "") + "</span></div>";
+}
+
+// The TLS hint and the CA field follow the chosen mode
+function uiDbFieldsSync(p) {
+    var sel = document.getElementById(p + "sslmode");
+    if (!sel) return;
+    document.getElementById(p + "ssl-hint").textContent = UI_DB_SSL_HINT[sel.value] || "";
+    document.getElementById(p + "ca-field").classList.toggle("hidden", sel.value !== "verify-full");
+}
+
+// The fields as the API takes them (postgres object)
+function uiDbFieldsRead(p) {
+    var val = function (id) { var el = document.getElementById(p + id); return el ? el.value : ""; };
+    var port = parseInt(val("port"), 10);
+    var body = {
+        host: val("host").trim(),
+        port: isNaN(port) ? 0 : port,
+        database: val("database").trim(),
+        user: val("user").trim(),
+        sslmode: val("sslmode") || "prefer",
+    };
+    var password = val("password");
+    if (password) body.password = password;
+    var ca = val("ca").trim();
+    if (body.sslmode === "verify-full") {
+        if (ca) body.caPem = ca;
+        else body.keepCa = true;
+    }
+    return body;
+}
+
+// Mark the field the server named
+function uiDbFieldError(p, field) {
+    ["host", "port", "database", "user", "password", "sslmode", "ca"].forEach(function (id) {
+        var el = document.getElementById(p + id);
+        if (el) el.removeAttribute("aria-invalid");
+    });
+    var id = field === "caPem" ? "ca" : field;
+    var el = id && document.getElementById(p + id);
+    if (el) {
+        el.setAttribute("aria-invalid", "true");
+        el.focus();
+    }
+}
+
+// What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text
+function uiDbCheckNote(r, where) {
+    if (!r) return null;
+    if (!r.ok) return { tone: " is-fail", title: "The connection failed", text: uiDbCodeText(r.code, r.detail) };
+    if (r.problems && r.problems.length) {
+        return { tone: " is-fail", title: "The database user cannot be used", text: r.problems.join(" ") };
+    }
+    if (r.state === "new") return { tone: "", title: "A new database file", text: "The service creates data/auth.db in its data directory." };
+    if (r.state === "empty") return { tone: "", title: "The database is empty", text: "The service creates its tables in it." };
+    if (r.state === "foreign") {
+        return { tone: " is-fail", title: "This database holds other data", text: "It has tables that are not this service's" +
+            (r.others && r.others.length ? " (" + r.others.join(", ") + ")" : "") + ". Use an empty database." };
+    }
+    if (r.state === "incomplete") {
+        return { tone: " is-fail", title: "Tables are missing", text: "This database holds this service's installation, but without " +
+            (r.others || []).join(", ") + ". Restore the whole database." };
+    }
+    if (r.state === "older") {
+        return { tone: " is-warn", title: "This service's data from an older version or a backup",
+            text: "The service can adopt it: it adds the tables of this version and keeps the data." +
+                (where === "setup" ? "" : " Changes made after it was taken are not in it.") };
+    }
+    if (r.pending) return { tone: " is-fail", title: "An unfinished copy", text: "This database holds a copy that a move did not finish. It is not used." };
+    if (where === "settings") {
+        if (r.identity === "same") return { tone: "", title: "The same database", text: "The new connection reaches the database the service uses now." };
+        if (r.identity === "different_copy") {
+            return { tone: " is-warn", title: "A different copy of this database", text: "For example a restored backup. Changes made after the copy was taken will be lost." };
+        }
+        return { tone: " is-fail", title: "Another installation", text: "This database holds another installation of this service." };
+    }
+    if (where === "setup") {
+        return { tone: "", title: "An existing installation of this service", text: r.hasAdmin
+            ? "The service uses it as it is. You sign in with its admin account; no new admin is created."
+            : "The service uses it as it is, and setup continues with the first admin account." };
+    }
+    return { tone: "", title: "An installation of this service", text: "The service can use this database." };
+}
+
+function uiDbNoteHtml(n) {
+    if (!n) return "";
+    return '<div class="ui-alert' + n.tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(n.title) + "</p><small>" +
+        esc(n.text) + "</small></div><span></span></div>";
+}
+
+// ===========================================================================
 // Page-wide listeners, installed once by the page
 // ===========================================================================
 
