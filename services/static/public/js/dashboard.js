@@ -331,7 +331,7 @@ function dashMoreOpen() {
         body: '<nav class="ui-more-list" aria-label="' + esc(t("shell.all-pages")) + '">' + link("tokens") + link("zones") + link("apikeys") + link("activity") + link("access") + link("usage") + link("settings") + link("account") +
             '<button type="button" class="ui-tool" data-more-prefs><span class="ui-tool-label">' + esc(t("shell.preferences")) + '</span></button>' +
             '<button type="button" class="ui-tool" data-more-theme><span class="ui-tool-label"></span></button>' +
-            '<p class="ui-side-user">' + esc(t("shell.signed-in-as")) + '<bdi dir="auto">' + esc(dash.user) + "</bdi></p>" +
+            '<p class="ui-side-user">' + tHtml("shell.signed-in-as", { user: tRaw('<bdi dir="auto">' + esc(dash.user) + "</bdi>") }) + "</p>" +
             '<button type="button" class="ui-tool" data-more-logout><span class="ui-tool-label">' + esc(t("shell.log-out")) + '</span></button></nav>',
     });
     dashMore = d;
@@ -429,7 +429,7 @@ function dashAttnItems() {
     var n = dashExpiringCount();
     if (n > 0) {
         items.push({
-            tone: "warn", text: n === 1 ? t("attention.1-token-expires-within-7-days") : uiNum(n) + t("attention.tokens-expire-within-7-days"),
+            tone: "warn", text: tn("attention.tokens-expire-within-7-days", n),
             sub: t("attention.replace-or-extend-them-before-they"), go: "tokens", query: "status=expiring", action: t("attention.open-tokens"),
         });
     }
@@ -460,7 +460,7 @@ function dashAttnUpdate() {
     var unknown = dashAttn.healthFailed || !!dashTokenStore.failed;
     var fail = items.some(function (i) { return i.tone === "fail"; });
     var label;
-    if (items.length) label = t("attention.needs-attention") + tn("attention.count-items", items.length);
+    if (items.length) label = tn("attention.needs-attention", items.length);
     else if (unknown) label = t("attention.needs-attention-some-checks-could-not");
     else if (!dashAttn.checked) label = t("attention.needs-attention-not-checked-yet");
     else label = t("attention.needs-attention-nothing-open");
@@ -497,7 +497,7 @@ function dashAttnContent() {
     }).join("") + "</div>";
     var note = "";
     if (dashAttn.healthFailed || dashTokenStore.failed) {
-        note = '<p class="ui-attn-note" role="status">' + esc(t("attention.could-not-check-the-service")) + '<button type="button" class="ui-btn-link" data-attn-retry>' + esc(t("attention.retry")) + '</button></p>';
+        note = '<p class="ui-attn-note" role="status">' + esc(t("attention.could-not-check-the-service")) + ' <button type="button" class="ui-btn-link" data-attn-retry>' + esc(t("attention.retry")) + '</button></p>';
     } else if (!dashAttn.checked) {
         note = '<p class="ui-attn-note" role="status">' + esc(t("attention.not-checked-yet")) + '</p>';
     } else if (!items.length) {
@@ -703,13 +703,13 @@ function dashTokRow(tok, now) {
     var s = dashTokStatus(tok);
     var st = TOKEN_STATUS[s];
     var soon = s === "active" && dashTokExpiring(tok, now);
-    var exp = tok.expiresAt ? '<span class="ui-td-sub' + (soon ? " ui-text-warn" : "") + '">' + esc(t("tokens.exp")) + uiTime(tok.expiresAt) + "</span>" : "";
+    var exp = tok.expiresAt ? '<span class="ui-td-sub' + (soon ? " ui-text-warn" : "") + '">' + tHtml("tokens.exp", { date: tRaw(uiTime(tok.expiresAt)) }) + "</span>" : "";
     return '<div class="ui-tr' + (s === "disabled" ? " is-off" : "") + '" role="row" tabindex="0" data-key="' + esc(tok.id) + '" aria-label="' + esc(tok.name) + '">' +
         '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(tok.name) + "</span>" +
         (tok.description ? '<span class="ui-td-sub">' + uiUserText(tok.description) + "</span>" : "") + "</div>" +
         '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + dashGrantTags(tok.grants) + "</div>" +
         '<div class="ui-td ui-td-status" role="cell">' + dashTag(t(st.label), st.tone) + (soon ? " " + dashTag(t("tokens.expiring-soon"), "warn") : "") + "</div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("tokens.last-used-2")) + '</span>' + (tok.lastUsedAt ? uiTime(tok.lastUsedAt) : '<span class="ui-muted">-</span>') + exp + "</div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("tokens.last-used-2")) + ' </span>' + (tok.lastUsedAt ? uiTime(tok.lastUsedAt) : '<span class="ui-muted">-</span>') + exp + "</div>" +
         '<div class="ui-td ui-td-end" role="cell">' + dashMenuButton(tok.name) + "</div></div>";
 }
 
@@ -908,7 +908,7 @@ function dashTokToggle(tok, button) {
             if (res.status !== 401) showToast(t("tokens.could-not", { action: next ? t("tokens.enable-2") : t("tokens.disable-2"), name: tok.name, reason: apiError(res, t("tokens.save-failed")) }), "error");
             return;
         }
-        showToast(tok.name + (next ? t("tokens.is-enabled") : t("tokens.is-disabled")), "success");
+        showToast(next ? t("tokens.is-enabled", { name: tok.name }) : t("tokens.is-disabled", { name: tok.name }), "success");
         uiMutated();
         dashTokLoad(true);
     });
@@ -983,7 +983,7 @@ function dashPermRows(rows) {
                 return '<label><input type="checkbox" class="ui-check" data-flag="' + fl + '"' + (flags.indexOf(fl) !== -1 ? " checked" : "") +
                     ' aria-label="' + esc(t("tokens.flag-for-zone", { flag: t("tokens.flag." + fl), zone: a })) + '"> ' + esc(t("tokens.flag." + fl)) + "</label>";
             }).join("") +
-            '<label><input type="checkbox" class="ui-check" data-area-all' + (all ? " checked" : "") + ' aria-label="' + esc(t("tokens.all", { zone: a })) + '">' + esc(t("tokens.all-2")) + '</label>' +
+            '<label><input type="checkbox" class="ui-check" data-area-all' + (all ? " checked" : "") + ' aria-label="' + esc(t("tokens.all", { zone: a })) + '"> ' + esc(t("tokens.all-2")) + '</label>' +
             (note ? '<p class="ui-perm-note" role="note"><bdi dir="auto">' + esc(note) + "</bdi></p>" : "") + "</div>";
     }).join("");
 }
@@ -1008,7 +1008,7 @@ function dashTokenDialog(type) {
     var formId = "tok-form";
     var body = '<div class="ui-form">' +
         '<div class="ui-field"><label class="ui-label" for="tf-name">' + esc(t("tokens.name")) + '</label><input id="tf-name" class="ui-input" name="name" required dir="auto" autocomplete="off" placeholder="' + esc(t("tokens.my-api-token")) + '" data-inventory="tokens.form.name"></div>' +
-        '<div class="ui-field"><label class="ui-label" for="tf-desc">' + esc(t("tokens.description")) + '<small>' + esc(t("tokens.optional")) + '</small></label><input id="tf-desc" class="ui-input" name="description" dir="auto" autocomplete="off" placeholder="' +
+        '<div class="ui-field"><label class="ui-label" for="tf-desc">' + esc(t("tokens.description")) + ' <small>' + esc(t("tokens.optional")) + '</small></label><input id="tf-desc" class="ui-input" name="description" dir="auto" autocomplete="off" placeholder="' +
         (editing ? esc(t("tokens.token-description")) : esc(t("tokens.what-this-token-is-used-for"))) + '" data-inventory="tokens.form.description"></div>' +
         (editing
             ? '<div class="ui-field"><label class="ui-label" for="tf-token">' + esc(t("tokens.replace-token-optional")) + '</label><input id="tf-token" class="ui-input ui-mono" name="token" autocomplete="off" spellcheck="false" placeholder="' + esc(t("tokens.leave-empty-to-keep-current-token")) + '" data-inventory="tokens.form.replace"></div>'
@@ -1024,8 +1024,8 @@ function dashTokenDialog(type) {
         '<div class="ui-perms" role="group" aria-labelledby="tf-perm-label">' + dashPermRows(selected) + "</div>" +
         '<p class="ui-picker-none hidden" id="tf-nomatch" role="status">' + esc(t("tokens.no-zones-match-the-filter")) + '</p></div>' +
         '<div class="ui-field"><label class="ui-label" for="tf-exp">' + esc(t("tokens.expires-optional")) + '</label><input id="tf-exp" class="ui-input" type="datetime-local" name="expires" data-inventory="tokens.form.expires">' +
-        '<p class="ui-hint">' + esc(t("tokens.in")) + esc(uiZoneName()) + esc(t("tokens.leave-empty-for-a-token-that")) +
-        '<button type="button" class="ui-btn-link" id="tf-exp-clear">' + esc(t("tokens.clear")) + '</button></p></div></div>';
+        '<p class="ui-hint">' + tHtml("tokens.in", { zone: uiZoneName(), clear: tRaw('<button type="button" class="ui-btn-link" id="tf-exp-clear">' + esc(t("tokens.clear")) + "</button>") }) +
+        "</p></div></div>";
     var foot = '<p class="ui-error hidden" id="tf-err" role="alert"></p>' +
         '<button type="button" class="ui-btn" data-cancel>' + esc(t("tokens.cancel")) + '</button>' +
         (editing ? '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '">' + esc(t("tokens.save")) + '</button>'
@@ -1150,7 +1150,7 @@ function dashMfaDialog(kind, item) {
     d = uiDialog({
         title: t("reveal.mfa-verification"), size: "sm", close: close,
         body: '<div class="ui-form"><p id="mfa-text">' + (kind === "token" ? esc(t("reveal.enter-your-6-digit-authenticator-code")) : esc(t("reveal.enter-your-6-digit-authenticator-code-2"))) + "</p>" +
-            '<p class="ui-hint">' + (kind === "token" ? esc(t("reveal.token")) : esc(t("reveal.api-key"))) + ': <bdi dir="auto">' + esc(item.name) + "</bdi></p>" +
+            '<p class="ui-hint">' + tHtml(kind === "token" ? "reveal.token" : "reveal.api-key", { name: tRaw('<bdi dir="auto">' + esc(item.name) + "</bdi>") }) + "</p>" +
             '<div class="ui-field hidden" id="mfa-pk"><button type="button" class="ui-btn ui-btn-block" id="mfa-pk-btn" data-inventory="mfa.passkey">' + esc(t("reveal.use-a-passkey")) + '</button>' +
             '<p class="ui-hint">' + esc(t("reveal.or-enter-your-6-digit-code")) + '</p></div>' +
             '<div class="ui-field"><label class="ui-label" for="mfa-code">' + esc(t("reveal.6-digit-code")) + '</label>' +
@@ -1182,7 +1182,7 @@ function dashMfaDialog(kind, item) {
         dashPkLoad(false).then(function () {
             if (!dashRevealCurrent(d, closed, seq) || verified || !dashPkUsable()) return;
             d.body.querySelector("#mfa-pk").classList.remove("hidden");
-            d.body.querySelector("#mfa-text").textContent = t("reveal.use-a-passkey-or-your-6") + what + ".";
+            d.body.querySelector("#mfa-text").textContent = t("reveal.use-a-passkey-or-your-6", { what: what });
         });
     }
     pkBtn.addEventListener("click", function () {
@@ -1294,8 +1294,7 @@ function dashZoneCaseGroups(zones) {
 function dashZoneCaseNotice(groups) {
     if (!groups.length) return "";
     return '<div class="ui-banner ui-banner-warn"><div><b>' + esc(t("zones.zones-whose-names-differ-only-in")) + '</b>' +
-        groups.map(function (g) { return '<bdi dir="auto">' + esc(g.join(", ")) + "</bdi>"; }).join("; ") +
-        esc(t("zones.a-token-for-one-of-them")) + "</div></div>";
+        tHtml("zones.a-token-for-one-of-them", { groups: tRaw(groups.map(function (g) { return '<bdi dir="auto">' + esc(g.join(", ")) + "</bdi>"; }).join("; ")) }) + "</div></div>";
 }
 
 function dashZonesDraw(quiet) {
@@ -1324,7 +1323,7 @@ function dashZonesDraw(quiet) {
             return '<div class="ui-tr" role="row" tabindex="0" data-key="' + esc(z.id) + '" aria-label="' + esc(z.name) + '">' +
                 '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(z.name) + "</span></div>" +
                 '<div class="ui-td ui-td-full" role="cell">' + (z.description ? uiUserText(z.description) : '<span class="ui-muted">-</span>') + "</div>" +
-                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("zones.created-2")) + '</span>' + uiTime(z.createdAt) + "</div>" +
+                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("zones.created-2")) + ' </span>' + uiTime(z.createdAt) + "</div>" +
                 '<div class="ui-td ui-td-end" role="cell">' + dashMenuButton(z.name) + "</div></div>";
         }).join("");
     }
@@ -1528,7 +1527,7 @@ function dashKeyMasterRow() {
         '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + esc(t("apikeys.master-key")) + '</span></div>' +
         '<div class="ui-td ui-td-full ui-td-wrap" role="cell"><div class="ui-tags"><span class="ui-tag ui-tag-line">' + esc(t("apikeys.all-scopes")) + '</span></div>' +
         '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("apikeys.set-by-the", { env: tRaw("<code>" + esc(m.envName || "ADMIN_API_KEY") + "</code>") }) + "</span></p></div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("apikeys.created-2")) + '</span><span class="ui-muted">' + '-' + '</span></div>' +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("apikeys.created-2")) + ' </span><span class="ui-muted">' + '-' + '</span></div>' +
         '<div class="ui-td ui-td-end" role="cell"></div></div>';
 }
 
@@ -1550,7 +1549,7 @@ function dashKeysDraw(quiet) {
                 '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(k.name) + "</span></div>" +
                 '<div class="ui-td ui-td-full ui-td-wrap" role="cell"><div class="ui-tags">' +
                 scopes.map(function (s) { return '<span class="ui-tag ui-tag-line ui-mono">' + esc(s) + "</span>"; }).join("") + "</div></div>" +
-                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("apikeys.created-2")) + '</span>' + uiTime(k.createdAt) + "</div>" +
+                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("apikeys.created-2")) + ' </span>' + uiTime(k.createdAt) + "</div>" +
                 '<div class="ui-td ui-td-end" role="cell">' + dashMenuButton(k.name) + "</div></div>";
         }).join("");
     }
@@ -1938,20 +1937,20 @@ function dashLogRowHtml(s, log) {
     if (s.id === "activity") {
         return '<div class="ui-tr" role="row" data-key="' + esc(log.id) + '">' +
             '<div class="ui-td" role="cell">' + uiTime(log.createdAt) + "</div>" +
-            '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(log.actor) + "</span></div>" +
-            '<div class="ui-td" role="cell">' + dashTag(log.action, "") + "</div>" +
-            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-type")) + '</span><span class="ui-muted">' + esc(log.entityType || "-") + "</span></div>" +
-            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-name")) + '</span>' + (log.entityName ? uiUserText(log.entityName) : '<span class="ui-muted">-</span>') + "</div>" +
+            '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(uiIdWord("logs.actor.", log.actor)) + "</span></div>" +
+            '<div class="ui-td" role="cell">' + dashTag(uiIdWord("logs.action.", log.action), "") + "</div>" +
+            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-type")) + ' </span><span class="ui-muted">' + esc(log.entityType ? uiIdWord("logs.entity.", log.entityType) : "-") + "</span></div>" +
+            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-name")) + ' </span>' + (log.entityName ? uiUserText(log.entityName) : '<span class="ui-muted">-</span>') + "</div>" +
             '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + dashLogDetails(log) + "</div>" +
-            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.ip-address")) + '</span>' + uiCopyable(log.ipAddress) + "</div></div>";
+            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.ip-address")) + ' </span>' + uiCopyable(log.ipAddress) + "</div></div>";
     }
     return '<div class="ui-tr" role="row" data-key="' + esc(log.id) + '">' +
         '<div class="ui-td" role="cell">' + uiTime(log.createdAt) + "</div>" +
         '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(log.tokenName) + "</span></div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.area-zone")) + '</span><span class="ui-tag ui-tag-line"><bdi dir="auto">' + esc(log.area) + "</bdi></span></div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.level")) + '</span><span class="ui-mono">' + esc(log.level) + "</span></div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.area-zone")) + ' </span><span class="ui-tag ui-tag-line"><bdi dir="auto">' + esc(log.area) + "</bdi></span></div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.level")) + ' </span><span class="ui-mono">' + esc(uiIdWord("logs.level.", log.level)) + "</span></div>" +
         '<div class="ui-td" role="cell">' + (log.result ? dashTag(t("logs.allowed"), "ok") : dashTag(t("logs.denied"), "fail")) + "</div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.ip-address")) + '</span>' + uiCopyable(log.ipAddress) + "</div></div>";
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.ip-address")) + ' </span>' + uiCopyable(log.ipAddress) + "</div></div>";
 }
 
 // What an activity changed, in words; every value escaped
@@ -1961,7 +1960,7 @@ function dashLogDetails(log) {
     var act = log.action;
     var grantsText = function (grants) {
         if (!grants || !grants.length) return esc(t("logs.none"));
-        return grants.map(function (g) { return esc(g.area) + ": " + esc(String(g.level || "").replace(/,/g, "+")); }).join(", ");
+        return grants.map(function (g) { return esc(g.area) + ": " + esc(String(g.level || "").split(",").map(function (f) { return f ? uiIdWord("logs.level.", f) : f; }).join("+")); }).join(", ");
     };
     var updated = function (items) {
         if (!items.length) return '<span class="ui-muted">' + esc(t("logs.no-modifications")) + '</span>';
@@ -1977,9 +1976,9 @@ function dashLogDetails(log) {
             if (u.name !== undefined && u.name !== null) items.push(esc(t("logs.updated-name", { name: u.name })));
             if (u.description !== undefined && u.description !== null) items.push(esc(t("logs.updated-description", { description: u.description })));
             if (u.isActive !== undefined && u.isActive !== null) items.push(esc(t("logs.status", { status: u.isActive ? t("logs.enabled") : t("logs.disabled") })));
-            if (u.grants !== undefined && u.grants !== null) items.push(esc(t("logs.grants-2")) + grantsText(u.grants));
-            if (u.expiresAt !== undefined && u.expiresAt !== null) items.push(esc(t("logs.expires-2")) + (u.expiresAt ? esc(formatTime(u.expiresAt, { seconds: false })) : esc(t("logs.never"))));
-            if (u.scopes !== undefined && u.scopes !== null) items.push(esc(t("logs.scopes")) + esc([].concat(u.scopes).join(", ")));
+            if (u.grants !== undefined && u.grants !== null) items.push(tHtml("logs.grants-2", { grants: tRaw(grantsText(u.grants)) }));
+            if (u.expiresAt !== undefined && u.expiresAt !== null) items.push(esc(t("logs.expires-2", { date: u.expiresAt ? formatTime(u.expiresAt, { seconds: false }) : t("logs.never") })));
+            if (u.scopes !== undefined && u.scopes !== null) items.push(esc(t("logs.scopes", { scopes: [].concat(u.scopes).join(", ") })));
             return updated(items);
         }
         if (act === "zone_create") return det.description ? "<b>" + esc(t("logs.description")) + "</b>" + " " + esc(det.description) : '<span class="ui-muted">-</span>';
@@ -2017,7 +2016,7 @@ function dashLogSettings(fields, det) {
     var items = fields.filter(function (f) { return JSON.stringify(from[f[0]]) !== JSON.stringify(to[f[0]]); }).map(function (f) {
         return esc(t("logs.setting-change", { name: t(f[1]), from: dashLogSettingValue(from[f[0]], f[2]), to: dashLogSettingValue(to[f[0]], f[2]) }));
     });
-    var version = det.version ? "<b>" + esc(t("logs.version")) + esc(uiNum(det.version)) + ":</b> " : "";
+    var version = det.version ? "<b>" + esc(t("logs.version", { version: uiNum(det.version) })) + "</b> " : "";
     return version + (items.length ? items.join(", ") : '<span class="ui-muted">' + esc(t("logs.no-modifications")) + '</span>');
 }
 
@@ -2032,7 +2031,7 @@ function dashLogPasskeyDetails(log, det) {
         return Object.prototype.hasOwnProperty.call(table, value) ? esc(t(table[value])) : esc(value);
     };
     if (act === "login" && det.method === "passkey") {
-        return "<b>" + esc(t("logs.signed-in-with")) + "</b>" + esc(t("logs.passkey-2")) + (det.passkey ? " (" + uiUserText(det.passkey) + ")" : "");
+        return "<b>" + esc(t("logs.signed-in-with")) + "</b> " + (det.passkey ? tHtml("logs.passkey-named", { name: tRaw(uiUserText(det.passkey)) }) : esc(t("logs.passkey-2")));
     }
     if ((act === "token_reveal" || act === "api_key_reveal") && det.method) {
         return "<b>" + esc(t("logs.confirmed-with")) + "</b>" + " " + word(DASH_STEP_UP_METHODS, det.method);
@@ -2046,8 +2045,8 @@ function dashLogPasskeyDetails(log, det) {
         var from = det.from.origin;
         var to = det.to.origin;
         if (!from && to) return "<b>" + esc(t("logs.passkey-address-set-to")) + "</b>" + " " + esc(to);
-        if (from && !to) return "<b>" + esc(t("logs.passkey-address-removed")) + "</b>" + esc(t("logs.it-was")) + esc(from);
-        return "<b>" + esc(t("logs.passkey-address-changed")) + "</b>" + esc(t("logs.from", { from: from, to: to }));
+        if (from && !to) return "<b>" + esc(t("logs.passkey-address-removed")) + "</b> " + esc(t("logs.it-was", { origin: from }));
+        return "<b>" + esc(t("logs.passkey-address-changed")) + "</b> " + esc(t("logs.from", { from: from, to: to }));
     }
     return null;
 }
@@ -2062,26 +2061,25 @@ function dashLogDraw(s, quiet) {
     var n = s.pending.length;
     pillEl.classList.toggle("hidden", !n && !s.capped);
     pillEl.textContent = s.capped ? t("logs.more-new-entries-than-can-be")
-        : n === 1 ? t("logs.1-new-entry") : uiNum(n) + t("logs.new-entries");
+        : tn("logs.new-entries", n);
     var moreHtml = "";
     if (s.moreFailed) {
-        moreHtml = '<span role="alert">' + esc(t("logs.could-not-load-more-entries")) + esc(s.moreFailed) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-more>' + esc(t("logs.try-again")) + '</button>';
+        moreHtml = '<span role="alert">' + esc(t("logs.could-not-load-more-entries", { reason: s.moreFailed })) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-more>' + esc(t("logs.try-again")) + '</button>';
     } else if (s.rows && s.rows.length && s.hasMore) {
         moreHtml = s.loading ? '<span class="ui-spin" aria-hidden="true"></span><span role="status">' + esc(t("logs.loading-more")) + '</span>'
             : '<button type="button" class="ui-btn ui-btn-sm" data-log-more data-inventory="' + s.id + '.loadmore">' + esc(t("logs.load-more")) + '</button>';
     } else if (s.rows && s.rows.length > LOG_PAGE_SIZE) {
-        moreHtml = '<span role="status">' + esc(t("logs.all")) + uiNum(s.rows.length) + esc(t("logs.entries-shown")) + "</span>";
+        moreHtml = '<span role="status">' + esc(t("logs.all", { n: uiNum(s.rows.length) })) + "</span>";
     }
     // A failed update keeps the rows and Load more, and says so above them (R7)
     if (s.refreshFailed && s.rows) {
-        moreHtml = '<span role="status">' + esc(t(s.failedText)) + ": " + esc(s.refreshFailed) +
-            esc(t("logs.the-list-shows-what-was-loaded")) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-retry-new>' + esc(t("logs.try-again")) + '</button>' +
+        moreHtml = '<span role="status">' + esc(t("logs.the-list-shows-what-was-loaded", { what: t(s.failedText), reason: s.refreshFailed })) + '</span>' + ' ' + '<button type="button" class="ui-btn-link" data-log-retry-new>' + esc(t("logs.try-again")) + '</button>' +
             (moreHtml ? " " + moreHtml : "");
     }
     if (moreEl.innerHTML !== moreHtml) moreEl.innerHTML = moreHtml;
     moreEl.classList.toggle("hidden", !moreHtml);
     var filtered = s.applied.search || s.applied.filter;
-    if (s.rows) countEl.textContent = tn("logs.count-entries", s.total) + (filtered ? t("logs.match-the-filters") : "");
+    if (s.rows) countEl.textContent = filtered ? tn("logs.match-the-filters", s.total) : tn("logs.count-entries", s.total);
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
     if (s.rows === null) html = s.failed ? dashFailed(t(s.failedText), s.failed, "data-log-retry") : dashLoading(t(s.loadingText));
@@ -2236,13 +2234,13 @@ function dashLimitLoad(isCurrent) {
 
 function dashLimitHtml() {
     var d = dashLimit.data;
-    var stale = dashLimit.failed ? esc(t("access.ratelimit.could-not-refresh-these-counts")) + esc(dashLimit.failed) + esc(t("access.ratelimit.they-are-checked-again-every-30")) : "";
+    var stale = dashLimit.failed ? esc(t("access.ratelimit.could-not-refresh-these-counts", { reason: dashLimit.failed })) : "";
     if (!d) return dashLimitAlert(" is-fail", t("access.ratelimit.could-not-load-the-rate-limit"), [stale]);
-    if (stale) stale += esc(t("access.ratelimit.the-counts-below-are-from")) + uiTime(new Date(dashLimit.at).toISOString()) + ".";
+    if (stale) stale = tHtml("access.ratelimit.the-counts-below-are-from", { reason: dashLimit.failed, time: tRaw(uiTime(new Date(dashLimit.at).toISOString())) });
     var seconds = d.windowMs / 1000;
-    var rule = esc(t("access.ratelimit.limit")) + esc(tn("access.ratelimit.count-requests", d.limit)) + esc(t("access.ratelimit.per")) +
-        esc(seconds === 60 ? t("access.ratelimit.minute") : tn("access.ratelimit.count-seconds", seconds)) + esc(t("access.ratelimit.from-one-address-or-from-one"));
-    var since = esc(t("access.ratelimit.counted-by-this-server-process-since")) + uiTime(d.since) + esc(t("access.ratelimit.a-restart-resets-the-count"));
+    var rule = esc(t("access.ratelimit.limit", { requests: tn("access.ratelimit.count-requests", d.limit),
+        window: seconds === 60 ? t("access.ratelimit.minute") : tn("access.ratelimit.count-seconds", seconds) }));
+    var since = tHtml("access.ratelimit.counted-by-this-server-process-since", { time: tRaw(uiTime(d.since)) });
     var lines = stale ? [stale] : [];
     if (!d.rejectedTotal) {
         return dashLimitAlert(stale ? " is-fail" : "", t("access.ratelimit.no-requests-were-rejected-by-the"), lines.concat([rule, since]));
@@ -2251,14 +2249,19 @@ function dashLimitHtml() {
         return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
     }).join(", ");
     lines.push(
-        esc(t("access.ratelimit.they-were-answered-with")) + "<code>" + esc(t("access.ratelimit.429-too-many-requests")) + "</code>" + esc(t("access.ratelimit.and-a")) + "<code>" + esc(t("access.ratelimit.retry-after")) + "</code>" + esc(t("access.ratelimit.header")) +
-            esc(t("access.ratelimit.and-are-not-in-the-list")) + uiTime(d.lastRejectedAt) + ".",
-        (d.untrackedRejected ? esc(t("access.ratelimit.most-rejected-among-the-first")) + esc(uiNum(d.maxTrackedAddresses)) + esc(t("access.ratelimit.addresses")) : esc(t("access.ratelimit.most-rejected"))) + tops +
-            (d.untrackedRejected ? "; " + esc(tn("access.ratelimit.count-more-rejections", d.untrackedRejected)) + esc(t("access.ratelimit.from-other-addresses-so-this-ranking")) : "."),
+        tHtml("access.ratelimit.they-were-answered-with", {
+            status: tRaw("<code>" + esc(t("access.ratelimit.429-too-many-requests")) + "</code>"),
+            header: tRaw("<code>" + esc(t("access.ratelimit.retry-after")) + "</code>"),
+            time: tRaw(uiTime(d.lastRejectedAt)),
+        }),
+        d.untrackedRejected
+            ? tHtml("access.ratelimit.most-rejected-among-the-first", { max: uiNum(d.maxTrackedAddresses), addresses: tRaw(tops),
+                more: tn("access.ratelimit.count-more-rejections", d.untrackedRejected) })
+            : tHtml("access.ratelimit.most-rejected", { addresses: tRaw(tops) }),
         rule,
         since
     );
-    var title = tn("access.ratelimit.count-requests-were", d.rejectedTotal) + t("access.ratelimit.rejected-by-the-rate-limit");
+    var title = tn("access.ratelimit.count-requests-were", d.rejectedTotal);
     return dashLimitAlert(stale ? " is-fail" : " is-warn", title, lines);
 }
 
@@ -2400,11 +2403,12 @@ function dashUsePurged(d) {
 function dashUseBucketWords(d, b) {
     if (b.coverage === "none") {
         return dashUsePurged(d) ? t("usage.no-data-these-access-logs-were")
-            : t("usage.no-data-access-logs-older-than") + tn("usage.count-days", d.retentionDays) + t("usage.are-deleted");
+            : t("usage.no-data-access-logs-older-than", { days: tn("usage.count-days", d.retentionDays) });
     }
-    var text = tn("usage.count-calls", b.allowed + b.denied) + ", " + uiNum(b.allowed) + t("usage.allowed") + uiNum(b.denied) + t("usage.denied-2");
-    if (b.coverage === "partial") text += t("usage.counted-from") + formatTime(d.dataFrom, { seconds: false, zone: dashUseZone(d) }) + t("usage.older-logs-are-deleted");
-    return text;
+    var counts = { calls: tn("usage.count-calls", b.allowed + b.denied), allowed: uiNum(b.allowed), denied: uiNum(b.denied) };
+    if (b.coverage !== "partial") return t("usage.bucket", counts);
+    counts.time = formatTime(d.dataFrom, { seconds: false, zone: dashUseZone(d) });
+    return t("usage.bucket-partial", counts);
 }
 
 // Allowed and denied calls per hour or day: bars from the series, a readout line that
@@ -2482,24 +2486,21 @@ function dashUseNotices(d) {
     if (d.partial) {
         var from = uiTime(d.dataFrom, formatTime(d.dataFrom, { seconds: false, zone: zone }), zone);
         out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>' + esc(t("usage.part-of-this-period-is-no")) + '</b>' +
-            (dashUsePurged(d) ? esc(t("usage.older-calls-were-deleted-under-an")) + from + "."
-                : esc(t("usage.access-logs-are-kept-for")) + esc(tn("usage.count-days", d.retentionDays)) + esc(t("usage.so-these-figures-start-at")) + from + ".") + "</div></div>";
+            (dashUsePurged(d) ? tHtml("usage.older-calls-were-deleted-under-an", { time: tRaw(from) })
+                : tHtml("usage.access-logs-are-kept-for", { days: tn("usage.count-days", d.retentionDays), time: tRaw(from) })) + "</div></div>";
     }
     if (d.timeZone && !uiZoneValid(d.timeZone)) {
         out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>' + esc(t("usage.this-browser-cannot-show-this-report")) + "</b>" +
-            esc(t("usage.the-hours-and-days-are-counted")) + "<code>" + esc(d.timeZone) + "</code>" + esc(t("usage.but-their-names-here-use")) + "<code>" + esc(zone) +
-            "</code>" + esc(t("usage.so-they-can-be-off-by")) + "</div></div>";
+            tHtml("usage.the-hours-and-days-are-counted", { zone: tRaw("<code>" + esc(d.timeZone) + "</code>"), shown: tRaw("<code>" + esc(zone) + "</code>") }) + "</div></div>";
     } else if (zone !== uiAppZone) {
-        out += '<div class="ui-banner" role="status"><div><b>' + esc(t("usage.this-report-uses-another-time-zone")) + '</b>' + esc(t("usage.its-hours-and-days-are-counted")) + '<code>' +
-            esc(zone) + "</code>" + esc(t("usage.a-time-zone-saved-after-this")) + "</div></div>";
+        out += '<div class="ui-banner" role="status"><div><b>' + esc(t("usage.this-report-uses-another-time-zone")) + '</b>' + tHtml("usage.its-hours-and-days-are-counted", { zone: tRaw("<code>" + esc(zone) + "</code>") }) + "</div></div>";
     }
     if (d.areasIncomplete) {
         out += '<div class="ui-banner ui-banner-warn" role="status"><div><b>' + esc(t("usage.area-figures-are-incomplete-for-this")) + '</b>' +
             esc(t("usage.the-calls-name-more-different-zones")) + "</div></div>";
     }
     if (dashUse.failed) {
-        out += '<div class="ui-banner ui-banner-fail" role="alert"><div><b>' + esc(t("usage.could-not-refresh-these-figures")) + '</b>' + esc(dashUse.failed) +
-            esc(t("usage.they-are-tried-again-every-minute")) + "</div></div>";
+        out += '<div class="ui-banner ui-banner-fail" role="alert"><div><b>' + esc(t("usage.could-not-refresh-these-figures")) + '</b>' + esc(t("usage.they-are-tried-again-every-minute", { reason: dashUse.failed })) + "</div></div>";
     }
     return out;
 }
@@ -2535,7 +2536,7 @@ function dashUseOverviewHtml(d) {
     var html = dashUseNotices(d) + '<div class="ui-kpis">' +
         dashUseKpi(t("usage.calls"), esc(uiNum(totals.calls)), esc(t("usage.in", { range: t(USAGE_RANGES[d.range]) }))) +
         dashUseKpi(t("usage.denied"), esc(uiNum(totals.denied)), esc(t("usage.of-calls", { pct: dashUsePct(totals.denied, totals.calls) }))) +
-        dashUseKpi(t("usage.tokens-with-calls"), esc(uiNum(totals.tokensUsed)) + ' ' + '<span class="ui-muted">' + esc(t("usage.of")) + esc(uiNum(totals.tokensTotal)) + "</span>", esc(t("usage.tokens-that-called-in-this-period"))) +
+        dashUseKpi(t("usage.tokens-with-calls"), esc(uiNum(totals.tokensUsed)) + ' ' + '<span class="ui-muted">' + esc(t("usage.of", { total: uiNum(totals.tokensTotal) })) + "</span>", esc(t("usage.tokens-that-called-in-this-period"))) +
         dashUseKpi(t("usage.unknown-token"), esc(uiNum(totals.unknownCalls)), esc(t("usage.calls-with-a-token-the-service"))) +
         "</div>" + dashUseChartPanel(d);
     // Busiest first; the header buttons and the Sort order re-sort from here
@@ -2552,18 +2553,18 @@ function dashUseOverviewHtml(d) {
             '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(r.name) + "</span>" +
             (r.status !== "active" ? " " + dashUseStatusTag(r.status) : "") +
             (r.grantsChecks ? '<span class="ui-td-sub">' + esc(tn("usage.count-grants-checks", r.grantsChecks)) + "</span>" : "") + "</div>" +
-            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + '</span>' + esc(uiNum(r.calls)) + "</div>" +
-            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.denied-3")) + '</span><span' + (r.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(r.denied)) + "</span>" +
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + ' </span>' + esc(uiNum(r.calls)) + "</div>" +
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.denied-3")) + ' </span><span' + (r.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(r.denied)) + "</span>" +
             (r.calls ? '<span class="ui-td-sub">' + esc(dashUsePct(r.denied, r.calls)) + "</span>" : "") + "</div>" +
             '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + (r.calls ? dashUseAreaTags(r.topAreas) : '<span class="ui-muted">' + esc(t("usage.no-calls-in-this-period")) + '</span>') + "</div>" +
-            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.addresses-2")) + '</span>' + esc(uiNum(r.ipCount)) + "</div>" +
-            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + '</span>' + (r.lastCallAt ? uiTime(r.lastCallAt) : '<span class="ui-muted">-</span>') + "</div></div>";
+            '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.addresses-2")) + ' </span>' + esc(uiNum(r.ipCount)) + "</div>" +
+            '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + ' </span>' + (r.lastCallAt ? uiTime(r.lastCallAt) : '<span class="ui-muted">-</span>') + "</div></div>";
     }).join("") : dashEmpty(t("usage.no-tokens-yet"), esc(t("usage.create-a-token-on-the-tokens")));
-    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.tokens")) + '<span class="ui-count">' + esc(tn("usage.count-rows", rows.length)) + "</span></div>" +
+    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.tokens")) + ' <span class="ui-count">' + esc(tn("usage.count-rows", rows.length)) + "</span></div>" +
         '<div class="ui-table ui-stack" id="usage-table" role="table" aria-label="' + esc(t("usage.calls-per-token")) + '">' +
         '<div class="ui-tr ui-tr-head" role="row" id="usage-head">' + head + "</div>" +
         '<div class="ui-table-body" role="rowgroup">' + body + "</div></div></div>" +
-        '<p class="ui-usage-note">' + dashUseNote() + (totals.grantsChecks ? esc(t("usage.this-period-has", { checks: tn("usage.count-grants-checks", totals.grantsChecks) })) : "") + "</p>";
+        '<p class="ui-usage-note">' + dashUseNote() + (totals.grantsChecks ? " " + esc(t("usage.this-period-has", { checks: tn("usage.count-grants-checks", totals.grantsChecks) })) : "") + "</p>";
     return html;
 }
 
@@ -2575,8 +2576,8 @@ function dashUseBackLink() {
 function dashUseLevels(levels) {
     return '<div class="ui-tags">' + Object.keys(levels).map(function (lv) {
         var v = levels[lv];
-        return (v.allowed ? '<span class="ui-tag ui-tag-line">' + esc(lv + " " + uiNum(v.allowed)) + "</span>" : "") +
-            (v.denied ? '<span class="ui-tag ui-tag-fail">' + esc(lv + " " + uiNum(v.denied) + t("usage.denied-2")) + "</span>" : "");
+        return (v.allowed ? '<span class="ui-tag ui-tag-line">' + esc(t("usage.level-calls", { level: uiIdWord("logs.level.", lv), n: uiNum(v.allowed) })) + "</span>" : "") +
+            (v.denied ? '<span class="ui-tag ui-tag-fail">' + esc(t("usage.level-denied", { level: uiIdWord("logs.level.", lv), n: uiNum(v.denied) })) + "</span>" : "");
     }).join("") + "</div>";
 }
 
@@ -2606,17 +2607,17 @@ function dashUseTokenHtml(d) {
             '<div class="ui-table-body" role="rowgroup">' + areas.map(function (a) {
                 var width = Math.max(2, (a.calls / most) * 100).toFixed(1);
                 return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(a.area + (a.truncated ? "…" : "")) + "</span></div>" +
-                    '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + '</span>' + esc(uiNum(a.calls)) +
-                    (a.denied ? '<span class="ui-td-sub"><span class="ui-text-fail">' + esc(uiNum(a.denied) + t("usage.denied-2")) + "</span></span>" : "") + "</div>" +
+                    '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + ' </span>' + esc(uiNum(a.calls)) +
+                    (a.denied ? '<span class="ui-td-sub"><span class="ui-text-fail">' + esc(t("usage.denied-2", { n: uiNum(a.denied) })) + "</span></span>" : "") + "</div>" +
                     '<div class="ui-td ui-td-full" role="cell"><div class="ui-bar" style="width:' + width + '%" aria-hidden="true">' +
                     (a.allowed ? '<i class="is-base" style="flex:' + a.allowed + '"></i>' : "") + (a.denied ? '<i class="is-fail" style="flex:' + a.denied + '"></i>' : "") +
-                    '</div><span class="ui-sr">' + esc(uiNum(a.allowed) + t("usage.allowed") + uiNum(a.denied) + t("usage.denied-2")) + "</span></div>" +
+                    '</div><span class="ui-sr">' + esc(t("usage.allowed", { allowed: uiNum(a.allowed), denied: uiNum(a.denied) })) + "</span></div>" +
                     '<div class="ui-td ui-td-full ui-td-wrap" role="cell">' + dashUseLevels(a.levels) + "</div></div>";
             }).join("") + "</div></div>";
     }
     var shownAreas = areas ? areas.length : 0;
     html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.zones")) +
-        (d.areasCount !== null ? ' <span class="ui-count">' + esc(d.areasCount > shownAreas ? t("usage.the") + uiNum(shownAreas) + t("usage.busiest-of") + uiNum(d.areasCount) : tn("usage.count-zones", d.areasCount)) + "</span>" : "") +
+        (d.areasCount !== null ? ' <span class="ui-count">' + esc(d.areasCount > shownAreas ? t("usage.busiest-of", { shown: uiNum(shownAreas), total: uiNum(d.areasCount) }) : tn("usage.count-zones", d.areasCount)) + "</span>" : "") +
         "</div>" + areasBody + "</div>";
 
     var addrs = d.addresses;
@@ -2626,12 +2627,12 @@ function dashUseTokenHtml(d) {
         '<div class="ui-td" role="columnheader">' + esc(t("usage.denied")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.last-call")) + '</div></div>' +
         '<div class="ui-table-body" role="rowgroup">' + addrs.map(function (a) {
             return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell">' + uiCopyable(a.address + (a.truncated ? "…" : "")) + "</div>" +
-                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + '</span>' + esc(uiNum(a.calls)) + "</div>" +
-                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.denied-3")) + '</span><span' + (a.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(a.denied)) + "</span></div>" +
-                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + '</span>' + uiTime(a.lastCallAt) + "</div></div>";
+                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + ' </span>' + esc(uiNum(a.calls)) + "</div>" +
+                '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.denied-3")) + ' </span><span' + (a.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(a.denied)) + "</span></div>" +
+                '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + ' </span>' + uiTime(a.lastCallAt) + "</div></div>";
         }).join("") + "</div></div>";
-    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.addresses-2")) + '<span class="ui-count">' +
-        esc(totals.ipCount > addrs.length ? t("usage.the") + uiNum(addrs.length) + t("usage.busiest-of") + uiNum(totals.ipCount) : tn("usage.count-addresses", totals.ipCount)) +
+    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.addresses-2")) + ' <span class="ui-count">' +
+        esc(totals.ipCount > addrs.length ? t("usage.busiest-of", { shown: uiNum(addrs.length), total: uiNum(totals.ipCount) }) : tn("usage.count-addresses", totals.ipCount)) +
         "</span></div>" + addrBody + "</div>";
 
     html += '<p class="ui-usage-note">' + dashUseNote() + "</p>";
@@ -2811,10 +2812,15 @@ function dashSetAlert(tone, title, sub, actions) {
         "</small></div>" + (actions || "<span></span>") + "</div>";
 }
 
+// A value in a sentence of tHtml, set as code
+function dashCode(value) {
+    return tRaw("<code>" + esc(value) + "</code>");
+}
+
 function dashSetSavedLine(s, none) {
     return s.version
-        ? esc(t("settings.version")) + esc(uiNum(s.version)) + esc(t("settings.saved-by")) + uiUserText(s.savedBy || "?") + (s.savedFrom ? esc(t("settings.from")) + "<code>" + esc(s.savedFrom) + "</code>" : "") +
-          " " + uiTime(s.savedAt) + "."
+        ? tHtml(s.savedFrom ? "settings.version-from" : "settings.version", { version: uiNum(s.version), user: tRaw(uiUserText(s.savedBy || "?")),
+            address: s.savedFrom ? dashCode(s.savedFrom) : "", time: tRaw(uiTime(s.savedAt)) })
         : none;
 }
 
@@ -2823,11 +2829,12 @@ function dashSetAppliedAlerts(s, alerts) {
     var a = s.applied || {};
     if (a.lastReloadError) {
         alerts.push(dashSetAlert(" is-fail", t("settings.this-server-process-could-not-reload"),
-            esc(a.lastReloadError) + esc(t("settings.it-keeps-using-version")) + esc(uiNum(a.version)) + "."));
+            esc(t("settings.it-keeps-using-version", { reason: a.lastReloadError, version: uiNum(a.version) }))));
     } else if (a.version < s.version) {
-        alerts.push(dashSetAlert(" is-warn", t("settings.this-server-process-still-uses-version") + uiNum(a.version), esc(t("settings.it-reloads-the-settings-every-15"))));
+        alerts.push(dashSetAlert(" is-warn", t("settings.this-server-process-still-uses-version", { version: uiNum(a.version) }), esc(t("settings.it-reloads-the-settings-every-15"))));
     }
-    return esc(t("settings.this-server-process-enforces-version")) + esc(uiNum(a.version || 0)) + (a.lastReload ? esc(t("settings.checked")) + uiTime(a.lastReload) : "") + ".";
+    return a.lastReload ? tHtml("settings.checked", { version: uiNum(a.version || 0), time: tRaw(uiTime(a.lastReload)) })
+        : esc(t("settings.this-server-process-enforces-version", { version: uiNum(a.version || 0) }));
 }
 
 function dashPanelLoad(p, isCurrent) {
@@ -2877,12 +2884,12 @@ function dashPanelDraw(p) {
     var alerts = [];
     if (st.conflict) {
         alerts.push(dashSetAlert(" is-warn", t("settings.someone-else-saved-these-settings-after"),
-            p.conflictText(st.conflict) + esc(t("settings.your-changes-are-still-in-the")),
+            tHtml("settings.your-changes-are-still-in-the", { saved: tRaw(p.conflictText(st.conflict)) }),
             '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-set-discard="' + p.name + '">' + esc(t("settings.discard-my-changes")) + '</button>' +
             '<button type="button" class="ui-btn ui-btn-sm" data-set-keep="' + p.name + '">' + esc(t("settings.keep-my-changes")) + '</button></div>'));
     }
     if (st.refreshFailed) {
-        alerts.push(dashSetAlert(" is-fail", t("settings.could-not-refresh-the-settings"), esc(st.refreshFailed) + esc(t("settings.they-are-checked-again-every-30"))));
+        alerts.push(dashSetAlert(" is-fail", t("settings.could-not-refresh-the-settings"), esc(t("settings.they-are-checked-again-every-30", { reason: st.refreshFailed }))));
     }
     p.alerts(st.snap, alerts);
     var html = alerts.join("");
@@ -3032,20 +3039,17 @@ function dashSettingsDrawForm() {
     var proxySet = proxy.value !== null && proxy.value !== undefined;
     var proxyLoopback = proxySet && dashProxyLoopbackOnly(proxy.value);
     var proxyField = !proxySet
-        ? '<p class="ui-hint"><code>' + esc(proxy.envName) + "</code>" + esc(t("settings.ratelimit.is-not-set-so-uvicorn-trusts")) + "<code>" + esc(t("settings.ratelimit.x-forwarded-for")) + "</code>" + esc(t("settings.ratelimit.only-from")) +
-          "<code>" + "127.0.0.1" + "</code>" + esc(t("settings.ratelimit.and")) + "<code>" + "::1" + "</code>" + esc(t("settings.ratelimit.behind-a-reverse-proxy-at-another")) +
-          esc(t("settings.ratelimit.set-it-to-the-proxy-s")) + "</p>"
+        ? '<p class="ui-hint">' + tHtml("settings.ratelimit.is-not-set-so-uvicorn-trusts", { env: dashCode(proxy.envName), header: dashCode(t("settings.ratelimit.x-forwarded-for")),
+            a: dashCode("127.0.0.1"), b: dashCode("::1") }) + "</p>"
         : proxyLoopback
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + esc(t("settings.ratelimit.set-by-the")) + "<code>" + esc(proxy.envName) + "</code>" + esc(t("settings.ratelimit.environment-variable")) + "<code>" +
-          esc(proxy.value) + "</code>" + esc(t("settings.ratelimit.loopback-addresses-only-uvicorn-trusts")) + "<code>" + esc(t("settings.ratelimit.x-forwarded-for")) + "</code>" + esc(t("settings.ratelimit.only-from-these-addresses")) +
-          esc(t("settings.ratelimit.if-a-reverse-proxy-connects-from")) + "</span></p>"
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.loopback-addresses-only-uvicorn-trusts", { env: dashCode(proxy.envName),
+            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
         : proxy.value === ""
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + esc(t("settings.ratelimit.set-by-the")) + "<code>" + esc(proxy.envName) + "</code>" + esc(t("settings.ratelimit.environment-variable-to-an-empty-value")) +
-          esc(t("settings.ratelimit.so-uvicorn-trusts")) + "<code>" + esc(t("settings.ratelimit.x-forwarded-for")) + "</code>" + esc(t("settings.ratelimit.from-no-address-every-caller-has")) + "</span></p>"
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.environment-variable-to-an-empty-value", { env: dashCode(proxy.envName),
+            header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
         : proxy.value
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + esc(t("settings.ratelimit.set-by-the")) + "<code>" + esc(proxy.envName) + "</code>" + esc(t("settings.ratelimit.environment-variable")) + "<code>" +
-          esc(proxy.value) + "</code>" + esc(t("settings.ratelimit.uvicorn-takes-the-caller-s-address")) + "<code>" + esc(t("settings.ratelimit.x-forwarded-for")) + "</code>" + esc(t("settings.ratelimit.on-connections-from-these-addresses")) +
-          esc(t("settings.ratelimit.unless-its-start-command-sets-another")) + "</span></p>"
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.uvicorn-takes-the-caller-s-address", { env: dashCode(proxy.envName),
+            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
         : "";
     // Shown whether the field is locked or not.
     var maxScope = esc(t("settings.ratelimit.an-ipv6-64-network-counts-as"));
@@ -3053,12 +3057,13 @@ function dashSettingsDrawForm() {
         ? dashSetLocked(f.maxReq, tn("settings.ratelimit.count-requests", f.maxReq.value)) + '<span class="ui-hint">' + maxScope + "</span>"
         : '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
           '" step="1" required value="' + esc(d.maxReq) + '" aria-describedby="set-max-hint" />' +
-          '<span class="ui-hint" id="set-max-hint">' + esc(dashSetSourceHint(f.maxReq)) + esc(t("settings.ratelimit.from-1-to")) + esc(uiNum(f.maxReq.max)) + ". " + maxScope + "</span>";
+          '<span class="ui-hint" id="set-max-hint">' + esc(t("settings.ratelimit.from-1-to", { source: dashSetSourceHint(f.maxReq), max: uiNum(f.maxReq.max),
+            scope: t("settings.ratelimit.an-ipv6-64-network-counts-as") })) + "</span>";
     var winField = f.windowMs.locked
-        ? dashSetLocked(f.windowMs, uiNum(f.windowMs.value) + t("settings.ratelimit.ms"))
+        ? dashSetLocked(f.windowMs, t("settings.ratelimit.ms", { n: uiNum(f.windowMs.value) }))
         : '<input class="ui-input" id="set-window" type="number" inputmode="numeric" min="' + esc(f.windowMs.minSeconds) + '" max="' +
           esc(f.windowMs.maxSeconds) + '" step="1" required value="' + esc(d.windowSeconds) + '" aria-describedby="set-window-hint" />' +
-          '<span class="ui-hint" id="set-window-hint">' + esc(dashSetSourceHint(f.windowMs)) + esc(t("settings.ratelimit.whole-seconds-from-1-to")) + esc(uiNum(f.windowMs.maxSeconds)) + ".</span>";
+          '<span class="ui-hint" id="set-window-hint">' + esc(t("settings.ratelimit.whole-seconds-from-1-to", { source: dashSetSourceHint(f.windowMs), max: uiNum(f.windowMs.maxSeconds) })) + "</span>";
     body.innerHTML =
         '<form class="ui-form" id="settings-form" novalidate><fieldset class="ui-settings-fields" id="settings-fields">' +
         '<div class="ui-form-row">' +
@@ -3066,17 +3071,16 @@ function dashSettingsDrawForm() {
         '<div class="ui-field"><label class="ui-label" for="set-window">' + esc(t("settings.ratelimit.window-in-seconds")) + '</label>' + winField + "</div>" +
         "</div>" +
         '<div class="ui-field"><span class="ui-label">' + esc(t("settings.ratelimit.reverse-proxy-addresses")) + '</span>' + proxyField + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="set-exempt">' + esc(t("settings.ratelimit.exempt-addresses-and-networks")) + '<small>' + esc(t("settings.ratelimit.one-per-line-up-to")) + esc(uiNum(f.exempt.max)) + ")</small></label>" +
+        '<div class="ui-field"><label class="ui-label" for="set-exempt">' + esc(t("settings.ratelimit.exempt-addresses-and-networks")) + ' <small>' + esc(t("settings.ratelimit.one-per-line-up-to", { max: uiNum(f.exempt.max) })) + "</small></label>" +
         '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint" placeholder="' + esc(t("settings.ratelimit.203-0-113-10-172-18")) + '">' +
         esc(d.exempt) + "</textarea>" +
-        '<span class="ui-hint" id="set-exempt-hint">' + esc(t("settings.ratelimit.ipv4-or-ipv6-addresses-or-networks")) + '<code>' + '172.18.0.0/16' + '</code>' + esc(t("settings.ratelimit.requests-from-them-are-never-limited")) +
-        (own ? esc(t("settings.ratelimit.your-request-to-this-page-came")) + "<code>" + esc(own) + "</code>." : "") + "</span>" +
+        '<span class="ui-hint" id="set-exempt-hint">' + (own
+            ? tHtml("settings.ratelimit.your-request-to-this-page-came", { example: dashCode("172.18.0.0/16"), own: dashCode(own) })
+            : tHtml("settings.ratelimit.ipv4-or-ipv6-addresses-or-networks", { example: dashCode("172.18.0.0/16") })) + "</span>" +
         (proxySet && proxy.value && !proxyLoopback ? "" :
             '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.ratelimit.an-exempt-address-is-not-limited")) + '</p>' +
-            "<small>" + esc(t("settings.ratelimit.if-a-reverse-proxy-sits-in")) + "<code>" + esc(t("settings.ratelimit.forwarded-allow-ips")) + "</code>" + esc(t("settings.ratelimit.does-not-list-its-address-every")) +
-            esc(t("settings.ratelimit.and-exempting-it-removes-the-limit")) + "</small></div><span></span></div>") +
-        '<label class="ui-check-label hidden" id="set-own-wrap"><input type="checkbox" class="ui-check" id="set-own" />' + ' ' + '<span>' + esc(t("settings.ratelimit.exempt")) + '<code>' + esc(own || "") +
-        "</code>" + esc(t("settings.ratelimit.the-address-my-own-request-came")) + "</span></label>" +
+            "<small>" + tHtml("settings.ratelimit.if-a-reverse-proxy-sits-in", { env: dashCode(t("settings.ratelimit.forwarded-allow-ips")) }) + "</small></div><span></span></div>") +
+        '<label class="ui-check-label hidden" id="set-own-wrap"><input type="checkbox" class="ui-check" id="set-own" />' + ' ' + '<span>' + tHtml("settings.ratelimit.exempt", { own: dashCode(own || "") }) + "</span></label>" +
         "</div>" +
         '<p class="ui-error hidden" id="set-err" role="alert"></p>' +
         '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-save">' + esc(t("settings.ratelimit.save")) + '</button>' +
@@ -3104,13 +3108,13 @@ function dashSettingsDraw() {
 function dashSettingsAlerts(s, alerts) {
     var applied = dashSetAppliedAlerts(s, alerts);
     var saved = dashSetSavedLine(s, esc(t("settings.ratelimit.nothing-saved-here-yet-the-values")));
-    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), saved + " " + applied + esc(t("settings.ratelimit.changes-apply-at-once-in-this"))));
+    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), tHtml("settings.ratelimit.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
 }
 
 function dashSettingsConflictText(c) {
     var f = c.fields;
-    return esc(t("settings.ratelimit.saved-now")) + esc(tn("settings.ratelimit.count-requests", f.maxReq.value)) + esc(t("settings.ratelimit.per")) + esc(uiNum(f.windowMs.value / 1000)) + esc(t("settings.ratelimit.s-exempt")) +
-        (f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : esc(t("settings.ratelimit.none"))) + ".";
+    return tHtml("settings.ratelimit.saved-now", { requests: tn("settings.ratelimit.count-requests", f.maxReq.value), seconds: uiNum(f.windowMs.value / 1000),
+        exempt: tRaw(f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : esc(t("settings.ratelimit.none"))) });
 }
 
 function dashSettingsInput() {
@@ -3246,8 +3250,7 @@ function dashGenRetentionField(f, r, d) {
     if (field.locked) return dashSetLocked(field, tn("settings.general.count-days", field.value));
     return '<input class="ui-input" id="' + r[1] + '" type="number" inputmode="numeric" min="' + esc(field.min) + '" max="' + esc(field.max) +
         '" step="1" required value="' + esc(d[r[0]]) + '" aria-describedby="' + r[1] + '-hint" />' +
-        '<span class="ui-hint" id="' + r[1] + '-hint">' + esc(dashSetSourceHint(field)) + esc(t("settings.general.whole-days-from")) + esc(uiNum(field.min)) + esc(t("settings.general.to")) +
-        esc(uiNum(field.max)) + esc(t("settings.general.older-entries-are-deleted-about-once")) + "</span>";
+        '<span class="ui-hint" id="' + r[1] + '-hint">' + esc(t("settings.general.whole-days-from", { source: dashSetSourceHint(field), min: uiNum(field.min), max: uiNum(field.max) })) + "</span>";
 }
 
 function dashGenDrawForm() {
@@ -3264,20 +3267,18 @@ function dashGenDrawForm() {
         : '<select class="ui-select" id="gen-tz" aria-describedby="gen-tz-hint">' + zones.map(function (z) {
             return '<option value="' + esc(z) + '"' + (z === d.timeZone ? " selected" : "") + ">" + esc(z) + "</option>";
         }).join("") + "</select>" +
-          '<span class="ui-hint" id="gen-tz-hint">' + esc(dashSetSourceHint(f.timeZone)) + esc(t("settings.general.dates-on-every-page-and-the")) +
-          esc(t("settings.general.other-open-tabs-show-the-previous")) + "</span>";
+          '<span class="ui-hint" id="gen-tz-hint">' + esc(t("settings.general.dates-on-every-page-and-the", { source: dashSetSourceHint(f.timeZone) })) + "</span>";
     var cookieField = f.cookieSecure.locked
         ? dashSetLocked(f.cookieSecure, f.cookieSecure.value ? "true" : "false")
         : '<label class="ui-check-label"><input type="checkbox" class="ui-check" id="gen-cookie"' + (d.cookieSecure ? " checked" : "") +
           ' aria-describedby="gen-cookie-hint" />' + ' ' + '<span>' + esc(t("settings.general.send-the-session-cookie-over-https")) + '</span></label>' +
-          '<span class="ui-hint" id="gen-cookie-hint">' + esc(dashSetSourceHint(f.cookieSecure)) +
-          esc(t("settings.general.turn-it-on-when-admins-reach")) + "</span>";
+          '<span class="ui-hint" id="gen-cookie-hint">' + esc(t("settings.general.turn-it-on-when-admins-reach", { source: dashSetSourceHint(f.cookieSecure) })) + "</span>";
     var root = s.rootPath || { envName: "ROOT_PATH", value: null };
     var rootField = root.value === null || root.value === undefined
-        ? '<p class="ui-hint"><code>' + esc(root.envName) + "</code>" + esc(t("settings.general.is-not-set-so-the-portal")) + "</p>"
-        : '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + esc(t("settings.general.set-by-the")) + "<code>" + esc(root.envName) + "</code>" + esc(t("settings.general.environment-variable")) +
-          (root.value ? ": <code>" + esc(root.value) + "</code>" : esc(t("settings.general.to-an-empty-value-so-the"))) +
-          esc(t("settings.general.it-must-match-the-route-of")) + "</span></p>";
+        ? '<p class="ui-hint">' + tHtml("settings.general.is-not-set-so-the-portal", { env: dashCode(root.envName) }) + "</p>"
+        : '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + (root.value
+            ? tHtml("settings.general.environment-variable", { env: dashCode(root.envName), value: dashCode(root.value) })
+            : tHtml("settings.general.to-an-empty-value-so-the", { env: dashCode(root.envName) })) + "</span></p>";
     var locked = f.timeZone.locked && f.cookieSecure.locked && f.activityLogRetentionDays.locked && f.accessLogRetentionDays.locked;
     body.innerHTML =
         '<form class="ui-form" id="general-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="general-fields">' +
@@ -3315,7 +3316,8 @@ function dashGenAsksHtml() {
         if (dashGenLowered(st.askPurge, "activityLogRetentionDays")) parts.push(rows(e.activityLogs, "settings.general.unknown-activity-log-entries", "settings.general.count-activity-log-entries"));
         if (dashGenLowered(st.askPurge, "accessLogRetentionDays")) parts.push(rows(e.accessLogs, "settings.general.unknown-access-log-entries", "settings.general.count-access-log-entries"));
         html += dashSetAskHtml("gen-purge-ok", t("settings.general.lowering-the-retention-deletes-older-entries"),
-            esc(st.askPurge.detail || "") + (parts.length ? esc(t("settings.general.older-than-the-new-limit", { parts: parts.join(t("settings.general.and")) })) : ""),
+            parts.length ? esc(t("settings.general.older-than-the-new-limit", { detail: st.askPurge.detail || "",
+                parts: parts.length > 1 ? t("settings.general.and", { first: parts[0], second: parts[1] }) : parts[0] })) : esc(st.askPurge.detail || ""),
             t("settings.general.delete-them-when-i-save"), st.askPurge.ok);
     }
     if (st.askCookie) {
@@ -3345,27 +3347,27 @@ function dashGenAlerts(s, alerts) {
     var tz = s.fields.timeZone;
     if (tz.envInvalid) {
         alerts.push(dashSetAlert(" is-warn", t("settings.general.tz-is-not-a-time-zone"),
-            esc(t("settings.general.the")) + "<code>" + esc(tz.envName) + "</code>" + esc(t("settings.general.environment-variable-is-empty-or-not")) +
-            esc(t("settings.general.set-it-to-a-name-such")) + "<code>" + esc(t("settings.general.europe-london")) + "</code>" + esc(t("settings.general.or-remove-it-to-choose-the"))));
+            tHtml("settings.general.environment-variable-is-empty-or-not", { env: dashCode(tz.envName), example: dashCode(t("settings.general.europe-london")) })));
     }
     var purge = s.purge || {};
     DASH_GEN_PURGE.forEach(function (x) {
         var p = purge[x[0]];
         if (p && p.state === "skipped") {
             alerts.push(dashSetAlert(" is-warn", t("settings.general.old", { log: t(x[1]) }),
-                esc(p.reason || t("settings.general.this-server-process-skipped-the-cleanup")) + (p.lastRun ? esc(t("settings.general.last-attempt")) + uiTime(p.lastRun) + "." : "") +
-                esc(t("settings.general.the-cleanup-runs-again-every-minute"))));
+                p.lastRun
+                    ? tHtml("settings.general.last-attempt", { reason: p.reason || t("settings.general.this-server-process-skipped-the-cleanup"), time: tRaw(uiTime(p.lastRun)) })
+                    : esc(t("settings.general.the-cleanup-runs-again-every-minute", { reason: p.reason || t("settings.general.this-server-process-skipped-the-cleanup") }))));
         }
     });
     var applied = dashSetAppliedAlerts(s, alerts);
     var saved = dashSetSavedLine(s, esc(t("settings.general.nothing-saved-here-yet-the-values")));
-    alerts.push(dashSetAlert("", t("settings.general.saved-settings"), saved + " " + applied + esc(t("settings.general.changes-apply-at-once-in-this"))));
+    alerts.push(dashSetAlert("", t("settings.general.saved-settings"), tHtml("settings.general.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
 }
 
 function dashGenConflictText(c) {
     var f = c.fields;
-    return esc(t("settings.general.saved-now-time-zone")) + esc(f.timeZone.value) + esc(t("settings.general.activity-log-2")) + esc(tn("settings.general.count-days", f.activityLogRetentionDays.value)) +
-        esc(t("settings.general.access-log-2")) + esc(tn("settings.general.count-days", f.accessLogRetentionDays.value)) + esc(t("settings.general.secure-cookie")) + (f.cookieSecure.value ? esc(t("settings.general.on")) : esc(t("settings.general.off"))) + ".";
+    return esc(t("settings.general.saved-now-time-zone", { zone: f.timeZone.value, activity: tn("settings.general.count-days", f.activityLogRetentionDays.value),
+        access: tn("settings.general.count-days", f.accessLogRetentionDays.value), cookie: f.cookieSecure.value ? t("settings.general.on") : t("settings.general.off") }));
 }
 
 function dashGenSave() {
@@ -3487,15 +3489,15 @@ function dashRedisDrawForm() {
     var body = document.getElementById("redis-body");
     if (!body || !dashRedis.baseSnap) return;
     var u = dashRedis.baseSnap.url;
-    var now = '<p class="ui-hint">' + esc(t("settings.redis.this-server-process-uses")) + '<code>' + esc(u.connected) + "</code>." +
-        (u.saved ? esc(t("settings.redis.saved-here")) + "<code>" + esc(u.saved) + "</code>." : "") +
-        esc(t("settings.redis.the-service-takes-the-connection-from")) + (DASH_REDIS_SOURCE[u.source] ? tHtml(DASH_REDIS_SOURCE[u.source][0], { env: tRaw(DASH_REDIS_SOURCE[u.source][1] ? "<code>" + esc(t(DASH_REDIS_SOURCE[u.source][1])) + "</code>" : "") }) : esc(u.source)) + esc(t("settings.redis.passwords-are-never-shown")) + "</p>";
+    var source = tRaw(DASH_REDIS_SOURCE[u.source] ? tHtml(DASH_REDIS_SOURCE[u.source][0], { env: tRaw(DASH_REDIS_SOURCE[u.source][1] ? "<code>" + esc(t(DASH_REDIS_SOURCE[u.source][1])) + "</code>" : "") }) : esc(u.source));
+    var now = '<p class="ui-hint">' + (u.saved
+        ? tHtml("settings.redis.saved-here", { connected: dashCode(u.connected), saved: dashCode(u.saved), source: source })
+        : tHtml("settings.redis.this-server-process-uses", { connected: dashCode(u.connected), source: source })) + "</p>";
     var field = u.locked
         ? dashSetLocked(u, u.connected)
         : '<input class="ui-input" id="redis-url" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr" ' +
           'placeholder="' + esc(t("settings.redis.redis-password-host-6379-0")) + '" aria-describedby="redis-url-hint" />' +
-          '<span class="ui-hint" id="redis-url-hint">' + esc(t("settings.redis.the-whole-url-with-its-password")) + '<code>' + esc(t("settings.redis.rediss")) + '</code>' + esc(t("settings.redis.for-tls-before-saving-the-server")) +
-          esc(t("settings.redis.with-it-and-tries-the-commands")) + "</span>";
+          '<span class="ui-hint" id="redis-url-hint">' + tHtml("settings.redis.the-whole-url-with-its-password", { scheme: dashCode(t("settings.redis.rediss")) }) + "</span>";
     body.innerHTML =
         '<form class="ui-form" id="redis-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="redis-fields">' +
         '<div class="ui-field"><span class="ui-label">' + esc(t("settings.redis.current-connection")) + '</span>' + now + "</div>" +
@@ -3525,19 +3527,18 @@ function dashRedisAlerts(s, alerts) {
     var u = s.url;
     if (u.syncPending) {
         alerts.push(dashSetAlert(" is-warn", t("settings.redis.the-environment-value-is-not-saved"),
-            esc(t("settings.redis.the-service-saves")) + "<code>" + esc(u.envName) + "</code>" + esc(t("settings.redis.here-once-a-check-against-it"))));
+            tHtml("settings.redis.the-service-saves", { env: dashCode(u.envName) })));
     }
     if (s.restartNeeded) {
         alerts.push(dashSetAlert(" is-warn", t("settings.redis.restart-the-service-to-use-the"),
-            esc(t("settings.redis.this-server-process-still-uses")) + "<code>" + esc(u.connected) + "</code>" + esc(t("settings.redis.restart-every-instance-of-the-service")) +
-            "<code>" + esc(t("settings.redis.docker-compose-restart-auth-service")) + "</code>" + esc(t("settings.redis.with-several-replicas-stop-them-all"))));
+            tHtml("settings.redis.this-server-process-still-uses", { connected: dashCode(u.connected), command: dashCode(t("settings.redis.docker-compose-restart-auth-service")) })));
     }
     var saved = dashSetSavedLine(s, esc(t("settings.redis.nothing-saved-here-yet")));
-    alerts.push(dashSetAlert("", t("settings.redis.saved-connection"), saved + esc(t("settings.redis.a-saved-connection-takes-effect-when"))));
+    alerts.push(dashSetAlert("", t("settings.redis.saved-connection"), tHtml("settings.redis.a-saved-connection-takes-effect-when", { saved: tRaw(saved) })));
 }
 
 function dashRedisConflictText(c) {
-    return esc(t("settings.redis.saved-now")) + (c.url.saved ? "<code>" + esc(c.url.saved) + "</code>" : esc(t("settings.redis.nothing"))) + ".";
+    return tHtml("settings.redis.saved-now", { url: c.url.saved ? dashCode(c.url.saved) : t("settings.redis.nothing") });
 }
 
 function dashRedisSave() {
@@ -3575,7 +3576,7 @@ function dashRedisSave() {
             return;
         }
         if (d.code === "redis_check_failed") {
-            dashPanelFail(DASH_SET_PANELS.redis, t(DASH_REDIS_CHECK[d.category] || DASH_REDIS_CHECK.other) + t("settings.redis.nothing-was-saved"), "url");
+            dashPanelFail(DASH_SET_PANELS.redis, t("settings.redis.nothing-was-saved", { reason: t(DASH_REDIS_CHECK[d.category] || DASH_REDIS_CHECK.other) }), "url");
             return;
         }
         dashPanelFail(DASH_SET_PANELS.redis, apiError(res, t("settings.redis.could-not-save-the-redis-connection")), d.field || "");
@@ -3724,15 +3725,14 @@ function dashPkSetFormHtml() {
         field = '<input class="ui-input" id="set-pk-origin" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" ' +
             'placeholder="' + esc(here) + '" value="' + esc(dashPkSet.draft) + '" aria-describedby="set-pk-hint" data-inventory="settings.passkeys.origin" />';
     }
-    var hint = esc(t("settings.passkeys.the-address-admins-open-this-service")) + "<code>" + esc(here) + "</code>" + esc(t("settings.passkeys.passkeys-work-only-there-https-is"));
-    if (!b.locked && !b.origin) hint += esc(t("settings.passkeys.not-set-yet-the-first-passkey"));
-    if (!b.locked && b.origin && b.savedBy) hint += esc(t("settings.passkeys.saved-by")) + uiUserText(b.savedBy) + " " + uiTime(b.savedAt) + ".";
+    var hint = !b.locked && !b.origin ? tHtml("settings.passkeys.not-set-yet-the-first-passkey", { here: dashCode(here) })
+        : !b.locked && b.origin && b.savedBy ? tHtml("settings.passkeys.saved-by", { here: dashCode(here), user: tRaw(uiUserText(b.savedBy)), time: tRaw(uiTime(b.savedAt)) })
+        : tHtml("settings.passkeys.the-address-admins-open-this-service", { here: dashCode(here) });
     return '<form class="ui-form" id="pk-set-form" novalidate><fieldset class="ui-settings-fields" id="pk-set-fields">' +
         '<div class="ui-field"><label class="ui-label" for="set-pk-origin">' + esc(t("settings.passkeys.passkey-address")) + '</label>' + field +
         '<span class="ui-hint" id="set-pk-hint">' + hint + "</span></div>" +
         '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.passkeys.passkeys-made-for-another-address-stop")) + '</p>' +
-        "<small>" + esc(t("settings.passkeys.a-new-host-name-or-no")) +
-        esc(t("settings.passkeys.passwords-and-authenticator-codes-keep-working")) + "</small></div><span></span></div>" +
+        "<small>" + esc(t("settings.passkeys.a-new-host-name-or-no")) + "</small></div><span></span></div>" +
         '<p class="ui-error hidden" id="set-pk-err" role="alert"></p>' +
         (b.locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-pk-save">' + esc(t("settings.passkeys.save")) + '</button>' +
             '<button type="button" class="ui-btn hidden" id="set-pk-discard">' + esc(t("settings.passkeys.discard-changes")) + '</button>' +
@@ -3750,7 +3750,7 @@ function dashPkSetDraw(redraw) {
     }
     if (redraw || !document.getElementById("pk-set-form")) body.innerHTML = dashPkSetFormHtml();
     var err = document.getElementById("set-pk-err");
-    var text = dashPkSet.error || (dashPkSet.refreshFailed ? t("settings.passkeys.could-not-refresh-the-passkey-address") + dashPkSet.refreshFailed : "");
+    var text = dashPkSet.error || (dashPkSet.refreshFailed ? t("settings.passkeys.could-not-refresh-the-passkey-address", { reason: dashPkSet.refreshFailed }) : "");
     err.textContent = text;
     err.classList.toggle("hidden", !text);
     var input = document.getElementById("set-pk-origin");
@@ -3790,7 +3790,7 @@ function dashPkSetSave() {
     if (!value) {
         ask = { title: t("settings.passkeys.remove-the-passkey-address"), message: t("settings.passkeys.no-passkey-works-until-an-address"), confirmText: t("settings.passkeys.remove") };
     } else if (current && b.rpId && dashPkHost(value) && dashPkHost(value) !== b.rpId) {
-        ask = { title: t("settings.passkeys.change-the-passkey-address"), message: t("settings.passkeys.passkeys-made-for") + b.rpId + t("settings.passkeys.stop-working-at-the-new-address"), confirmText: t("settings.passkeys.change") };
+        ask = { title: t("settings.passkeys.change-the-passkey-address"), message: t("settings.passkeys.passkeys-made-for", { address: b.rpId }), confirmText: t("settings.passkeys.change") };
     }
     if (ask) ask.danger = true;
     (ask ? uiConfirm(ask) : Promise.resolve(true)).then(function (ok) {
@@ -3896,15 +3896,16 @@ function dashDbLoad(isCurrent) {
 
 function dashDbSummary(c) {
     if (!c) return "";
-    if (c.backend === "sqlite") return esc(t("settings.database.the-sqlite-file")) + "<code>" + esc(c.path || "") + "</code>.";
-    var where = esc((c.user || "?") + "@" + (c.host || "?") + ":" + (c.port || "") + "/" + (c.database || "?"));
-    return esc(t("settings.database.postgresql")) + "<code>" + where + "</code>" + (c.sslmode ? esc(t("settings.database.tls")) + esc(c.sslmode) + (c.caPem ? esc(t("settings.database.with-a-ca-certificate")) : "") : "") + ".";
+    if (c.backend === "sqlite") return tHtml("settings.database.the-sqlite-file", { path: dashCode(c.path || "") });
+    var where = dashCode((c.user || "?") + "@" + (c.host || "?") + ":" + (c.port || "") + "/" + (c.database || "?"));
+    if (!c.sslmode) return tHtml("settings.database.postgresql", { where: where });
+    return tHtml(c.caPem ? "settings.database.with-a-ca-certificate" : "settings.database.tls", { where: where, mode: uiIdWord("db.sslmode.", c.sslmode) });
 }
 
 function dashDbFormHtml() {
     var s = dashDb.snap;
     var c = s.connection;
-    var now = '<p class="ui-hint">' + dashDbSummary(c) + esc(t("settings.database.passwords-are-never-shown")) + "</p>";
+    var now = '<p class="ui-hint">' + tHtml("settings.database.passwords-are-never-shown", { summary: tRaw(dashDbSummary(c)) }) + "</p>";
     if (s.locked) {
         return '<div class="ui-form"><div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
             dashSetLocked({ envName: s.envName }, c.backend === "sqlite" ? t("settings.database.sqlite") : t("settings.database.postgresql-2")) + "</div></div>";
@@ -3915,8 +3916,7 @@ function dashDbFormHtml() {
     }
     return '<form class="ui-form" id="db-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="db-fields">' +
         '<div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
-        '<p class="ui-hint">' + esc(t("settings.database.change-it-for-a-new-password")) +
-        esc(t("settings.database.the-service-checks-the-new-connection")) + "</p></div>" +
+        '<p class="ui-hint">' + esc(t("settings.database.change-it-for-a-new-password")) + "</p></div>" +
         uiDbFieldsHtml("dbs-", { host: c.host, port: c.port, database: c.database, user: c.user, sslmode: c.sslmode, caSaved: c.caPem }, true) +
         '<div id="dbs-result" aria-live="polite"></div>' +
         '<label class="ui-check-label hidden" id="dbs-confirm-row"><input type="checkbox" class="ui-check" id="dbs-confirm" /> <span id="dbs-confirm-text"></span></label>' +
@@ -3947,7 +3947,7 @@ function dashDbDraw(redraw) {
     document.getElementById("dbs-confirm-text").textContent = dashDb.askConfirm;
     document.getElementById("dbs-confirm").checked = dashDb.confirm;
     var err = document.getElementById("dbs-err");
-    var text = dashDb.error || (dashDb.refreshFailed ? t("settings.database.could-not-refresh-the-database-connection") + dashDb.refreshFailed : "");
+    var text = dashDb.error || (dashDb.refreshFailed ? t("settings.database.could-not-refresh-the-database-connection", { reason: dashDb.refreshFailed }) : "");
     err.textContent = text;
     err.classList.toggle("hidden", !text);
 }
@@ -3997,7 +3997,7 @@ function dashDbSave() {
         if (!r) return;
         var note = uiDbCheckNote(r, "settings");
         if (!r.ok || (note && note.tone === " is-fail")) {
-            dashDbFail(t("settings.database.nothing-was-saved") + (note ? note.title.toLowerCase() : t("settings.database.the-check-failed-2")) + ".");
+            dashDbFail(t("settings.database.nothing-was-saved", { reason: note ? note.title.toLowerCase() : t("settings.database.the-check-failed-2") }));
             return;
         }
         if (dashDb.askConfirm && !dashDb.confirm) {
@@ -4058,7 +4058,7 @@ function dashDbRun(job) {
                 dashDb.askConfirm = t("settings.database.use-it-anyway-changes-made-after");
                 dashDb.confirm = false;
             }
-            dashDbFail(t("settings.database.nothing-was-changed") + uiDbCodeText(j.code, j.error));
+            dashDbFail(t("settings.database.nothing-was-changed", { reason: uiDbCodeText(j.code, j.error) }));
         });
     };
     poll();
@@ -4295,26 +4295,25 @@ function dashPkInfoHtml(data, blocked, here) {
     var a = data && data.address;
     if (!a) return alerts.join("");
     if (!a.origin) {
-        add("", t("account.passkeys.no-passkey-address-yet"), esc(t("account.passkeys.your-first-passkey-ties-passkeys-to")) + "<code>" + esc(here) +
-            "</code>" + esc(t("account.passkeys.the-address-this-page-is-open")) + settings + ".");
+        add("", t("account.passkeys.no-passkey-address-yet"), tHtml("account.passkeys.your-first-passkey-ties-passkeys-to", { here: dashCode(here), settings: tRaw(settings) }));
     } else if (a.origin !== here) {
-        add(" is-warn", t("account.passkeys.this-page-is-open-at-another"), esc(t("account.passkeys.passkeys-work-at")) + "<code>" + esc(a.origin) + "</code>" + esc(t("account.passkeys.and-this-page-is-open-at")) + "<code>" +
-            esc(here) + "</code>" + esc(t("account.passkeys.open-the-service-at")) + "<code>" + esc(a.origin) + "</code>" + esc(t("account.passkeys.to-add-or-use-a-passkey")));
+        add(" is-warn", t("account.passkeys.this-page-is-open-at-another"), tHtml("account.passkeys.and-this-page-is-open-at", { origin: dashCode(a.origin), here: dashCode(here) }));
     } else {
-        add("", t("account.passkeys.passkey-address"), esc(t("account.passkeys.passkeys-work-at")) + "<code>" + esc(a.origin) + "</code>." +
-            (a.locked ? esc(t("account.passkeys.the")) + "<code>" + esc(a.envName || "PASSKEY_ORIGIN") + "</code>" + esc(t("account.passkeys.environment-variable-sets-it")) : esc(t("account.passkeys.you-can-change-it-on")) + settings + "."));
+        add("", t("account.passkeys.passkey-address"), a.locked
+            ? tHtml("account.passkeys.environment-variable-sets-it", { origin: dashCode(a.origin), env: dashCode(a.envName || "PASSKEY_ORIGIN") })
+            : tHtml("account.passkeys.you-can-change-it-on", { origin: dashCode(a.origin), settings: tRaw(settings) }));
     }
     return alerts.join("");
 }
 
 function dashPkRowHtml(p) {
     var tags = [];
-    if (!p.usable) tags.push(dashTag(t("account.passkeys.not-usable-at-this-address-made") + p.rpId + ")", "warn"));
+    if (!p.usable) tags.push(dashTag(t("account.passkeys.not-usable-at-this-address-made", { address: p.rpId }), "warn"));
     tags.push(p.backedUp ? dashTag(t("account.passkeys.synced"), "ok") : dashTag(t("account.passkeys.not-backed-up"), ""));
     return '<div class="ui-tr" role="row" data-key="' + esc(p.id) + '" aria-label="' + esc(p.name) + '">' +
         '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(p.name) + "</span></div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("account.passkeys.created")) + '</span>' + uiTime(p.createdAt) + "</div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("account.passkeys.last-used")) + '</span>' + (p.lastUsedAt ? uiTime(p.lastUsedAt) : '<span class="ui-muted">' + esc(t("account.passkeys.never")) + '</span>') + "</div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("account.passkeys.created")) + ' </span>' + uiTime(p.createdAt) + "</div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("account.passkeys.last-used")) + ' </span>' + (p.lastUsedAt ? uiTime(p.lastUsedAt) : '<span class="ui-muted">' + esc(t("account.passkeys.never")) + '</span>') + "</div>" +
         '<div class="ui-td ui-td-full ui-td-wrap" role="cell"><div class="ui-tags">' + tags.join("") + "</div></div>" +
         '<div class="ui-td ui-td-end" role="cell">' + dashMenuButton(p.name) + "</div></div>";
 }
@@ -4365,7 +4364,7 @@ function dashPkBind() {
         dashPkLoad(true).then(function (data) {
             dashPkDraw(false);
             if (!data) {
-                showToast(t("account.passkeys.could-not-load-your-passkeys-2") + (dashPk.failed || t("account.passkeys.failed")) + t("account.passkeys.try-again-in-a-moment"), "error");
+                showToast(t("account.passkeys.could-not-load-your-passkeys-2", { reason: dashPk.failed || t("account.passkeys.failed") }), "error");
                 return;
             }
             dashPkAddDialog(data);
@@ -4407,11 +4406,10 @@ function dashPkAddDialog(data) {
     var notice = "";
     if (!a.origin) {
         notice = '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("account.passkeys.this-passkey-sets-the-passkey-address")) + '</p><small>' +
-            esc(t("account.passkeys.passkeys-will-work-at")) + "<code>" + esc(here) + "</code>" + esc(t("account.passkeys.if-the-service-moves-to-another")) + "</small></div><span></span></div>";
+            tHtml("account.passkeys.passkeys-will-work-at", { here: dashCode(here) }) + "</small></div><span></span></div>";
     } else if (a.origin !== here) {
         notice = '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("account.passkeys.this-page-is-open-at-another")) + '</p><small>' +
-            esc(t("account.passkeys.passkeys-work-at")) + "<code>" + esc(a.origin) + "</code>" + esc(t("account.passkeys.so-the-browser-will-likely-refuse")) + "<code>" +
-            esc(a.origin) + "</code>" + esc(t("account.passkeys.to-add-a-passkey")) + "</small></div><span></span></div>";
+            tHtml("account.passkeys.so-the-browser-will-likely-refuse", { origin: dashCode(a.origin) }) + "</small></div><span></span></div>";
     }
     var formId = "pk-add-form";
     d = uiDialog({
@@ -4684,6 +4682,9 @@ registerPageRefresh("account", 30000, function (isCurrent) {
 });
 
 var DASH_SEARCH_ICON ='<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>';
+
+// The last script of the page: every word of the parsed page is in place (js/text.js)
+if (typeof document !== "undefined" && document && typeof document.querySelectorAll === "function") uiApplyText(document, true);
 
 if (typeof document !== "undefined" && document.readyState !== undefined) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", dashBoot);

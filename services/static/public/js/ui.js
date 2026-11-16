@@ -50,6 +50,14 @@ function uiCountLabel(n, key) {
     return tn(key, n);
 }
 
+// An identifier from the API shown as a word (a log action, a level, a TLS mode):
+// the catalog's word for it under prefix, or the identifier itself when the
+// catalog has none, so a value the UI does not know yet still shows
+function uiIdWord(prefix, id) {
+    var key = prefix + String(id);
+    return Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? t(key) : String(id);
+}
+
 function uiIsPhone() {
     return typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
 }
@@ -171,7 +179,7 @@ function writeClock(p, seconds, prefs) {
     var tail = ":" + uiPad(p.minute) + (seconds ? ":" + uiPad(p.second) : "");
     if ((prefs || uiDatePrefs).time === "12") {
         var h = p.hour % 12 === 0 ? 12 : p.hour % 12;
-        return h + tail + (p.hour < 12 ? t("dates.am") : t("dates.pm"));
+        return p.hour < 12 ? t("dates.am", { time: h + tail }) : t("dates.pm", { time: h + tail });
     }
     return uiPad(p.hour) + tail;
 }
@@ -1745,8 +1753,7 @@ function uiDbFieldsHtml(p, v, keepPassword) {
         '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] ? t(UI_DB_SSL_HINT[mode]) : "") + "</span></div>" +
         '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">' + esc(t("db.ca-certificate-pem-optional")) + '</label>' +
         '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="' + esc(t("db.begin-certificate")) + '"></textarea>' +
-        '<span class="ui-hint">' + esc(t("db.only-when-the-server-s-certificate")) +
-        (v.caSaved ? esc(t("db.leave-empty-to-keep-the-saved")) : "") + "</span></div>";
+        '<span class="ui-hint">' + esc(v.caSaved ? t("db.ca-hint-saved") : t("db.only-when-the-server-s-certificate")) + "</span></div>";
 }
 
 // The TLS hint and the CA field follow the chosen mode
@@ -1802,16 +1809,15 @@ function uiDbCheckNote(r, where) {
     if (r.state === "new") return { tone: "", title: t("db.a-new-database-file"), text: t("db.the-service-creates-data-auth-db") };
     if (r.state === "empty") return { tone: "", title: t("db.the-database-is-empty"), text: t("db.the-service-creates-its-tables-in") };
     if (r.state === "foreign") {
-        return { tone: " is-fail", title: t("db.this-database-holds-other-data"), text: t("db.it-has-tables-that-are-not") +
-            (r.others && r.others.length ? " (" + r.others.join(", ") + ")" : "") + t("db.use-an-empty-database") };
+        return { tone: " is-fail", title: t("db.this-database-holds-other-data"), text: r.others && r.others.length
+            ? t("db.it-has-tables-that-are-not-named", { tables: r.others.join(", ") }) : t("db.it-has-tables-that-are-not") };
     }
     if (r.state === "incomplete") {
         return { tone: " is-fail", title: t("db.tables-are-missing"), text: t("db.this-database-holds-this-service-s", { tables: (r.others || []).join(", ") }) };
     }
     if (r.state === "older") {
         return { tone: " is-warn", title: t("db.this-service-s-data-from-an"),
-            text: t("db.the-service-can-adopt-it-it") +
-                (where === "setup" ? "" : t("db.changes-made-after-it-was-taken")) };
+            text: where === "setup" ? t("db.the-service-can-adopt-it-it") : t("db.the-service-can-adopt-it-copy") };
     }
     if (r.pending) return { tone: " is-fail", title: t("db.an-unfinished-copy"), text: t("db.this-database-holds-a-copy-that") };
     if (where === "settings") {

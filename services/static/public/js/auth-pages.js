@@ -127,7 +127,7 @@ function authPasskeyOffer() {
         if (res.status === 409) return;
         var blocked = uiPasskeyBlocked(window, false);
         if (blocked) {
-            note.textContent = blocked === "insecure" ? t(UI_PASSKEY_INSECURE) : t(UI_PASSKEY_OLD_BROWSER) + t("login.use-your-password-and-authenticator-code");
+            note.textContent = blocked === "insecure" ? t(UI_PASSKEY_INSECURE) : t("login.passkey-old-browser");
             note.classList.remove("hidden");
             return;
         }
@@ -538,7 +538,7 @@ function authRecovery() {
         document.getElementById("rec-why").textContent = " " + (d.message || "");
         var c = d.configured;
         var saved = "";
-        if (c && c.backend === "postgres") saved = t("recovery.saved-connection", { user: c.user, host: c.host, port: c.port, database: c.database, sslmode: c.sslmode });
+        if (c && c.backend === "postgres") saved = t("recovery.saved-connection", { user: c.user, host: c.host, port: c.port, database: c.database, sslmode: uiIdWord("db.sslmode.", c.sslmode) });
         else if (c && c.backend === "sqlite") saved = t("recovery.saved-database-the-sqlite-file", { path: c.path });
         document.getElementById("rec-saved").textContent = saved;
         var pgValues = c && c.backend === "postgres" ? c : { port: 5432 };
@@ -655,6 +655,9 @@ function authStart() {
     else if (page === "setup-mfa") authSetupMfa();
     else if (page === "recovery") authRecovery();
 }
+
+// The last script of the page: every word of the parsed page is in place (js/text.js)
+if (typeof document !== "undefined" && document && typeof document.querySelectorAll === "function") uiApplyText(document, true);
 
 if (typeof document !== "undefined" && document.readyState !== undefined) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", authStart);

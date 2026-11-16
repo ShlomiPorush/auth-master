@@ -221,3 +221,11 @@ test("hostile catalog and server values never become markup: sign-in and setup p
     clean(els["issuer-locked"].innerHTML, "authSetupMfaShow locked note");
     clean(els.sec.innerHTML, "authSetupMfaShow secret");
 });
+
+test("an API identifier shows the catalog's word, and itself when the catalog has none", () => {
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
+    ctx.UI_TEXT["logs.action.token_create"] = "Token created";
+    assert.equal(ctx.uiIdWord("logs.action.", "token_create"), "Token created");
+    assert.equal(ctx.uiIdWord("logs.action.", "brand_new"), "brand_new");
+    assert.equal(ctx.uiIdWord("logs.action.", "constructor"), "constructor");
+});
