@@ -2686,6 +2686,8 @@ function dashUseDraw(quiet) {
     else html = '<div class="ui-panel">' + (dashUse.failed ? dashFailed(t("usage.could-not-load-the-usage"), dashUse.failed, "data-usage-retry") : dashLoading(t("usage.loading-usage"))) + "</div>";
     if (quiet && uiAreaHeld(body)) return;
     dashUse.shown = mine ? dashUse.data : null;
+    // The browser tab names the token whose usage is open (NL-3, WP3)
+    uiSetSubTitle(dashUse.token && dashUse.shown && dashUse.shown.token ? dashUse.shown.token.name : "");
     if (html !== dashUse.drawn) {
         dashUse.drawn = html;
         uiKeepFocus(body, function () { body.innerHTML = html; });

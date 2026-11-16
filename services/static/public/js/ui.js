@@ -916,15 +916,60 @@ function uiPagePath(id) {
     return basePath() + uiPages[id].path;
 }
 
-function uiPageFromLocation() {
-    var p = window.location.pathname;
+// A part of a page's address after its own path (a Settings section, NL-3)
+var UI_SUB_ID = /^[a-z0-9_-]+$/;
+
+// The page of an address and the part after the page's path:
+// /admin/settings/redis is { id: "settings", sub: "redis" }. A part that is not
+// an id gives the page with no part, so the page opens its first section.
+function uiParsePath(pathname) {
+    var p = pathname;
     var b = basePath();
     if (b && p.indexOf(b) === 0) p = p.slice(b.length);
     if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
     for (var id in uiPages) {
-        if (Object.prototype.hasOwnProperty.call(uiPages, id) && uiPages[id].path === p) return id;
+        if (!Object.prototype.hasOwnProperty.call(uiPages, id)) continue;
+        var own = uiPages[id].path;
+        if (own === p) return { id: id, sub: "" };
+        if (p.indexOf(own + "/") === 0) {
+            var rest = p.slice(own.length + 1);
+            var sub = "";
+            try { sub = decodeURIComponent(rest); } catch (e) { sub = ""; }
+            return { id: id, sub: UI_SUB_ID.test(sub) ? sub : "" };
+        }
     }
-    return "";
+    return { id: "", sub: "" };
+}
+
+function uiPageFromLocation() {
+    return uiParsePath(window.location.pathname).id;
+}
+
+// The open page's part of the address ("" when it has none)
+function uiPageSub() {
+    var at = uiParsePath(window.location.pathname);
+    return at.id === uiPageCurrent ? at.sub : "";
+}
+
+// The address of a page, a part of it, a query and a fragment
+function uiPageUrl(id, sub, query, hash) {
+    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
+    return uiPagePath(id) + (sub && UI_SUB_ID.test(sub) ? "/" + encodeURIComponent(sub) : "") + (qs ? "?" + qs : "") +
+        (hash ? "#" + encodeURIComponent(hash) : "");
+}
+
+// The open page switched to another part (a Settings section): one Back step,
+// or a correction of the address without one (replace)
+function uiSetPageSub(sub, replace) {
+    var url = uiPageUrl(uiPageCurrent, sub, "", "");
+    if (url === window.location.pathname + window.location.search) return;
+    if (replace || uiOverlayEntry) {
+        history.replaceState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    } else {
+        uiSaveScroll();
+        uiHistIdx += 1;
+        history.pushState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    }
 }
 
 function uiPageQuery() {
@@ -939,8 +984,19 @@ function uiSetPageQuery(params) {
     history.replaceState(history.state, "", url);
 }
 
+// The browser tab names the page, and a level opened in it (the Usage of one
+// token, a Settings section) when the page names one with uiSetSubTitle (NL-3)
+var uiTitleSub = "";
 function uiSetTitle(id) {
-    document.title = uiPages[id] ? t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) }) : t(uiAppTitle);
+    if (!uiPages[id]) { document.title = t(uiAppTitle); return; }
+    var withSub = uiTitleSub ? t("common.page-title-sub", { sub: uiTitleSub, page: t(uiPages[id].title), app: t(uiAppTitle) }) : "";
+    document.title = withSub || t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) });
+}
+function uiSetSubTitle(text) {
+    var next = text ? String(text) : "";
+    if (next === uiTitleSub) return;
+    uiTitleSub = next;
+    uiSetTitle(uiPageCurrent);
 }
 
 function uiMainScroller() {
@@ -984,7 +1040,7 @@ function uiRouterStart(pages, show) {
     var known = !!id;
     if (!known) id = Object.keys(pages)[0];
     if (history.state && typeof history.state.idx === "number") uiHistIdx = history.state.idx;
-    var url = known ? window.location.pathname + window.location.search : uiPagePath(id);
+    var url = known ? window.location.pathname + window.location.search + window.location.hash : uiPagePath(id);
     history.replaceState({ page: id, idx: uiHistIdx }, "", url);
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     window.addEventListener("popstate", uiOnPopState);
@@ -999,20 +1055,24 @@ function uiRouterStart(pages, show) {
 }
 
 function uiShowPage(id, info) {
+    if (id !== uiPageCurrent) uiTitleSub = "";
     uiPageCurrent = id;
     uiSetTitle(id);
     if (uiPageShow) uiPageShow(id, info || {});
 }
 
 // Open a page from the app: one Back step when the address changes; the current
-// page clicked again shows it again without a new entry (NL-4)
+// page clicked again shows it again without a new entry (NL-4).
+// opts.sub: a part of the page (a Settings section); opts.hash: a field in it.
+// Resolves true when the page opened, false when the user stayed (unsaved changes).
 function uiGo(id, query, opts) {
     var o = opts || {};
-    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
-    var url = uiPagePath(id) + (qs ? "?" + qs : "");
+    var url = uiPageUrl(id, o.sub, query, "");
+    var hash = o.hash ? "#" + encodeURIComponent(o.hash) : "";
     var here = window.location.pathname + window.location.search;
     var proceed = function () {
         if (id === uiPageCurrent && url === here && !o.force) {
+            if (hash !== window.location.hash) history.replaceState(history.state, "", url + hash);
             uiShowPage(id, { again: true });
             return true;
         }
@@ -1020,10 +1080,10 @@ function uiGo(id, query, opts) {
         if (uiOverlayEntry || o.replace) {
             // Moving from inside a layer takes over its history entry
             uiOverlayEntry = false;
-            history.replaceState({ page: id, idx: uiHistIdx }, "", url);
+            history.replaceState({ page: id, idx: uiHistIdx }, "", url + hash);
         } else {
             uiHistIdx += 1;
-            history.pushState({ page: id, idx: uiHistIdx }, "", url);
+            history.pushState({ page: id, idx: uiHistIdx }, "", url + hash);
         }
         uiScrolls[uiHistIdx] = 0;
         var m = uiMainScroller();

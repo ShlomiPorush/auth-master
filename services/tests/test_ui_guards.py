@@ -751,8 +751,10 @@ def catalog_entries(text_js: str) -> tuple[dict, list[str]]:
             out[k] = v
         return out
 
+    # Whole-line comments (the "// brief:" notes for the writer above new keys) are not data
+    body = re.sub(r"^[ \t]*//[^\n]*\n", "", m.group(1), flags=re.M)
     try:
-        catalog = json.loads(re.sub(r",(\s*[}\]])", r"\1", m.group(1)), object_pairs_hook=pairs)
+        catalog = json.loads(re.sub(r",(\s*[}\]])", r"\1", body), object_pairs_hook=pairs)
     except ValueError as e:
         return {}, [f"UI_TEXT is not plain data: {e}"]
     for k, v in catalog.items():

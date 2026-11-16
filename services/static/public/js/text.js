@@ -250,6 +250,8 @@ var UI_TEXT = {
     "common.leave-unsaved": { "one": "You have {n} unsaved change. Leaving drops it.", "other": "You have {n} unsaved changes. Leaving drops them." },
     "common.leave-without-saving": "Leave without saving?",
     "common.page-title": "{page} · {app}",
+    // brief: browser tab title while a page shows one level inside it (one token's usage, a Settings section); names {sub} (that level), {page} and {app}, in that order of importance; max 8 words
+    "common.page-title-sub": "",
     "common.stay": "Stay",
     "common.what-you-changed-in-this-window": "What you changed in this window is not saved.",
 
