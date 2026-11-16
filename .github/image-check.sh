@@ -71,17 +71,21 @@ healthy() {
 
 # refused NAME TEXT: the container exits with an error and its log has TEXT.
 refused() {
-    local name=$RUN-$1 code
+    local name=$RUN-$1 code log
     code=$(timeout 90 docker wait "$name") || fail "$1 is still running"
     [ "$code" != 0 ] || fail "$1 exited with 0"
-    docker logs "$name" 2>&1 | grep -qF -- "$2" || { docker logs "$name" >&2; fail "$1: log lacks '$2'"; }
+    # The whole log first: grep -q in a pipe can stop docker logs early, and pipefail
+    # would then count the match as a failure.
+    log=$(docker logs "$name" 2>&1)
+    grep -qF -- "$2" <<<"$log" || { printf '%s\n' "$log" >&2; fail "$1: log lacks '$2'"; }
 }
 
 stop_cleanly() {
-    local name=$RUN-$1
+    local name=$RUN-$1 log
     docker stop -t 30 "$name" >/dev/null
     [ "$(docker inspect -f '{{.State.ExitCode}}' "$name")" = 0 ] || fail "$1 did not exit with 0 on SIGTERM"
-    docker logs "$name" 2>&1 | grep -q "Finished server process" || fail "$1 did not shut down uvicorn"
+    log=$(docker logs "$name" 2>&1)
+    grep -q "Finished server process" <<<"$log" || { printf '%s\n' "$log" >&2; fail "$1 did not shut down uvicorn"; }
 }
 
 not_service_owned() {
