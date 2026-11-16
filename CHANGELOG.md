@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-16
+
 ### Added
 
 - **Move to PostgreSQL** in the Database section of the Settings page: an installation that
@@ -32,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On SQLite, requests could fail with 500 "database is locked" under concurrent load, for
+  example `/validate` calls while an admin changes tokens: a write sent while another request's
+  read was still open on the shared connection failed at once instead of waiting for the write
+  lock. Each call on the shared connection now finishes before the next one starts.
 - In the Docker image, every PostgreSQL connection failed (setup, the Settings page, the
   recovery page and `DATABASE_URL`), reported as "The database server cannot be reached":
   the service ran as uid 10001 with `HOME=/root`, and the PostgreSQL driver stopped with a
@@ -774,7 +780,8 @@ Initial release. Self-hosted token authentication and authorization service with
 admin dashboard, TOTP-protected sessions, scoped API keys, authorization zones and a
 token validation endpoint.
 
-[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.1.0...v2.2.0
