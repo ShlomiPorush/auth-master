@@ -11,6 +11,7 @@ When running on SQLite the driver transparently rewrites them to ``?``.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
@@ -217,29 +218,69 @@ class _PgConn:
 # ── SQLite (aiosqlite) implementation ──────────────────────────
 
 class SqliteDatabase(Database):
+    """The shared request connection.
+
+    Every statement of one call (execute, fetch, closing the cursor) runs before any
+    statement of another call (_lock).  aiosqlite runs a connection's statements one at a
+    time, but a read is several of them: while its statement is still open, the connection
+    holds a read transaction, and a write that another request sends meanwhile fails at
+    once with "database is locked" when another connection holds the write lock or has
+    committed since (SQLite cannot upgrade that read transaction), instead of waiting for
+    the lock."""
+
     is_sqlite = True
 
     def __init__(self, conn: Any):
         self._conn = conn
+        self._lock = asyncio.Lock()
+
+    async def _whole(self, fn: Any) -> Any:
+        """Run fn's statements under the lock, as their own task: a caller cancelled
+        meanwhile does not release the lock before they have ended (aiosqlite runs a
+        queued statement even when its caller stopped waiting), so its cursor is closed
+        before another call's statement runs."""
+        async with self._lock:
+            task = asyncio.ensure_future(fn())
+            cancelled = False
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    cancelled = True
+                except BaseException:
+                    break
+            if cancelled:
+                raise asyncio.CancelledError
+            return task.result()
 
     async def execute(self, sql: str, *args: Any) -> None:
         sql, args = _pg_to_sqlite(sql, args)
-        try:
-            await self._conn.execute(sql, args)
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE" in str(e).upper():
-                raise UniqueViolationError(str(e)) from e
-            raise
-        await self._conn.commit()
+
+        async def run() -> None:
+            try:
+                cursor = await self._conn.execute(sql, args)
+            except sqlite3.IntegrityError as e:
+                if "UNIQUE" in str(e).upper():
+                    raise UniqueViolationError(str(e)) from e
+                raise
+            await cursor.close()
+            await self._conn.commit()
+
+        await self._whole(run)
 
     async def fetchrow(self, sql: str, *args: Any) -> Row | None:
         sql, args = _pg_to_sqlite(sql, args)
-        cursor = await self._conn.execute(sql, args)
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        cols = [d[0] for d in cursor.description]
-        return Row(zip(cols, row))
+
+        async def run() -> Row | None:
+            cursor = await self._conn.execute(sql, args)
+            try:
+                row = await cursor.fetchone()
+                cols = [d[0] for d in cursor.description] if row is not None else []
+            finally:
+                await cursor.close()
+            return None if row is None else Row(zip(cols, row))
+
+        return await self._whole(run)
 
     async def fetchval(self, sql: str, *args: Any) -> Any:
         row = await self.fetchrow(sql, *args)
@@ -249,10 +290,17 @@ class SqliteDatabase(Database):
 
     async def fetch(self, sql: str, *args: Any) -> list[Row]:
         sql, args = _pg_to_sqlite(sql, args)
-        cursor = await self._conn.execute(sql, args)
-        rows = await cursor.fetchall()
-        cols = [d[0] for d in cursor.description]
-        return [Row(zip(cols, r)) for r in rows]
+
+        async def run() -> list[Row]:
+            cursor = await self._conn.execute(sql, args)
+            try:
+                rows = await cursor.fetchall()
+                cols = [d[0] for d in cursor.description]
+            finally:
+                await cursor.close()
+            return [Row(zip(cols, r)) for r in rows]
+
+        return await self._whole(run)
 
     async def fetchval_write(self, sql: str, *args: Any) -> Any:
         """Runs on its own connection in autocommit mode, not on the shared request connection.
