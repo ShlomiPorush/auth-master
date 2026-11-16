@@ -355,8 +355,19 @@ class Job:
         }
 
 
+class Pending:
+    """The place of a change request that has not started its job yet.
+
+    The request marks it before its first wait (the second factor), so a page whose
+    answer was lost reads "pending" until the request has started its job or ended.
+    Only the request that set the mark clears it (Jobs.clear_pending)."""
+
+    def view(self) -> dict[str, Any]:
+        return {"state": "pending"}
+
+
 class Busy(Exception):
-    def __init__(self, job: Job) -> None:
+    def __init__(self, job: Job | Pending) -> None:
         super().__init__("a database operation is running")
         self.job = job
 
@@ -368,13 +379,37 @@ class Jobs:
         self.current: Job | None = None
         self._recent: dict[str, Job] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._pending: Pending | None = None
         # Held for the whole operation (Registry.exclusive): nothing is created or changed
         # in a database before this process has proved that it is the only one.
         self._guard = guard
 
-    def start(self, kind: str, fn: Callable[[Job], Awaitable[dict[str, Any] | None]]) -> Job:
+    def busy(self) -> Job | Pending | None:
+        """The running job, else the pending mark of a request about to start one."""
+        if self.current is not None and self.current.state == "running":
+            return self.current
+        return self._pending
+
+    def mark_pending(self) -> Pending:
+        """Hold the place of a job this request will start; Busy when one runs or is pending.
+        Synchronous: called before the request's first await."""
+        busy = self.busy()
+        if busy is not None:
+            raise Busy(busy)
+        mark = Pending()
+        self._pending = mark
+        return mark
+
+    def clear_pending(self, mark: Pending) -> None:
+        """Called on every exit of the request that set `mark`; another request's mark stays."""
+        if self._pending is mark:
+            self._pending = None
+
+    def start(self, kind: str, fn: Callable[[Job], Awaitable[dict[str, Any] | None]], *, pending: Pending | None = None) -> Job:
         if self.current is not None and self.current.state == "running":
             raise Busy(self.current)
+        if self._pending is not None and self._pending is not pending:
+            raise Busy(self._pending)
         job = Job(uuid.uuid4().hex, kind)
         self.current = job
         self._recent[job.id] = job
