@@ -19,7 +19,8 @@ SESSION_SECRET=$(openssl rand -hex 32)
 APP_ENCRYPTION_KEY=$(openssl rand -hex 32)
 REDIS_PASSWORD=$(openssl rand -hex 32)
 REDIS_URL="redis://:$REDIS_PASSWORD@redis:6379/0"
-export SESSION_SECRET APP_ENCRYPTION_KEY REDIS_PASSWORD REDIS_URL
+PG_PASSWORD=$(openssl rand -hex 32)
+export SESSION_SECRET APP_ENCRYPTION_KEY REDIS_PASSWORD REDIS_URL PG_PASSWORD
 
 cleanup() {
     docker ps -aq --filter "label=$RUN" | xargs -r docker rm -f >/dev/null
@@ -200,5 +201,20 @@ h=$(volume h)
 on_volume "$h" 'echo x > /d/auth.db && ln /d/auth.db /d/auth.db.copy && chown 0:10001 /d/auth.db && chmod 0620 /d/auth.db'
 start h -v "$h:/app/data" "$IMAGE"
 refused h "/app/data/auth.db: cannot read and write the file"
+
+echo "I. PostgreSQL through DATABASE_URL, as the service user"
+docker run -d --label "$RUN" --name "$RUN-pg" --network "$RUN" --network-alias pg \
+    -e POSTGRES_USER=auth -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=auth postgres:16-alpine >/dev/null
+for _ in $(seq 60); do
+    docker exec "$RUN-pg" pg_isready -q -h 127.0.0.1 -U auth -d auth && break
+    sleep 1
+done
+i=$(volume i)
+start i -v "$i:/app/data" -e DATABASE_URL="postgres://auth:$PG_PASSWORD@pg:5432/auth" "$IMAGE"
+healthy i
+# The service process (PID 1 after the entrypoint's exec), not this exec's shell.
+[ "$(docker exec -u 10001:10001 "$RUN-i" sh -c 'stat -c %u /proc/1; tr "\0" "\n" < /proc/1/environ | grep "^HOME="' | tr '\n' ' ')" = "10001 HOME=/nonexistent " ] ||
+    fail "I: the service does not run as 10001 with its own HOME"
+stop_cleanly i
 
 echo "All image checks passed."

@@ -9,6 +9,11 @@ data_dir=/usr/local/lib/auth-master/data_dir.py
 
 if [ "$(id -u)" = 0 ]; then
     python -I "$data_dir" take-ownership
+    # setpriv keeps the environment, so HOME would stay /root, which the service user
+    # cannot read: asyncpg then fails every PostgreSQL connection while it looks for
+    # client certificates in ~/.postgresql. The service user's own home, as in
+    # /etc/passwd (it does not exist, so nothing is found there).
+    export HOME=/nonexistent
     setpriv --reuid=10001 --regid=10001 --clear-groups --inh-caps=-all --no-new-privs -- \
         python -I "$data_dir" check
     exec setpriv --reuid=10001 --regid=10001 --clear-groups --inh-caps=-all --no-new-privs -- "$@"
