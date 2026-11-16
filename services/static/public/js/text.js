@@ -888,6 +888,8 @@ var UI_TEXT = {
 
     "sort.a-to-z": "A to Z",
     "sort.ascending": "Ascending",
+    // brief: first choice in the Sort by group of a list's Sort menu, for lists that have no column of their own order; picking it shows the list in the order it arrives in; max 3 words
+    "sort.default-order": "",
     "sort.descending": "Descending",
     "sort.high-to-low": "High to low",
     "sort.low-to-high": "Low to high",
@@ -896,6 +898,10 @@ var UI_TEXT = {
     "sort.order": "Order",
     "sort.sort": "Sort {name}",
     "sort.sort-by": "Sort by",
+    // brief: hidden words a screen reader reads after a column header's name while the list is sorted by that column, smallest or A first; max 3 words
+    "sort.sorted-ascending": "",
+    // brief: hidden words a screen reader reads after a column header's name while the list is sorted by that column, largest, newest or Z first; max 3 words
+    "sort.sorted-descending": "",
     "sort.z-to-a": "Z to A",
 
     "tokens.a-token-lets-a-service-call": "A token lets a service call the zones you grant it.",
@@ -1065,7 +1071,6 @@ var UI_TEXT = {
     "usage.open-in-access-logs": "Open in Access Logs",
     "usage.part-of-this-period-is-no": "Part of this period is no longer in the log",
     "usage.period": "Period",
-    "usage.sort-default-order": "Sort: Default order",
     "usage.the-calls-came-from": "the calls came from",
     "usage.the-calls-name-more-different-zones": "The calls name more different zones than the page can count, so zone figures are not shown. Call counts are complete.",
     "usage.the-hours-and-days-are-counted": "The hours and days are counted in {zone}, but their names here use {shown}, so they can be off by the difference between the two. Choose another time zone on the Settings page.",

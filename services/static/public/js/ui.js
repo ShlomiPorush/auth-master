@@ -1547,11 +1547,13 @@ function uiMenuDismiss(returnFocus) {
     var state = uiMenuOpen;
     if (!state) return;
     uiMenuOpen = null;
-    state.anchor.setAttribute("aria-expanded", "false");
-    state.anchor.removeAttribute("aria-controls");
+    // A list drawn again while its menu was open has a new button with the same id
+    var anchor = state.anchor.isConnected || !state.anchor.id ? state.anchor : document.getElementById(state.anchor.id) || state.anchor;
+    anchor.setAttribute("aria-expanded", "false");
+    anchor.removeAttribute("aria-controls");
     try { if (state.supported && state.menu.matches(":popover-open")) state.menu.hidePopover(); } catch (e) { /* closed already */ }
     state.menu.remove();
-    if (returnFocus && state.anchor.isConnected) state.anchor.focus({ preventScroll: true });
+    if (returnFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
 }
 
 var uiPickerScrollQueued = false;
@@ -1593,11 +1595,30 @@ function uiMenuOutside(event) {
 // ===========================================================================
 
 // cols: [{ key, label, kind: "text" | "number" | "date" }]
-function uiSortToggle(state, col) {
-    if (state.key === col.key) state.dir = state.dir === "asc" ? "desc" : "asc";
-    else {
+// def: the column and order a list arrives in ({ key, dir }), for a list that has
+// one; state.key "" is then that order, and a sort that lands on it puts the
+// arrival order back exactly
+function uiSortToggle(state, col, def) {
+    var cur = uiSortEffective(state, def);
+    if (cur.key === col.key) {
+        state.key = col.key;
+        state.dir = cur.dir === "asc" ? "desc" : "asc";
+    } else {
         state.key = col.key;
         state.dir = col.kind === "text" ? "asc" : "desc";
+    }
+    return uiSortReset(state, def);
+}
+
+// The order the list shows: the one picked, else the list's own default
+function uiSortEffective(state, def) {
+    return state.key ? state : def && def.key ? def : state;
+}
+
+function uiSortReset(state, def) {
+    if (def && state.key === def.key && state.dir === def.dir) {
+        state.key = "";
+        state.dir = "";
     }
     return state;
 }
@@ -1619,8 +1640,9 @@ function uiSortRows(rows, state, value) {
         .map(function (e) { return e.row; });
 }
 
-function uiSortAria(state, key) {
-    return state.key === key ? (state.dir === "asc" ? "ascending" : "descending") : "none";
+function uiSortAria(state, key, def) {
+    var cur = uiSortEffective(state, def);
+    return cur.key === key ? (cur.dir === "asc" ? "ascending" : "descending") : "none";
 }
 
 function uiSortWords(kind, dir) {
@@ -1630,9 +1652,12 @@ function uiSortWords(kind, dir) {
     return dir === "asc" ? t("sort.ascending") : t("sort.descending");
 }
 
-// The Sort button's panel: Sort by and Order, applied at once (TB-28)
-function uiSortMenu(anchor, name, cols, state, onChange) {
-    if (uiMenuOpen && uiMenuOpen.anchor === anchor) { uiMenuDismiss(true); return; }
+// The Sort button's panel: Sort by and Order, applied at once (TB-28). A list
+// without a default column and order (def) leads Sort by with Default order,
+// which brings back the order it arrives in; a list with one shows that column
+// and order while nothing else is picked.
+function uiSortMenu(anchor, name, cols, state, onChange, def) {
+    if (uiMenuOpen && (uiMenuOpen.anchor === anchor || (anchor.id && uiMenuOpen.anchor.id === anchor.id))) { uiMenuDismiss(true); return; }
     uiMenuDismiss(false);
     var panel = document.createElement("div");
     panel.className = "ui-menu ui-sort-panel";
@@ -1641,17 +1666,18 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
     panel.id = "ui-sort-" + (++uiDialogCount);
     var supported = typeof panel.showPopover === "function";
     if (supported) panel.setAttribute("popover", "auto");
+    var hasDefault = !!(def && def.key);
     var draw = function () {
-        var col = cols.filter(function (c) { return c.key === state.key; })[0];
+        var cur = uiSortEffective(state, def);
+        var col = cols.filter(function (c) { return c.key === cur.key; })[0];
+        var radio = function (group, value, checked, label) {
+            return '<label><input type="radio" class="ui-check" name="' + panel.id + "-" + group + '" value="' + esc(value) + '"' + (checked ? " checked" : "") + "> " + esc(label) + "</label>";
+        };
         panel.innerHTML = '<fieldset><legend>' + esc(t("sort.sort-by")) + '</legend>' +
-            cols.map(function (c) {
-                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-by" value="' + esc(c.key) + '"' + (state.key === c.key ? " checked" : "") + "> " + esc(t(c.label)) + "</label>";
-            }).join("") + "</fieldset>" +
+            (hasDefault ? "" : radio("by", "", !cur.key, t("sort.default-order"))) +
+            cols.map(function (c) { return radio("by", c.key, cur.key === c.key, t(c.label)); }).join("") + "</fieldset>" +
             '<fieldset' + (col ? "" : " disabled") + "><legend>" + esc(t("sort.order")) + "</legend>" +
-            ["asc", "desc"].map(function (d) {
-                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-dir" value="' + d + '"' + (state.dir === d ? " checked" : "") + "> " +
-                    esc(uiSortWords(col ? col.kind : "", d)) + "</label>";
-            }).join("") + "</fieldset>";
+            ["asc", "desc"].map(function (d) { return radio("dir", d, !!col && cur.dir === d, uiSortWords(col ? col.kind : "", d)); }).join("") + "</fieldset>";
     };
     draw();
     document.body.appendChild(panel);
@@ -1660,15 +1686,21 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
     anchor.setAttribute("aria-expanded", "true");
     panel.addEventListener("change", function (event) {
         var input = event.target;
-        if (input.name === panel.id + "-by") {
+        var byGroup = input.name === panel.id + "-by";
+        if (byGroup) {
             var col = cols.filter(function (c) { return c.key === input.value; })[0];
-            state.key = col.key;
-            state.dir = col.kind === "text" ? "asc" : "desc";
+            // A column picked starts in its own first order; Default order is no column
+            state.key = col ? col.key : "";
+            state.dir = col ? (col.kind === "text" ? "asc" : "desc") : "";
         } else {
+            var cur = uiSortEffective(state, def);
+            state.key = cur.key;
             state.dir = input.value;
         }
+        uiSortReset(state, def);
+        var after = uiSortEffective(state, def);
         var focusName = input.name;
-        var focusValue = state.key && input.name.slice(-3) === "-by" ? state.key : state.dir;
+        var focusValue = byGroup ? after.key : after.dir;
         draw();
         var again = panel.querySelector('input[name="' + focusName + '"][value="' + focusValue + '"]');
         if (again) again.focus({ preventScroll: true });

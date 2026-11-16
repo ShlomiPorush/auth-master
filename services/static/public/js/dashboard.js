@@ -582,10 +582,14 @@ function dashTag(text, tone) {
     return '<span class="ui-tag' + (tone ? " ui-tag-" + tone : "") + '">' + esc(text) + "</span>";
 }
 
-// A header label that sorts: the cell carries aria-sort, the label is a button (TB-1)
-function dashSortHead(state, col) {
-    return '<div class="ui-td" role="columnheader" aria-sort="' + uiSortAria(state, col.key) + '"><button type="button" class="ui-sort" data-sort="' +
-        esc(col.key) + '">' + esc(t(col.label)) + "</button></div>";
+// A header label that sorts (TB-1): the label is a button that says its order in
+// hidden words; the cell's data-sort-state draws the arrow. def: the list's own
+// column and order, for a list that has one.
+function dashSortHead(state, col, def) {
+    var s = uiSortAria(state, col.key, def);
+    var words = s === "ascending" ? t("sort.sorted-ascending") : s === "descending" ? t("sort.sorted-descending") : "";
+    return '<div class="ui-td' + (col.kind === "number" ? " ui-num" : "") + '" role="columnheader" data-sort-state="' + s + '"><button type="button" class="ui-sort" data-sort="' +
+        esc(col.key) + '">' + esc(t(col.label)) + (words ? '<span class="ui-sr">' + esc(words) + "</span>" : "") + "</button></div>";
 }
 
 // Wire a list's header buttons, Sort button and rows (open on click, Enter, Space)
@@ -597,14 +601,14 @@ function dashBindList(cfg) {
         var b = event.target.closest("[data-sort]");
         if (!b) return;
         var col = cfg.cols.filter(function (c) { return c.key === b.getAttribute("data-sort"); })[0];
-        uiSortToggle(cfg.state, col);
+        uiSortToggle(cfg.state, col, cfg.def);
         cfg.redraw();
         var again = head.querySelector('[data-sort="' + col.key + '"]');
         if (again) again.focus({ preventScroll: true });
     });
     if (sortBtn) {
         sortBtn.addEventListener("click", function () {
-            uiSortMenu(sortBtn, cfg.name, cfg.cols, cfg.state, cfg.redraw);
+            uiSortMenu(sortBtn, cfg.name, cfg.cols, cfg.state, cfg.redraw, cfg.def);
         });
     }
     rows.addEventListener("click", function (event) {
@@ -627,13 +631,19 @@ function dashBindList(cfg) {
     });
 }
 
+// The Sort button's name: the order the list shows (TB-28)
+function dashSortLabel(state, cols, def) {
+    var cur = uiSortEffective(state, def);
+    var col = cols.filter(function (c) { return c.key === cur.key; })[0];
+    return col ? t("list.sort", { column: t(col.label), order: uiSortWords(col.kind, cur.dir) }) : t("list.sort-default-order");
+}
+
 // The Sort button's dot: an order other than the default (TB-28)
-function dashSortButtonSync(id, state, name, cols) {
+function dashSortButtonSync(id, state, name, cols, def) {
     var b = document.getElementById(id);
     if (!b) return;
-    var col = cols.filter(function (c) { return c.key === state.key; })[0];
-    var text = col ? t("list.sort", { column: t(col.label), order: uiSortWords(col.kind, state.dir) }) : t("list.sort-default-order");
-    b.classList.toggle("is-set", !!col);
+    var text = dashSortLabel(state, cols, def);
+    b.classList.toggle("is-set", !!state.key);
     b.setAttribute("aria-label", text);
     b.setAttribute("title", text);
     b.setAttribute("data-sort-name", name);
@@ -2301,6 +2311,8 @@ var DASH_USE_COLS = [
     { key: "ipCount", label: "usage.addresses", kind: "number" },
     { key: "lastCallAt", label: "usage.last-call", kind: "date" },
 ];
+// The token list arrives busiest first: Calls, high to low (TB-1, TB-28)
+var DASH_USE_DEFAULT = { key: "calls", dir: "desc" };
 var USAGE_NOTE = "usage.note";
 
 // data: the last answer; shown: the answer the page now draws (a refresh skipped while the
@@ -2544,9 +2556,9 @@ function dashUseOverviewHtml(d) {
         return b.calls - a.calls || b.grantsChecks - a.grantsChecks || String(a.name).localeCompare(String(b.name), undefined, { sensitivity: "base" });
     });
     var rows = uiSortRows(base, dashUse.sort, dashUseSortValue);
-    var head = DASH_USE_COLS.slice(0, 3).map(function (c) { return dashSortHead(dashUse.sort, c); }).join("") +
+    var head = DASH_USE_COLS.slice(0, 3).map(function (c) { return dashSortHead(dashUse.sort, c, DASH_USE_DEFAULT); }).join("") +
         '<div class="ui-td" role="columnheader">' + esc(t("usage.top-zones")) + '</div>' +
-        DASH_USE_COLS.slice(3).map(function (c) { return dashSortHead(dashUse.sort, c); }).join("");
+        DASH_USE_COLS.slice(3).map(function (c) { return dashSortHead(dashUse.sort, c, DASH_USE_DEFAULT); }).join("");
     var body = rows.length ? rows.map(function (r) {
         var key = r.tokenId || "unknown";
         return '<div class="ui-tr' + (r.calls ? "" : " is-off") + '" role="row" tabindex="0" data-key="' + esc(key) + '" aria-label="' + esc(r.name) + '">' +
@@ -2560,12 +2572,20 @@ function dashUseOverviewHtml(d) {
             '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.addresses-2")) + ' </span>' + esc(uiNum(r.ipCount)) + "</div>" +
             '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + ' </span>' + (r.lastCallAt ? uiTime(r.lastCallAt) : '<span class="ui-muted">-</span>') + "</div></div>";
     }).join("") : dashEmpty(t("usage.no-tokens-yet"), esc(t("usage.create-a-token-on-the-tokens")));
-    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.tokens")) + ' <span class="ui-count">' + esc(tn("usage.count-rows", rows.length)) + "</span></div>" +
+    html += '<div class="ui-panel"><div class="ui-panel-head">' + esc(t("usage.tokens")) + ' <span class="ui-count">' + esc(tn("usage.count-rows", rows.length)) + "</span>" +
+        dashUseSortButton() + "</div>" +
         '<div class="ui-table ui-stack" id="usage-table" role="table" aria-label="' + esc(t("usage.calls-per-token")) + '">' +
         '<div class="ui-tr ui-tr-head" role="row" id="usage-head">' + head + "</div>" +
         '<div class="ui-table-body" role="rowgroup">' + body + "</div></div></div>" +
         '<p class="ui-usage-note">' + dashUseNote() + (totals.grantsChecks ? " " + esc(t("usage.this-period-has", { checks: tn("usage.count-grants-checks", totals.grantsChecks) })) : "") + "</p>";
     return html;
+}
+
+// The token list's Sort button sits at the end of its panel head (TB-28)
+function dashUseSortButton() {
+    var label = dashSortLabel(dashUse.sort, DASH_USE_COLS, DASH_USE_DEFAULT);
+    return '<button type="button" class="ui-icon-btn ui-sort-menu-btn' + (dashUse.sort.key ? " is-set" : "") + '" id="usage-sort" data-action="usage-sort" aria-haspopup="dialog" aria-expanded="false" data-sort-name="' +
+        esc(t("list.name-tokens")) + '" aria-label="' + esc(label) + '" title="' + esc(label) + '">' + UI_SORT_ICON + "</button>";
 }
 
 function dashUseBackLink() {
@@ -2601,7 +2621,7 @@ function dashUseTokenHtml(d) {
     else if (!areas.length) areasBody = dashEmpty(t("usage.no-calls-in-this-period-2"), "");
     else {
         var most = areas[0].calls;
-        areasBody = '<div class="ui-table ui-stack" id="usage-areas" role="table" aria-label="' + esc(t("usage.calls-per-zone")) + '">' +
+        areasBody = '<div class="ui-table ui-stack" id="usage-areas" role="table" data-nosort aria-label="' + esc(t("usage.calls-per-zone")) + '">' +
             '<div class="ui-tr ui-tr-head" role="row"><div class="ui-td" role="columnheader">' + esc(t("usage.zone")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.calls")) + '</div>' +
             '<div class="ui-td" role="columnheader">' + esc(t("usage.allowed-and-denied")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.levels")) + '</div></div>' +
             '<div class="ui-table-body" role="rowgroup">' + areas.map(function (a) {
@@ -2622,7 +2642,7 @@ function dashUseTokenHtml(d) {
 
     var addrs = d.addresses;
     var addrBody = !addrs.length ? dashEmpty(t("usage.no-calls-in-this-period-2"), "") :
-        '<div class="ui-table ui-stack" id="usage-addrs" role="table" aria-label="' + esc(t("usage.calls-per-address")) + '">' +
+        '<div class="ui-table ui-stack" id="usage-addrs" role="table" data-nosort aria-label="' + esc(t("usage.calls-per-address")) + '">' +
         '<div class="ui-tr ui-tr-head" role="row"><div class="ui-td" role="columnheader">' + esc(t("usage.address")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.calls")) + '</div>' +
         '<div class="ui-td" role="columnheader">' + esc(t("usage.denied")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.last-call")) + '</div></div>' +
         '<div class="ui-table-body" role="rowgroup">' + addrs.map(function (a) {
@@ -2648,10 +2668,6 @@ function dashUseSyncRange() {
     document.querySelectorAll("#usage-range [data-range]").forEach(function (b) {
         b.setAttribute("aria-pressed", b.getAttribute("data-range") === dashUse.range ? "true" : "false");
     });
-    // The Sort button orders the token list, which only the overview shows
-    var sort = document.getElementById("usage-sort");
-    if (sort) sort.classList.toggle("hidden", !!dashUse.token);
-    dashSortButtonSync("usage-sort", dashUse.sort, t("list.name-tokens"), DASH_USE_COLS);
 }
 
 // A background refresh (quiet) leaves the page alone while the user works in it
@@ -2690,10 +2706,6 @@ function dashUseBind() {
         dashUseDraw(false);
         dashUseLoad().then(function () { uiRefreshLoaded("usage"); });
     });
-    var sortBtn = document.getElementById("usage-sort");
-    sortBtn.addEventListener("click", function () {
-        uiSortMenu(sortBtn, t("list.name-tokens"), DASH_USE_COLS, dashUse.sort, function () { dashUseDraw(false); });
-    });
     var body = document.getElementById("usage-body");
     body.addEventListener("click", function (event) {
         var target = event.target;
@@ -2703,10 +2715,20 @@ function dashUseBind() {
             dashUseLoad();
             return;
         }
+        var sortBtn = target.closest("#usage-sort");
+        if (sortBtn) {
+            uiSortMenu(sortBtn, t("list.name-tokens"), DASH_USE_COLS, dashUse.sort, function () {
+                dashUseDraw(false);
+                // The list was drawn again with its button; the menu stays open over it
+                var again = document.getElementById("usage-sort");
+                if (again) again.setAttribute("aria-expanded", "true");
+            }, DASH_USE_DEFAULT);
+            return;
+        }
         var sort = target.closest("#usage-head [data-sort]");
         if (sort) {
             var col = DASH_USE_COLS.filter(function (c) { return c.key === sort.getAttribute("data-sort"); })[0];
-            uiSortToggle(dashUse.sort, col);
+            uiSortToggle(dashUse.sort, col, DASH_USE_DEFAULT);
             dashUseDraw(false);
             var again = body.querySelector('#usage-head [data-sort="' + col.key + '"]');
             if (again) again.focus({ preventScroll: true });

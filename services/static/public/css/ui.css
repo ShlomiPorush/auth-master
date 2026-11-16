@@ -485,15 +485,15 @@ body.ui-app { overflow: hidden; }
 #pk-table { --ui-cols: minmax(140px, 1.2fr) 130px 130px minmax(0, 1.6fr) 40px; --ui-table-min: 700px; }
 .ui-table-body.is-dim { opacity: .6; transition: opacity .15s; }
 
-/* Header sort (TB-1): the label is a button; the arrow follows aria-sort */
+/* Header sort (TB-1): the label is a button; the arrow follows the cell's data-sort-state */
 .ui-sort { display: inline-flex; align-items: center; max-width: 100%; padding: 0; border: 0; background: none; color: inherit; font-size: inherit;
     font-weight: inherit; user-select: none; }
 .ui-sort::after { content: ""; margin-inline-start: var(--ui-sp-2); border-inline: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0; }
 @media (hover: hover) { .ui-sort:hover::after { opacity: .35; } }
 .ui-sort:focus-visible::after { opacity: .35; }
-[aria-sort="descending"] > .ui-sort, [aria-sort="ascending"] > .ui-sort { color: var(--ui-ink); }
-[aria-sort="descending"] > .ui-sort::after { opacity: 1; }
-[aria-sort="ascending"] > .ui-sort::after { opacity: 1; border-top: 0; border-bottom: 5px solid currentColor; }
+[data-sort-state="descending"] > .ui-sort, [data-sort-state="ascending"] > .ui-sort { color: var(--ui-ink); }
+[data-sort-state="descending"] > .ui-sort::after { opacity: 1; }
+[data-sort-state="ascending"] > .ui-sort::after { opacity: 1; border-top: 0; border-bottom: 5px solid currentColor; }
 
 /* One Sort button per list (TB-28) */
 .ui-sort-menu-btn { position: relative; }
@@ -502,6 +502,11 @@ body.ui-app { overflow: hidden; }
 .ui-sort-panel fieldset { margin: 0; padding: var(--ui-sp-2) var(--ui-sp-3) var(--ui-sp-4); border: 0; }
 .ui-sort-panel legend { padding: 0; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
 .ui-sort-panel label { display: flex; align-items: center; gap: var(--ui-sp-4); min-height: 30px; cursor: pointer; }
+
+/* WP4, lists: numbers end-aligned with their header (Components, Table); a Sort
+   button at the end of a panel head (TB-28) */
+.ui-td.ui-num { text-align: end; }
+.ui-panel-head .ui-sort-menu-btn { width: var(--ui-chip-h); height: var(--ui-chip-h); margin-inline-start: auto; }
 
 /* Click to copy (FB-12) */
 .ui-copy { display: inline-flex; align-items: center; gap: var(--ui-sp-2); max-width: 100%; padding: 0 var(--ui-sp-1); border: 0; border-radius: var(--ui-sp-2);
