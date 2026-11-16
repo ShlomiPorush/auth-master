@@ -216,5 +216,12 @@ healthy i
 [ "$(docker exec -u 10001:10001 "$RUN-i" sh -c 'stat -c %u /proc/1; tr "\0" "\n" < /proc/1/environ | grep "^HOME="' | tr '\n' ' ')" = "10001 HOME=/nonexistent " ] ||
     fail "I: the service does not run as 10001 with its own HOME"
 stop_cleanly i
+# A HOME set for the container (client certificates there, for example) is kept.
+i2=$(volume i2)
+start i2 -v "$i2:/app/data" -e HOME=/srv/certs -e DATABASE_URL="postgres://auth:$PG_PASSWORD@pg:5432/auth" "$IMAGE"
+healthy i2
+[ "$(docker exec -u 10001:10001 "$RUN-i2" sh -c 'tr "\0" "\n" < /proc/1/environ | grep "^HOME="')" = "HOME=/srv/certs" ] ||
+    fail "I: a HOME set for the container was replaced"
+stop_cleanly i2
 
 echo "All image checks passed."
