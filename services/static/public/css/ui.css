@@ -523,6 +523,9 @@ body.ui-app { overflow: hidden; }
 .ui-picker-arrow { width: 8px; height: 8px; margin-inline-start: var(--ui-sp-1); border-inline-end: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
     transform: rotate(45deg) translateY(-2px); transition: transform .15s; }
 .ui-picker-btn[aria-expanded="true"] .ui-picker-arrow { transform: rotate(-135deg) translateY(-2px); }
+/* The arrow's inline-end border is the left one under RTL: turn the other way so it still points down (up when open) */
+[dir="rtl"] .ui-picker-arrow { transform: rotate(-45deg) translateY(-2px); }
+[dir="rtl"] .ui-picker-btn[aria-expanded="true"] .ui-picker-arrow { transform: rotate(135deg) translateY(-2px); }
 @media (hover: hover) { .ui-picker-btn:not(.is-set):hover { border-color: var(--ui-muted); } }
 .ui-picker.is-field { display: block; }
 .ui-picker.is-field .ui-picker-btn { width: 100%; max-width: none; height: var(--ui-ctl-h); border-radius: var(--ui-radius-sm); font-weight: 500; }
