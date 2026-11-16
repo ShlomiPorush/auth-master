@@ -790,10 +790,11 @@ function dashTokDraw(quiet) {
         if (!rows.length) html = dashEmpty(t("tokens.no-tokens-yet-click-new-token"), esc(t("tokens.a-token-lets-a-service-call")));
         else if (!shown.length) html = dashEmpty(t("tokens.no-tokens-match-your-search"), esc(t("tokens.change-the-search-or-clear-the")));
         else html = shown.map(function (tok) { return dashTokRow(tok, now); }).join("");
-        // Each status option names how many tokens it lists, with the other filters (MP-1 hint)
-        Array.prototype.forEach.call(document.getElementById("tok-status").options, function (opt) {
-            var n = rows.filter(function (tok) { return dashTokMatch(tok, { q: f.q, status: opt.value, zone: f.zone, level: f.level }, "", now); }).length;
-            opt.setAttribute("data-hint", uiNum(n));
+        // Each option of a picker names how many tokens it lists with the other filters (MP-1 hint)
+        [["tok-status", "status"], ["tok-zone", "zone"], ["tok-level", "level"]].forEach(function (pair) {
+            var opts = document.getElementById(pair[0]).options;
+            var values = Array.prototype.map.call(opts, function (opt) { return opt.value; });
+            dashTokHints(rows, f, pair[1], values, now).forEach(function (n, i) { opts[i].setAttribute("data-hint", uiNum(n)); });
         });
     }
     var filtered = f.q || f.status !== "all" || f.zone || f.level;
@@ -808,6 +809,16 @@ function dashTokDraw(quiet) {
     if (html === dashTok.drawn) return;
     dashTok.drawn = html;
     uiKeepFocus(rowsEl, function () { rowsEl.innerHTML = html; });
+}
+
+// How many tokens each value of one filter lists, the other filters as they are
+// (the count ignores its own filter, so it is the rows a pick of it shows)
+function dashTokHints(rows, f, field, values, now) {
+    return values.map(function (v) {
+        var g = { q: f.q, status: f.status, zone: f.zone, level: f.level };
+        g[field] = v;
+        return rows.filter(function (tok) { return dashTokMatch(tok, g, "", now); }).length;
+    });
 }
 
 function dashTokSortValue(tok, key) {
@@ -1328,7 +1339,7 @@ function dashZonesDraw(quiet) {
         }), dashZones.sort, function (z, key) { return key === "name" ? String(z.name) : uiParseInstant(z.createdAt); });
         document.getElementById("zone-count").textContent = tn("zones.count-zones", shown.length);
         if (!dash.zones.length) html = dashEmpty(t("zones.no-zones-yet"), esc(t("zones.add-a-zone-so-tokens-can")));
-        else if (!shown.length) html = dashEmpty(t("zones.no-zones-match-your-search"), "");
+        else if (!shown.length) html = dashEmpty(t("zones.no-zones-match-your-search"), esc(t("zones.no-zones-match-line")));
         else html = shown.map(function (z) {
             return '<div class="ui-tr" role="row" tabindex="0" data-key="' + esc(z.id) + '" aria-label="' + esc(z.name) + '">' +
                 '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(z.name) + "</span></div>" +
@@ -1551,7 +1562,8 @@ function dashKeysDraw(quiet) {
         document.getElementById("key-count").textContent = "";
     } else {
         var rows = uiSortRows(dashKeys.rows, dashKeys.sort, function (k, key) { return key === "name" ? String(k.name) : uiParseInstant(k.createdAt); });
-        document.getElementById("key-count").textContent = tn("apikeys.count-api-keys", rows.length);
+        // The Master key row is a row of the list, so it counts (TB-17)
+        document.getElementById("key-count").textContent = tn("apikeys.count-api-keys", rows.length + (dashKeys.master && dashKeys.master.active ? 1 : 0));
         if (!rows.length) html = dashKeyMasterRow() + dashEmpty(t("apikeys.no-api-keys-yet"), esc(t("apikeys.create-one-with-new-key")));
         else html = dashKeyMasterRow() + rows.map(function (k) {
             var scopes = String(k.scopes || "").split(",").filter(Boolean);
@@ -1697,11 +1709,11 @@ registerPageRefresh("apikeys", 30000, function () { return dashKeysLoad(true); }
 var dashLogs = {
     activity: {
         id: "activity", endpoint: "/admin/api/logs/activity", filterParam: "action", queryKey: "action",
-        loadingText: "logs.loading-activity", emptyText: "logs.no-activity-logs-found", failedText: "logs.failed-to-load-activity-logs",
+        loadingText: "logs.loading-activity", emptyText: "logs.no-activity-logs-found", emptyLine: "logs.no-activity-line", failedText: "logs.failed-to-load-activity-logs",
     },
     access: {
         id: "access", endpoint: "/admin/api/logs/access", filterParam: "result", queryKey: "result", tokenParam: "token_id",
-        loadingText: "logs.loading-access-logs", emptyText: "logs.no-access-logs-found", failedText: "logs.failed-to-load-access-logs",
+        loadingText: "logs.loading-access-logs", emptyText: "logs.no-access-logs-found", emptyLine: "logs.no-access-line", failedText: "logs.failed-to-load-access-logs",
     },
 };
 Object.keys(dashLogs).forEach(function (k) {
@@ -1947,7 +1959,7 @@ function dashLogRowHtml(s, log) {
     if (s.id === "activity") {
         return '<div class="ui-tr" role="row" data-key="' + esc(log.id) + '">' +
             '<div class="ui-td" role="cell">' + uiTime(log.createdAt) + "</div>" +
-            '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(uiIdWord("logs.actor.", log.actor)) + "</span></div>" +
+            '<div class="ui-td ui-td-main" role="cell">' + dashLogActor(log.actor) + "</div>" +
             '<div class="ui-td" role="cell">' + dashTag(uiIdWord("logs.action.", log.action), "") + "</div>" +
             '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-type")) + ' </span><span class="ui-muted">' + esc(log.entityType ? uiIdWord("logs.entity.", log.entityType) : "-") + "</span></div>" +
             '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.entity-name")) + ' </span>' + (log.entityName ? uiUserText(log.entityName) : '<span class="ui-muted">-</span>') + "</div>" +
@@ -1956,11 +1968,20 @@ function dashLogRowHtml(s, log) {
     }
     return '<div class="ui-tr" role="row" data-key="' + esc(log.id) + '">' +
         '<div class="ui-td" role="cell">' + uiTime(log.createdAt) + "</div>" +
-        '<div class="ui-td ui-td-main" role="cell"><span class="ui-td-name">' + uiUserText(log.tokenName) + "</span></div>" +
-        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.area-zone")) + ' </span><span class="ui-tag ui-tag-line"><bdi dir="auto">' + esc(log.area) + "</bdi></span></div>" +
+        '<div class="ui-td ui-td-main" role="cell">' + uiCopyable(log.tokenName, "is-text ui-td-name") + "</div>" +
+        '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.area-zone")) + ' </span>' + uiCopyable(log.area, "is-text") + "</div>" +
         '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.level")) + ' </span><span class="ui-mono">' + esc(uiIdWord("logs.level.", log.level)) + "</span></div>" +
         '<div class="ui-td" role="cell">' + (log.result ? dashTag(t("logs.allowed"), "ok") : dashTag(t("logs.denied"), "fail")) + "</div>" +
         '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("logs.ip-address")) + ' </span>' + uiCopyable(log.ipAddress) + "</div></div>";
+}
+
+// Who did it: a user name copies on a click (FB-12); a system actor (setup, the
+// master API key...) is a word, not a value to copy
+function dashLogActor(actor) {
+    if (Object.prototype.hasOwnProperty.call(UI_TEXT, "logs.actor." + String(actor))) {
+        return '<span class="ui-td-name">' + uiUserText(uiIdWord("logs.actor.", actor)) + "</span>";
+    }
+    return uiCopyable(actor, "is-text ui-td-name");
 }
 
 // What an activity changed, in words; every value escaped
@@ -2093,7 +2114,7 @@ function dashLogDraw(s, quiet) {
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
     if (s.rows === null) html = s.failed ? dashFailed(t(s.failedText), s.failed, "data-log-retry") : dashLoading(t(s.loadingText));
-    else if (!s.rows.length) html = dashEmpty(t(s.emptyText), filtered ? esc(t("logs.change-the-filters-or-reset-them")) : "");
+    else if (!s.rows.length) html = dashEmpty(t(s.emptyText), filtered ? esc(t("logs.change-the-filters-or-reset-them")) : esc(t(s.emptyLine)));
     else html = s.rows.map(function (log) { return dashLogRowHtml(s, log); }).join("");
     if (html === s.drawn) return;
     s.drawn = html;
@@ -2256,7 +2277,7 @@ function dashLimitHtml() {
         return dashLimitAlert(stale ? " is-fail" : "", t("access.ratelimit.no-requests-were-rejected-by-the"), lines.concat([rule, since]));
     }
     var tops = (d.topAddresses || []).map(function (a) {
-        return uiUserText(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
+        return uiCopyable(a.address) + " (" + esc(uiNum(a.rejected)) + ")";
     }).join(", ");
     lines.push(
         tHtml("access.ratelimit.they-were-answered-with", {
@@ -2618,7 +2639,7 @@ function dashUseTokenHtml(d) {
     var areas = d.areas;
     var areasBody;
     if (areas === null) areasBody = dashEmpty(t("usage.area-figures-are-incomplete-for-this-2"), esc(t("usage.call-counts-above-are-complete")));
-    else if (!areas.length) areasBody = dashEmpty(t("usage.no-calls-in-this-period-2"), "");
+    else if (!areas.length) areasBody = dashEmpty(t("usage.no-calls-in-this-period-2"), esc(t("usage.no-calls-line")));
     else {
         var most = areas[0].calls;
         areasBody = '<div class="ui-table ui-stack" id="usage-areas" role="table" data-nosort aria-label="' + esc(t("usage.calls-per-zone")) + '">' +
@@ -2641,12 +2662,12 @@ function dashUseTokenHtml(d) {
         "</div>" + areasBody + "</div>";
 
     var addrs = d.addresses;
-    var addrBody = !addrs.length ? dashEmpty(t("usage.no-calls-in-this-period-2"), "") :
+    var addrBody = !addrs.length ? dashEmpty(t("usage.no-calls-in-this-period-2"), esc(t("usage.no-calls-line"))) :
         '<div class="ui-table ui-stack" id="usage-addrs" role="table" data-nosort aria-label="' + esc(t("usage.calls-per-address")) + '">' +
         '<div class="ui-tr ui-tr-head" role="row"><div class="ui-td" role="columnheader">' + esc(t("usage.address")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.calls")) + '</div>' +
         '<div class="ui-td" role="columnheader">' + esc(t("usage.denied")) + '</div><div class="ui-td" role="columnheader">' + esc(t("usage.last-call")) + '</div></div>' +
         '<div class="ui-table-body" role="rowgroup">' + addrs.map(function (a) {
-            return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell">' + uiCopyable(a.address + (a.truncated ? "…" : "")) + "</div>" +
+            return '<div class="ui-tr" role="row"><div class="ui-td ui-td-main" role="cell">' + (a.truncated ? uiUserText(a.address + "…", "ui-mono") : uiCopyable(a.address)) + "</div>" +
                 '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.calls-2")) + ' </span>' + esc(uiNum(a.calls)) + "</div>" +
                 '<div class="ui-td ui-num" role="cell"><span class="ui-unit">' + esc(t("usage.denied-3")) + ' </span><span' + (a.denied ? ' class="ui-text-fail"' : "") + ">" + esc(uiNum(a.denied)) + "</span></div>" +
                 '<div class="ui-td" role="cell"><span class="ui-unit">' + esc(t("usage.last-call-2")) + ' </span>' + uiTime(a.lastCallAt) + "</div></div>";
@@ -4348,10 +4369,13 @@ function dashPkDraw(quiet) {
     var data = dashPk.data;
     var infoHtml = dashPkInfoHtml(data, blocked, window.location.origin);
     if (info.innerHTML !== infoHtml && !uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = infoHtml; });
-    // Shown only where this browser can add one; the notes above say why not
+    // Locked, not hidden, where this browser cannot add one: the reason is its tooltip
+    // and the notes above say it too (FB-1)
     var add = document.getElementById("pk-add");
-    add.classList.toggle("hidden", !!blocked);
     add.disabled = !!blocked || !data;
+    var lock = blocked === "insecure" ? t(UI_PASSKEY_INSECURE) : blocked ? t(UI_PASSKEY_OLD_BROWSER) : "";
+    if (lock) add.setAttribute("title", lock);
+    else add.removeAttribute("title");
     if (quiet && uiAreaHeld(rowsEl)) return;
     var html;
     if (!data) {

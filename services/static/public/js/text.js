@@ -453,7 +453,11 @@ var UI_TEXT = {
     "logs.more-new-entries-than-can-be": "More new entries than can be merged. Show newest",
     "logs.never": "Never",
     "logs.new-entries": { "one": "1 new entry", "other": "{n} new entries" },
+    // brief: second, muted line under the empty Access Logs list when no filter is set; says when entries appear (each token check through /validate is written here); max 14 words
+    "logs.no-access-line": "",
     "logs.no-access-logs-found": "No access logs found.",
+    // brief: second, muted line under the empty Activity Log when no filter is set; says when entries appear (sign-ins and every change to tokens, zones, API keys, passkeys and settings are written here); max 14 words
+    "logs.no-activity-line": "",
     "logs.no-activity-logs-found": "No activity logs found.",
     "logs.no-modifications": "No modifications",
     "logs.none": "None",
@@ -1059,6 +1063,8 @@ var UI_TEXT = {
     "usage.no-calls": "No calls",
     "usage.no-calls-in-this-period": "No calls in this period",
     "usage.no-calls-in-this-period-2": "No calls in this period.",
+    // brief: second, muted line under an empty zone or address table of one token's usage; says a longer period may show calls (the period buttons are at the top of the page); max 12 words
+    "usage.no-calls-line": "",
     "usage.no-data": "No data",
     "usage.no-data-access-logs-older-than": "No data: access logs older than {days} are deleted",
     "usage.no-data-these-access-logs-were": "No data: these access logs were deleted under an earlier, shorter retention",
@@ -1124,6 +1130,8 @@ var UI_TEXT = {
     "zones.name": "Name",
     "zones.name-is-required": "Name is required",
     "zones.no-zones-match-your-search": "No zones match your search.",
+    // brief: second, muted line under the Zones list when the search matches no zone; says what to do (change the search or clear it with Clear filters); max 10 words
+    "zones.no-zones-match-line": "",
     "zones.no-zones-yet": "No zones yet.",
     "zones.optional": "(optional)",
     "zones.save": "Save",

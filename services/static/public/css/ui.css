@@ -460,6 +460,9 @@ body.ui-app { overflow: hidden; }
 .ui-picker-none { padding: var(--ui-sp-2) var(--ui-sp-4); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
 .ui-panel:has(.ui-popover:not(.hidden)) { overflow: visible; }
 
+/* WP4, pickers: a filter's panel is 320px wide, never wider than the screen (MP-4) */
+.ui-picker-panel { width: min(320px, calc(100vw - 16px)); }
+
 /* ---------- Table (CSS grid rows; set --ui-cols on .ui-table) ---------- */
 
 .ui-table { overflow-x: auto; }
@@ -518,6 +521,9 @@ body.ui-app { overflow: hidden; }
     .ui-copy:hover { background: color-mix(in srgb, var(--ui-info) 9%, transparent); }
     .ui-copy:hover svg { opacity: .5; }
 }
+
+/* WP4, lists: a name that copies (an actor, a token, a zone) keeps the text's own font (FB-12) */
+.ui-copy.is-text { font-family: inherit; font-size: inherit; }
 
 /* Row menu on the native popover layer (MP-7) */
 .ui-menu[popover] { position: fixed; inset: auto; margin: 0; min-width: 190px; max-width: min(300px, calc(100vw - 16px)); overflow-y: auto; padding: var(--ui-sp-2);
