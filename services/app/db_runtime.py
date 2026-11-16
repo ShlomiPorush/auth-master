@@ -73,7 +73,7 @@ STARTUP_LOCK_WAIT_SEC = 120.0
 CLOSE_TIMEOUT_SEC = 5.0
 # Failures that can pass on their own (the server was not up yet, a network outage): in
 # recovery mode the saved connection is tried again every RECOVERY_RETRY_SEC.
-RETRYABLE = frozenset({"unreachable", "timeout", "attach_failed", "database_missing", "other"})
+RETRYABLE = frozenset({"unreachable", "timeout", "attach_failed", "database_missing", "other", "move_incomplete"})
 
 # Short texts for the fixed failure codes; never the driver's message.
 MESSAGES = {
@@ -97,6 +97,9 @@ MESSAGES = {
     "config_unreadable": "The saved database password cannot be read: SESSION_SECRET or APP_ENCRYPTION_KEY changed.",
     "config_not_durable": "The new connection was written to data/database.json, but the disk did not confirm it.",
     "other": "The database connection failed.",
+    "database_moved": "This SQLite database was moved to PostgreSQL. Enter the PostgreSQL connection on this page.",
+    "move_incomplete": "The move to PostgreSQL did not finish switching. The service tries again every few seconds; you can also enter the PostgreSQL connection on this page.",
+    "move_source_mismatch": "The SQLite file the move came from belongs to another installation or another move, so it was not changed. Put the original file back, or enter the PostgreSQL connection on this page.",
 }
 
 
@@ -112,6 +115,11 @@ class OperationError(Exception):
         self.code = code
         self.text = text or message(code)
         self.extra = extra
+
+
+class NotFenced(OperationError):
+    """Raised by a switch's `fence` step when it certainly did not happen: the service
+    stays on the database it uses."""
 
 
 # ── Process registry ────────────────────────────────────────────
@@ -507,6 +515,10 @@ class Runtime:
     config: db_config.Config | None = None
     # The installation id the saved file names, when the file could be read only in part.
     known_installation_id: str | None = None
+    # The move from SQLite the saved file records (migrationId, movedFromSqlite), kept the
+    # same way when the file could be read only in part (move_record).
+    known_migration_id: str | None = None
+    known_moved_from: str | None = None
     db: Any = None
     settings_db: Any = None
     close_settings: bool = False
@@ -523,6 +535,11 @@ class Runtime:
     restart_task: asyncio.Task | None = None
     # Connections being closed in the background (attach failures).
     closing: set[asyncio.Task] = field(default_factory=set)
+    # In recovery after a move passed its commit point (the fence of the old SQLite file)
+    # but data/database.json was not written: the retry writes `config` first.
+    unpublished: bool = False
+    # How long the request gate was closed in the last switch (seconds).
+    last_pause_sec: float | None = None
 
     def __post_init__(self) -> None:
         self.jobs = Jobs(guard=self.registry.exclusive)
@@ -544,6 +561,7 @@ class Runtime:
                 pass
             db = await create_database(url)
             try:
+                await _refuse_unfinished(db)
                 await ensure_database_schema(db)
                 await installation.ensure_row(db)
                 await self.attach(app, db, run_schema=False)
@@ -572,6 +590,7 @@ class Runtime:
             legacy_exists = legacy.exists()
         if error is not None:
             self.known_installation_id = _installation_id_in_file()
+            self.known_migration_id, self.known_moved_from = _move_record_in_file()
             await self._enter_recovery(app, error.code, error.message)
             return
         if cfg is not None:
@@ -746,6 +765,8 @@ class Runtime:
             return
         try:
             code = await _check_identity(db, cfg.installation_id)
+            if code == "installation_pending":
+                code = await self._pending(db, cfg)
             if code is None:
                 await self.attach(app, db)
                 self.source = "file"
@@ -764,6 +785,12 @@ class Runtime:
         db = await db_config.open_sqlite(str(path))
         try:
             state = await db_inspect.inspect(db)
+            if state.kind == db_inspect.INSTALLATION and _moved(state.installation):
+                await db.close()
+                self.known_installation_id = state.installation.id
+                self.known_migration_id, self.known_moved_from = state.installation.migration_id, str(path)
+                await self._enter_recovery(app, "database_moved")
+                return
             if state.kind == db_inspect.INSTALLATION and state.installation.status == installation.ACTIVE:
                 iid = state.installation.id
             elif state.kind == db_inspect.OLDER:
@@ -819,6 +846,8 @@ class Runtime:
                     return {"mode": self.mode}
                 try:
                     code = await _check_identity(db, cfg.installation_id)
+                    if code == "installation_pending":
+                        code = await self._pending(db, cfg)
                 except asyncio.CancelledError:
                     await self._close_handles(db, None, False)
                     raise
@@ -829,7 +858,7 @@ class Runtime:
                     self.failure_code, self.failure_text = code, message(code)
                     return {"mode": self.mode}
                 try:
-                    await self.switch(app, job, new_db=db, new_config=cfg, publish=False)
+                    await self.switch(app, job, new_db=db, new_config=cfg, publish=self.unpublished)
                 except BaseException as e:
                     # As db_operations._switch: only while it is not attached or closed already.
                     if self.db is not db and not (isinstance(e, OperationError) and e.code == "attach_failed"):
@@ -841,6 +870,50 @@ class Runtime:
                 self.jobs.start("reconnect", reconnect)
             except Busy:
                 continue
+
+    async def _pending(self, db: Any, cfg: db_config.Config) -> str | None:
+        """The code for a database whose installation row is not active, or None once a
+        move whose commit point passed is completed (the row is then active)."""
+        row = await installation.read(db)
+        if db.is_sqlite and _moved(row):
+            # The fenced file names the move: kept, so every later configuration records it
+            # (move_record), also when no file was written for PostgreSQL yet.
+            self.known_migration_id, self.known_moved_from = row.migration_id, cfg.sqlite_path
+            return "database_moved"
+        if cfg.backend == db_config.POSTGRES and cfg.migration_id and row is not None \
+                and row.migration_id == cfg.migration_id:
+            return await self._complete_move(db, cfg)
+        return "installation_pending"
+
+    async def _complete_move(self, db: Any, cfg: db_config.Config) -> str | None:
+        """Finish a move from SQLite after its commit point: fence the old file (again; it is
+        idempotent, and a missing file counts as fenced), then activate the PostgreSQL row.
+        None when done, else a failure code."""
+        from app import db_move
+
+        assert cfg.migration_id is not None and cfg.moved_from_sqlite is not None
+        try:
+            result = await asyncio.to_thread(
+                db_move.fence_file, cfg.moved_from_sqlite, cfg.installation_id, cfg.migration_id
+            )
+        except db_move.SourceMismatch:
+            return "move_source_mismatch"
+        except Exception as e:
+            print(f"Locking the old SQLite file failed ({type(e).__name__})")
+            return "move_incomplete"
+        if result == "missing":
+            print(f"The SQLite file the move came from ({cfg.moved_from_sqlite}) is missing; nothing to lock")
+        await installation.activate(db, cfg.installation_id, cfg.migration_id)
+        return None
+
+    def move_record(self) -> tuple[str | None, str | None]:
+        """(migration id, SQLite path) of the move from SQLite this installation made, from
+        the configuration in use or, when the saved file could be read only in part, from
+        that file; (None, None) when there was none."""
+        cfg = self.config
+        if cfg is not None and cfg.migration_id:
+            return cfg.migration_id, cfg.moved_from_sqlite
+        return self.known_migration_id, self.known_moved_from
 
     # ── Switching ──
 
@@ -855,10 +928,20 @@ class Runtime:
         publish: bool = True,
         run_schema: bool = True,
         after: Callable[[], Awaitable[None]] | None = None,
+        fence: Callable[[], Awaitable[None]] | None = None,
+        before_attach: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Switch the service to `new_db` (opened and checked by the caller, which closes it
         when this raises before the commit point).  Runs inside a job, which holds
-        Registry.exclusive for the whole operation."""
+        Registry.exclusive for the whole operation.
+
+        The move from SQLite (app.db_move) adds two steps.  `fence` runs after `verify`,
+        inside the closed gate, and is the commit point: it is never cancelled and is
+        awaited until it returns, also past the deadline.  NotFenced means it certainly did
+        not happen (the gate reopens on the old database); any other error leaves its
+        outcome open, so the service goes to recovery mode, as after the commit point.
+        `before_attach` runs after data/database.json is written, before the new database
+        is attached (the first write to it)."""
         loop = asyncio.get_running_loop()
         old = (self.db, self.settings_db, self.close_settings)
         had_db = self.db is not None
@@ -872,7 +955,8 @@ class Runtime:
         try:
             job.step = "waiting for requests to finish"
             # One deadline from the moment the gate closes.
-            deadline = loop.time() + SWITCH_BUDGET_SEC
+            closed_at = loop.time()
+            deadline = closed_at + SWITCH_BUDGET_SEC
             if not await self.gate.close_and_drain(DRAIN_BUDGET_SEC):
                 raise OperationError(
                     "busy",
@@ -891,13 +975,36 @@ class Runtime:
                 self._resume_background(app)
             raise
 
+        cancelled = False
+        if fence is not None:
+            job.step = "locking the old database file"
+            fencing = asyncio.ensure_future(fence())
+            while not fencing.done():
+                try:
+                    await asyncio.shield(fencing)
+                except asyncio.CancelledError:
+                    cancelled = True
+                except BaseException:
+                    break
+            error = None if fencing.cancelled() else fencing.exception()
+            if isinstance(error, NotFenced):
+                self.gate.reopen()
+                if had_db:
+                    self._resume_background(app)
+                raise error
+            if error is not None or fencing.cancelled():
+                print(f"Locking the old database file failed ({type(error).__name__}); its outcome is not known")
+                self.unpublished = True
+                await self._recover_after_commit(app, new_db, new_config, old, had_db, "move_incomplete", None)
+                raise OperationError("move_incomplete")
+
         # From the commit point on, a cancellation (shutdown) must not stop the switch half
         # way: the rest runs as its own task, and this one waits for it, however often it is
         # cancelled, so the job keeps Registry.exclusive until the outcome is final.
         finish = asyncio.ensure_future(
-            self._commit(app, job, new_db, new_config, old, had_db, publish, run_schema, deadline, after)
+            self._commit(app, job, new_db, new_config, old, had_db, publish, run_schema, deadline, after,
+                         fenced=fence is not None, before_attach=before_attach, closed_at=closed_at)
         )
-        cancelled = False
         while not finish.done():
             try:
                 await asyncio.shield(finish)
@@ -913,10 +1020,14 @@ class Runtime:
         self, app: Any, job: Job, new_db: Any, new_config: db_config.Config, old: tuple[Any, Any, bool],
         had_db: bool, publish: bool, run_schema: bool, deadline: float,
         after: Callable[[], Awaitable[None]] | None = None,
+        fenced: bool = False, before_attach: Callable[[], Awaitable[None]] | None = None,
+        closed_at: float | None = None,
     ) -> None:
         """Publish data/database.json (the commit point), then attach the new database, all
         within the switch deadline.  The gate is closed on entry and open on every exit."""
         loop = asyncio.get_running_loop()
+        # The retry of a move whose file was not written yet is past the commit point too.
+        fenced = fenced or self.unpublished
         if publish:
             job.step = "saving the configuration"
             # Off the event loop, so a slow disk does not stop other requests' timers.
@@ -927,11 +1038,17 @@ class Runtime:
                 # The file may already name the new database, but the disk has not confirmed
                 # it (or the write has not ended): a power failure could bring the old file
                 # back, so no write may be acknowledged on either database.
-                await self._recover_after_commit(
-                    app, new_db, new_config, old, had_db, "config_not_durable",
-                    "The new connection was written to data/database.json, but the disk did not "
-                    "confirm it in time. Check the disk, then save the connection again on this page.",
-                )
+                if fenced:
+                    # After a move's commit point the retry loop writes the file again and
+                    # finishes the switch once the disk answers.
+                    self.unpublished = True
+                    await self._recover_after_commit(app, new_db, new_config, old, had_db, "move_incomplete", None)
+                else:
+                    await self._recover_after_commit(
+                        app, new_db, new_config, old, had_db, "config_not_durable",
+                        "The new connection was written to data/database.json, but the disk did not "
+                        "confirm it in time. Check the disk, then save the connection again on this page.",
+                    )
                 if not done:
                     # Nothing else may write the file before this write has ended.
                     await asyncio.wait({writing})
@@ -940,18 +1057,30 @@ class Runtime:
                     "The new connection was written, but the disk did not confirm it. The service is "
                     "in recovery mode; open /recovery to save it again.",
                 )
+            if error is not None and fenced:
+                # The old SQLite file is fenced already: no way back to it.  The retry loop
+                # writes the file again (unpublished) and finishes the switch.
+                print(f"Writing data/database.json failed after the move's commit point ({type(error).__name__})")
+                self.unpublished = True
+                await self._recover_after_commit(app, new_db, new_config, old, had_db, "move_incomplete", None)
+                raise OperationError("move_incomplete")
             if error is not None:
                 # Failed before the replace: the old file and the old database stay in use.
                 self.gate.reopen()
                 if had_db:
                     self._resume_background(app)
                 raise error
+        if publish:
+            self.unpublished = False
         job.step = "switching"
+
+        async def bring_up() -> None:
+            if before_attach is not None:
+                await before_attach()
+            await self.attach(app, new_db, run_schema=run_schema, switching=True)
+
         try:
-            await asyncio.wait_for(
-                self.attach(app, new_db, run_schema=run_schema, switching=True),
-                max(ATTACH_FLOOR_SEC, deadline - loop.time()),
-            )
+            await asyncio.wait_for(bring_up(), max(ATTACH_FLOOR_SEC, deadline - loop.time()))
         except Exception as e:
             print(f"Switching to the new database failed after it was saved ({type(e).__name__})")
             await self._recover_after_commit(app, new_db, new_config, old, had_db, "attach_failed", None)
@@ -963,6 +1092,8 @@ class Runtime:
         self.config, self.source = new_config, "file"
         self.known_installation_id = new_config.installation_id
         self.gate.reopen()
+        if closed_at is not None:
+            self.last_pause_sec = loop.time() - closed_at
         if had_db:
             await self._close_handles(*old)
         if after is not None:
@@ -995,6 +1126,28 @@ def _build_redis(app: Any, connection: redis_settings.Connection) -> None:
     redis_settings.state.connection = connection
 
 
+def _moved(row: Any) -> bool:
+    """A SQLite installation row that a move to PostgreSQL fenced (app.db_move.fence_file)."""
+    return row is not None and row.status == installation.PENDING and bool(row.migration_id)
+
+
+async def _refuse_unfinished(db: Any) -> None:
+    """DATABASE_URL start-up: never serve a database whose installation row is not active,
+    before anything in it is changed."""
+    if not await installation.table_exists(db):
+        return
+    row = await installation.read(db)
+    if row is None or row.status == installation.ACTIVE:
+        return
+    if db.is_sqlite and _moved(row):
+        text = ("DATABASE_URL names a SQLite database that was moved to PostgreSQL. Remove DATABASE_URL "
+                "or point it to the PostgreSQL database.")
+    else:
+        text = ("DATABASE_URL names a database that holds an unfinished copy from a move to PostgreSQL. "
+                "Remove DATABASE_URL so the service uses data/database.json, or point it to the database in use.")
+    raise RuntimeError(text)
+
+
 async def _check_identity(db: Any, installation_id: str) -> str | None:
     """None when `db` holds the active installation `installation_id`, else a failure code."""
     state = await db_inspect.inspect(db)
@@ -1023,6 +1176,20 @@ def _installation_id_in_file() -> str | None:
         return iid if isinstance(iid, str) and iid else None
     except Exception:
         return None
+
+
+def _move_record_in_file() -> tuple[str | None, str | None]:
+    """migrationId and movedFromSqlite of a file that cannot be used as a whole."""
+    import json
+
+    try:
+        data = json.loads(db_config.config_path().read_text(encoding="utf-8"))
+        mid, moved = data.get("migrationId"), data.get("movedFromSqlite")
+        if isinstance(mid, str) and mid:
+            return mid, moved if isinstance(moved, str) and moved else None
+    except Exception:
+        pass
+    return None, None
 
 
 def _remove_setup_leftovers() -> None:

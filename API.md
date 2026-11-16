@@ -390,7 +390,17 @@ them carry values that other tools may read:
 - `GET /admin/api/settings/database` reports in `job` a database operation that runs
   (`{"state": "running", ...}`), or `{"state": "pending"}` while a connection change has been
   received but has not started its operation yet. A second change meanwhile answers `409`
-  with `"code": "busy"`.
+  with `"code": "busy"`. For a SQLite database chosen in setup, `movable` is `true`.
+- `POST /admin/api/settings/database/move/check` with `{"postgres": {...}}` (the connection
+  fields of a change) checks a move to that PostgreSQL database and changes nothing. It answers
+  `{"ok": true, "target": "empty" | "earlier_copy", "problems": [...], "counts": {...},
+  "uncheckedTables": ["access_logs", "activity_logs"]}`, or `{"ok": false, "code": ..., "detail": ...}`.
+  The tables in `uncheckedTables` are only counted; the move reads every row of them and
+  stops before anything changes when one cannot be moved.
+- `POST /admin/api/settings/database/move` with the same body and `code` or `passkey` starts the
+  move and answers `202` with its `job`, followed at `GET /admin/api/settings/database/jobs/{id}`.
+  A finished move's `result` holds `rows` per table, `textReplaced` (log rows whose NUL or
+  invalid text was replaced) and `pauseMs`.
 
 ---
 

@@ -5954,6 +5954,28 @@ function dashDbSummary(c) {
     return tHtml(c.caPem ? "settings.database.with-a-ca-certificate" : "settings.database.tls", { where: where, mode: uiIdWord("db.sslmode.", c.sslmode) });
 }
 
+// A SQLite database chosen in setup can move to an empty PostgreSQL database while the
+// service runs (Move to PostgreSQL); the form then takes a new connection, not an edit
+function dashDbMoving() {
+    var s = dashDb.snap;
+    return !!(s && s.movable && !s.editable && !s.locked);
+}
+
+// What the move check found, as a note (uiDbNoteHtml)
+function dashDbMoveNote(r) {
+    if (!r) return null;
+    if (!r.ok) return { kind: "failed", tone: " is-fail", title: t("settings.database.move-cannot-start"), text: uiDbCodeText(r.code, r.detail) };
+    if (r.problems && r.problems.length) {
+        return { kind: "user", tone: " is-fail", title: t("db.the-database-user-cannot-be-used"), text: r.problems.join(" ") };
+    }
+    var n = r.counts || {};
+    var text = t("settings.database.move-ready", {
+        tokens: uiNum(n.tokens), zones: uiNum(n.zones), logs: uiNum((n.access_logs || 0) + (n.activity_logs || 0)),
+    });
+    if (r.target === "earlier_copy") text += " " + t("settings.database.move-earlier-copy");
+    return { tone: "", title: t("settings.database.move-ready-title"), text: text };
+}
+
 function dashDbFormHtml() {
     var s = dashDb.snap;
     var c = s.connection;
@@ -5961,6 +5983,23 @@ function dashDbFormHtml() {
     if (s.locked) {
         return '<div class="ui-form"><div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
             dashSetLocked({ envName: s.envName }, c.backend === "sqlite" ? t("settings.database.sqlite") : t("settings.database.postgresql-2")) + "</div></div>";
+    }
+    if (dashDbMoving()) {
+        return '<form class="ui-form" id="db-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="db-fields">' +
+            '<div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
+            '<p class="ui-hint">' + esc(t("settings.database.chosen-in-setup-back-up-the")) + "</p></div>" +
+            '<div class="ui-field"><span class="ui-label">' + esc(t("settings.database.move-title")) + '</span>' +
+            '<p class="ui-hint">' + esc(t("settings.database.move-intro")) + "</p>" +
+            '<p class="ui-hint">' + esc(t("settings.database.move-notes")) + "</p></div>" +
+            uiDbFieldsHtml("dbs-", { port: 5432, sslmode: "prefer" }, false, false) +
+            '<div id="dbs-result" aria-live="polite"></div>' +
+            '<label class="ui-check-label hidden" id="dbs-confirm-row"><input type="checkbox" class="ui-check" id="dbs-confirm" /> <span id="dbs-confirm-text"></span></label>' +
+            '<p class="ui-error hidden" id="dbs-err" role="alert"></p>' +
+            '<div class="ui-settings-actions"><button type="button" class="ui-btn" id="dbs-check" data-inventory="settings.database.move-check">' + esc(t("settings.database.check-connection")) + '</button>' +
+            '<button type="submit" class="ui-btn ui-btn-primary" id="dbs-save" data-inventory="settings.database.move" aria-describedby="dbs-blocked">' + esc(t("settings.database.move-start")) + '</button>' +
+            '<button type="button" class="ui-btn hidden" id="dbs-discard">' + esc(t("settings.database.discard-changes")) + '</button></div>' +
+            '<p class="ui-hint hidden" id="dbs-blocked"></p>' +
+            "</fieldset></form>";
     }
     if (!s.editable) {
         return '<div class="ui-form"><div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
@@ -6018,7 +6057,8 @@ function dashDbDraw(redraw) {
         return;
     }
     if (redraw || !body.firstChild || body.querySelector(".ui-loading, .ui-failed")) {
-        dashDb.replacing = { password: false, ca: false };
+        // A move takes a new password (nothing is saved for that server yet)
+        dashDb.replacing = { password: dashDbMoving(), ca: dashDbMoving() };
         dashDb.caRemove = false;
         body.innerHTML = dashDbFormHtml();
     }
@@ -6028,13 +6068,15 @@ function dashDbDraw(redraw) {
     document.getElementById("db-fields").disabled = !!dashDb.busy || !!dashSettings.lock;
     document.getElementById("dbs-check").textContent = dashDb.busy === "check" ? t("settings.database.checking") : t("settings.database.check-connection");
     var save = document.getElementById("dbs-save");
-    save.textContent = dashSettings.lock ? t("settings.database.saving") : t("settings.database.change-connection");
+    var moving = dashDbMoving();
+    save.textContent = dashSettings.lock ? t(moving ? "settings.database.moving" : "settings.database.saving")
+        : t(moving ? "settings.database.move-start" : "settings.database.change-connection");
     save.disabled = !!blocked;
     var why = document.getElementById("dbs-blocked");
     why.textContent = blocked;
     why.classList.toggle("hidden", !blocked);
     document.getElementById("dbs-discard").classList.toggle("hidden", !dashDb.dirty || !!dashDb.busy || !!dashSettings.lock);
-    document.getElementById("dbs-result").innerHTML = uiDbNoteHtml(uiDbCheckNote(dashDb.check, "settings"));
+    document.getElementById("dbs-result").innerHTML = uiDbNoteHtml(moving ? dashDbMoveNote(dashDb.check) : uiDbCheckNote(dashDb.check, "settings"));
     var row = document.getElementById("dbs-confirm-row");
     row.classList.toggle("hidden", !dashDb.askConfirm);
     document.getElementById("dbs-confirm-text").textContent = dashDb.askConfirm;
@@ -6087,7 +6129,8 @@ function dashDbCheck() {
     dashDb.busy = "check";
     dashDb.error = "";
     dashDbDraw(false);
-    return api("POST", "/admin/api/settings/database/check", { postgres: fields }).then(function (res) {
+    var url = dashDbMoving() ? "/admin/api/settings/database/move/check" : "/admin/api/settings/database/check";
+    return api("POST", url, { postgres: fields }).then(function (res) {
         dashDb.busy = "";
         if (!res.ok) {
             dashDb.check = null;
@@ -6105,7 +6148,8 @@ function dashDbCheck() {
 }
 
 function dashDbSave() {
-    if (dashDb.busy || dashSettings.lock || !dashDb.snap || !dashDb.snap.editable) return;
+    if (dashDb.busy || dashSettings.lock || !dashDb.snap || !(dashDb.snap.editable || dashDbMoving())) return;
+    var moving = dashDbMoving();
     if (dashDbBlockReason()) {
         dashDbDraw(false);
         return;
@@ -6115,9 +6159,10 @@ function dashDbSave() {
     var checked = dashDb.check && dashDb.checkedFor === key ? Promise.resolve(dashDb.check) : dashDbCheck();
     checked.then(function (r) {
         if (!r) return;
-        var note = uiDbCheckNote(r, "settings");
+        var note = moving ? dashDbMoveNote(r) : uiDbCheckNote(r, "settings");
         if (!r.ok || (note && note.tone === " is-fail")) {
-            dashDbFail(t((note && DASH_DB_REFUSED[note.kind]) || "settings.database.nothing-saved-check-failed"));
+            dashDbFail(t(moving ? "settings.database.move-check-failed"
+                : (note && DASH_DB_REFUSED[note.kind]) || "settings.database.nothing-saved-check-failed"));
             return;
         }
         if (dashDb.askConfirm && !dashDb.confirm) {
@@ -6133,10 +6178,10 @@ function dashDbSave() {
         var body = { postgres: fields };
         if (dashDb.askConfirm) body.confirmCopy = true;
         dashStepUpDialog({
-            title: t("settings.database.confirm-the-change"),
-            text: t("settings.database.enter-your-6-digit-authenticator-code"),
-            pkText: t("settings.database.use-a-passkey-or-your-6"),
-            submitText: t("settings.database.verify-save"),
+            title: t(moving ? "settings.database.confirm-the-move" : "settings.database.confirm-the-change"),
+            text: t(moving ? "settings.database.move-step-up" : "settings.database.enter-your-6-digit-authenticator-code"),
+            pkText: t(moving ? "settings.database.move-step-up-pk" : "settings.database.use-a-passkey-or-your-6"),
+            submitText: t(moving ? "settings.database.verify-move" : "settings.database.verify-save"),
             send: function (proof) {
                 var b = {};
                 Object.keys(body).forEach(function (k) { b[k] = body[k]; });
@@ -6176,7 +6221,8 @@ function dashDbSend(body) {
     dashDb.error = "";
     dashSettingsLockFor("sending");
     uiMutated();
-    return api("PUT", "/admin/api/settings/database", body).then(function (res) {
+    var moving = dashDbMoving();
+    return api(moving ? "POST" : "PUT", moving ? "/admin/api/settings/database/move" : "/admin/api/settings/database", body).then(function (res) {
         if (gen !== dashDb.gen) return res;
         var d = res.data || {};
         if (res.ok && d.job && d.job.id) {
@@ -6275,7 +6321,9 @@ function dashDbEnded(j) {
         dashDb.snap = null;
         dashSettingsUnlock();
         dashDbDraw(true);
-        showToast(j.result && j.result.warning ? j.result.warning : t("settings.database.database-connection-saved"), j.result && j.result.warning ? "warning" : "success");
+        var done = j.kind === "move" ? t("settings.database.moved", { ms: uiNum(j.result && j.result.pauseMs) })
+            : t("settings.database.database-connection-saved");
+        showToast(j.result && j.result.warning ? j.result.warning : done, j.result && j.result.warning ? "warning" : "success");
         // Every section from the database now in use; then dates, zone and lists follow it
         dashSettingsReloadAll();
         dashDbLoad();

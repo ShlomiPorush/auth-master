@@ -9,7 +9,10 @@ The file (format 1), mode 0600:
      "sqlite": {"path": "data/auth.db"},                      # backend sqlite
      "postgres": {"host", "port", "database", "user",         # backend postgres
                   "passwordEnc", "sslmode", "caPem"},
-     "installationId": str, "updatedAt": str}
+     "installationId": str, "updatedAt": str,
+     "migrationId": str, "movedFromSqlite": str}            # after a move from SQLite
+migrationId names the move (app.db_move) that filled the PostgreSQL database, and
+movedFromSqlite the SQLite file it was moved from; versions before the move ignore both.
 The password is encrypted with app.crypto_tokens (AES-GCM under SESSION_SECRET and
 APP_ENCRYPTION_KEY), so changing either key makes the saved connection unreadable, as it
 does for the other saved secrets; the recovery page then takes the password again.
@@ -101,6 +104,9 @@ class Config:
     installation_id: str
     sqlite_path: str | None = None
     pg: PgParams | None = None
+    # Set by a move from SQLite (app.db_move): the move's id and the old SQLite file.
+    migration_id: str | None = None
+    moved_from_sqlite: str | None = None
 
 
 # ── Validation of connection fields ─────────────────────────────
@@ -174,6 +180,9 @@ def _dump(cfg: Config) -> str:
             "sslmode": p.sslmode,
             "caPem": p.ca_pem,
         }
+    if cfg.migration_id is not None:
+        data["migrationId"] = cfg.migration_id
+        data["movedFromSqlite"] = cfg.moved_from_sqlite
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
@@ -219,7 +228,12 @@ def _parse(text: str) -> Config:
             "The saved database password cannot be read: SESSION_SECRET or APP_ENCRYPTION_KEY "
             "changed since it was saved. Enter the connection again on the recovery page.",
         ) from None
-    return Config(POSTGRES, iid, pg=PgParams(host, port, database, user, password, sslmode, ca))
+    migration_id, moved_from = data.get("migrationId"), data.get("movedFromSqlite")
+    if migration_id is not None and not (isinstance(migration_id, str) and migration_id
+                                         and isinstance(moved_from, str) and moved_from):
+        raise ConfigError("config_invalid", f"{_INVALID} (migrationId).")
+    return Config(POSTGRES, iid, pg=PgParams(host, port, database, user, password, sslmode, ca),
+                  migration_id=migration_id, moved_from_sqlite=moved_from if migration_id else None)
 
 
 def read_config() -> Config | None:
@@ -344,6 +358,24 @@ async def open_postgres(p: PgParams, *, min_size: int = 1, max_size: int = 10) -
         max_size=max_size,
     )
     return PgDatabase(pool)
+
+
+async def connect_postgres(p: PgParams) -> Any:
+    """One asyncpg connection (not a pool) with the options of open_postgres, for work that
+    must stay on one connection, such as the move's single transaction (app.db_move)."""
+    import asyncpg
+
+    return await asyncpg.connect(
+        host=p.host,
+        port=p.port,
+        user=p.user,
+        password=p.password,
+        database=p.database,
+        ssl=ssl_argument(p),
+        timeout=CONNECT_TIMEOUT_SEC,
+        command_timeout=COMMAND_TIMEOUT_SEC,
+        target_session_attrs="read-write",
+    )
 
 
 async def open_sqlite(path: str) -> Any:

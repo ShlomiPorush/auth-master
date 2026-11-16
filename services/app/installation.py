@@ -107,6 +107,15 @@ async def ensure_row(db: Any) -> Installation:
     return current
 
 
+async def activate(db: Any, installation_id: str, migration_id: str) -> None:
+    """The first write to a database a move from SQLite filled (app.db_move): its row
+    becomes active.  Does nothing when it is active already."""
+    await db.execute(
+        "UPDATE installation SET status = $1 WHERE id = $2 AND migration_id = $3 AND status = $4",
+        ACTIVE, installation_id, migration_id, PENDING,
+    )
+
+
 async def write_nonce(db: Any) -> str:
     value = secrets.token_hex(16)
     await db.execute("UPDATE installation SET switch_nonce = $1", value)

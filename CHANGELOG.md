@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Move to PostgreSQL** in the Database section of the Settings page: an installation that
+  uses the SQLite file chosen in setup moves to an empty PostgreSQL database while the service
+  runs. The check names every row that cannot be moved; the move copies everything in one
+  PostgreSQL transaction and compares the copy, and at the switch requests wait a few seconds.
+  It needs the authenticator code or a passkey, and each move is an Activity Log entry
+  (`database.migrated`, or `database.migration_failed`). New endpoints
+  `POST /admin/api/settings/database/move/check` and `POST /admin/api/settings/database/move`.
+  See "Move from SQLite to PostgreSQL" in README.md.
+
+### Changed
+
+- After a move, the old SQLite file stays in the data directory, locked against writes: its
+  `installation` row is `pending` with the move's id, and triggers refuse every write. Start-up
+  never serves it, with or without `data/database.json`, and with `DATABASE_URL` the service
+  does not start on it. `data/database.json` gains `migrationId` and `movedFromSqlite`, which
+  2.3 and 2.4 ignore.
+- With `DATABASE_URL`, the service no longer starts on a database whose `installation` row is
+  not active (an unfinished copy from a move).
+- The access and activity logs replace the NUL character with U+FFFD on both backends. Before,
+  a `/validate` request with NUL in `area` failed with 500 on PostgreSQL.
+
 ### Fixed
 
 - In the Docker image, every PostgreSQL connection failed (setup, the Settings page, the
@@ -14,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the service ran as uid 10001 with `HOME=/root`, and the PostgreSQL driver stopped with a
   permission error while it looked for client certificates in `~/.postgresql`. The service
   now runs with the service user's own home, `/nonexistent`. Affects 2.3.0 and 2.4.0.
+
+### Upgrade notes
+
+- After a move to PostgreSQL, do not roll back below 2.3: older images open the old SQLite
+  file, whose lock refuses their first write at start-up, so they stop (checked with 2.2.0).
+  Do not roll back to the 2.3.0 or 2.4.0 images either: they cannot connect to PostgreSQL
+  (see Fixed).
 
 ## [2.4.0] - 2026-11-16
 

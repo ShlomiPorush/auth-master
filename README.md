@@ -324,6 +324,53 @@ TLS. `require` always uses TLS without checking the server's certificate. `verif
 checks the server's certificate and host name against the system's trusted certificates, or a
 CA certificate (PEM) that you paste.
 
+#### Move from SQLite to PostgreSQL
+
+When the service uses the SQLite file chosen in setup, the **Database** section of the Settings
+page offers **Move to PostgreSQL**. It copies everything to an empty PostgreSQL database while
+the service keeps running, then switches to it.
+
+1. Create an empty PostgreSQL database in UTF8 and a user that owns it, for example
+   `CREATE DATABASE authdb OWNER auth ENCODING 'UTF8'`.
+2. Enter the host, port, database, user, password and TLS mode, then choose **Check
+   connection**. The check changes nothing. It shows how many tokens, zones and log entries
+   will be copied, and names any row that cannot be moved (table, row and column), so you can
+   fix or delete it first. Log entries are only counted there; the move checks each one as
+   it copies it and stops before anything changes when one cannot be moved.
+3. Choose **Move to PostgreSQL** and confirm with your authenticator code or a passkey.
+
+While the data is copied, the log cleanup and the Usage summary pause. At the switch, requests
+wait a few seconds and then continue on PostgreSQL; none is lost. The result shows how long
+they waited. Each move is an entry in the Activity Log, without the password.
+
+What to know before you start:
+
+- The PostgreSQL server must run with `fsync` on, and the database must be empty or hold only
+  an unfinished copy that an earlier move of this installation left. The user needs the same
+  rights as for a connection change.
+- PostgreSQL text cannot hold the NUL character. In the access and activity logs it becomes
+  U+FFFD (the replacement character), and the result counts the rows changed; in any other
+  table the move does not start and names the row.
+- A row larger than 1 MiB is not moved. The check names it; in the logs, which the check only
+  counts, the move names it before anything changes.
+- The tables that requests change (admins, tokens, zones, API keys, passkeys) are copied while
+  requests wait. If that takes longer than 3 seconds in a test run before the switch, the move
+  does not start and nothing changes.
+- The SQLite file stays in the data directory and is locked against writes: the service, and
+  any image from 2.3 on, never uses it again. Images before 2.3 do not read
+  `data/database.json` and open the SQLite file; its lock refuses their first write at
+  start-up, so they stop (checked with 2.2.0). The published 2.3.0 and 2.4.0 images cannot
+  connect to PostgreSQL from Docker, so after a move, do not roll back to them either.
+- There is no move back. From then on, back up PostgreSQL. A backup of the data directory
+  from before the move, restored afterwards, brings back the SQLite file as it was then.
+- Keep `APP_ENCRYPTION_KEY` and `SESSION_SECRET`: the stored token values and secrets move as
+  they are, encrypted with those keys.
+
+If anything fails before the switch, the service stays on SQLite and nothing changes there. If
+the switch itself is interrupted after the SQLite file was locked, the service enters recovery
+mode and finishes the move by itself once the cause is gone, for example a full disk. If it
+cannot, the recovery page takes the PostgreSQL connection and finishes it.
+
 #### Recovery mode
 
 When the saved database cannot be used at start, for example because the password changed,
@@ -350,8 +397,12 @@ data.
 
 #### Limits
 
-- Changing the connection needs a single service process for the data directory, as in the
-  bundled `docker-compose.yml`. With several processes, the page says so and changes nothing.
+- Changing the connection or moving to PostgreSQL needs a single service process for the data
+  directory, as in the bundled `docker-compose.yml`. With several processes, the page says so
+  and changes nothing.
+- `DATABASE_URL` locks the connection, so an installation that sets it cannot move from the
+  Settings page. When `DATABASE_URL` names a SQLite file that was moved, or a PostgreSQL
+  database that holds an unfinished copy from a move, the service does not start and says why.
 - An image older than this version ignores `data/database.json`. See
   [Roll back to 2.2.x](#roll-back-to-22x).
 
