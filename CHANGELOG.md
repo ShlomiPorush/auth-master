@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The **Date format** and **Time format** of every date on the dashboard are server settings
+  in Settings > General, sent to every page by `GET /admin/api/me` (`dateFormat`,
+  `timeFormat`). `DATE_FORMAT` and `TIME_FORMAT` set them and lock the fields. They are
+  stored in the table `app_state` (key `display_settings`), so the database schema does not
+  change. The two fields leave **Preferences**, and the choice each browser kept there is no
+  longer read.
+- Each Settings section has its own address, such as `/admin/settings/database`.
+
+### Changed
+
+- The dashboard follows the v3 design throughout:
+  - A top bar on wide screens holds the page title, its help button, a search of the whole portal (press `/`) and the page's actions. The sidebar folds into an icon rail, and the browser remembers that choice.
+  - Every page has a help button beside its title.
+  - Settings is split into sections with one save bar for all of them. Each change is marked, and a field can be reset to its default. Stored secrets show as stored, with Replace. Questions about risky changes come up in a dialog before saving.
+  - The logs load more rows as you scroll and offer new entries at the top.
+  - The Usage chart zooms, and an overview strip shows the whole period.
+  - A list that could not be updated says so and keeps its rows.
+- Every word the dashboard shows comes from one text catalog, `services/static/public/js/text.js`, and the wording was rewritten throughout.
+
+### Fixed
+
+- A database connection change whose answer was lost no longer reads as "nothing running"
+  while it still waits for its second-factor check: `GET /admin/api/settings/database` reports
+  it as `{"state": "pending"}` until its operation starts or the request ends.
+
 ## [2.3.0] - 2026-11-16
 
 ### Added

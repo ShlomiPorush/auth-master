@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadScripts } = require("./_load.cjs");
 
-const ui = loadScripts(["js/common.js", "js/ui.js"]);
+const ui = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
 const H = 3600 * 1000;
 
 // Probe a zone hour by hour for an offset change in one direction (no dates
@@ -33,14 +33,19 @@ function findTransition(tz, fromMs, toMs, forward) {
 const wall = (ms, tz) => ui.uiToZonedInput(ms, tz);
 const prefs = (date, time) => ({ date, time });
 
-test("formats follow the Date Format and Time Format preferences", () => {
+test("formats follow the Date Format and Time Format settings", () => {
     const t = Date.UTC(2026, 9, 23, 13, 5, 9);
-    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("dmy", "24") }), "23/10/2026, 13:05:09");
-    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("mdy", "24") }), "10/23/2026, 13:05:09");
-    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("ymd", "12"), seconds: false }), "2026-10-23, 1:05 PM");
-    assert.equal(ui.formatDay(t, { zone: "UTC", prefs: prefs("ymd", "24") }), "2026-10-23");
-    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 0, 7), { zone: "UTC", prefs: prefs("dmy", "12") }), "12:07 AM");
-    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 12, 7), { zone: "UTC", prefs: prefs("dmy", "12") }), "12:07 PM");
+    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("DD/MM/YYYY", "24h") }), "23/10/2026, 13:05:09");
+    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("MM/DD/YYYY", "24h") }), "10/23/2026, 13:05:09");
+    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("DD.MM.YYYY", "24h") }), "23.10.2026, 13:05:09");
+    assert.equal(ui.formatShortDay(t, { zone: "UTC", prefs: prefs("DD.MM.YYYY", "24h") }), "23.10");
+    assert.equal(ui.formatTime(t, { zone: "UTC", prefs: prefs("YYYY-MM-DD", "12h"), seconds: false }), "2026-10-23, " + ui.t("dates.pm", { time: "1:05" }));
+    assert.equal(ui.formatDay(t, { zone: "UTC", prefs: prefs("YYYY-MM-DD", "24h") }), "2026-10-23");
+    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 0, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), ui.t("dates.am", { time: "12:07" }));
+    assert.equal(ui.formatClock(Date.UTC(2026, 0, 1, 12, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "12h") }), ui.t("dates.pm", { time: "12:07" }));
+    // Browser: the browser's own clock, with the same hour and minutes
+    const own = ui.formatClock(Date.UTC(2026, 0, 1, 13, 7), { zone: "UTC", prefs: prefs("DD/MM/YYYY", "browser") });
+    assert.match(own, /(13|1).07/);
     // Browser order: numbers only, never month names
     const browser = ui.formatDay(t, { zone: "UTC", prefs: prefs("browser", "24") });
     assert.match(browser, /^[\d./\- ]+$/);
@@ -49,7 +54,7 @@ test("formats follow the Date Format and Time Format preferences", () => {
 
 test("the app time zone decides the day and the clock", () => {
     const t = Date.UTC(2026, 0, 15, 22, 30);
-    const p = prefs("dmy", "24");
+    const p = prefs("DD/MM/YYYY", "24h");
     assert.equal(ui.formatTime(t, { zone: "Asia/Jerusalem", prefs: p, seconds: false }), "16/01/2026, 00:30");
     assert.equal(ui.formatTime(t, { zone: "UTC", prefs: p, seconds: false }), "15/01/2026, 22:30");
     assert.equal(ui.formatTime(t, { zone: "Asia/Kolkata", prefs: p, seconds: false }), "16/01/2026, 04:00");
@@ -57,7 +62,7 @@ test("the app time zone decides the day and the clock", () => {
 
 test("list times: clock today, day and month this year, full date before", () => {
     const now = Date.UTC(2026, 5, 10, 12, 0);
-    const p = prefs("dmy", "24");
+    const p = prefs("DD/MM/YYYY", "24h");
     assert.equal(ui.formatListTime(Date.UTC(2026, 5, 10, 8, 15), { zone: "UTC", prefs: p, now }), "08:15");
     assert.equal(ui.formatListTime(Date.UTC(2026, 2, 4, 8, 15), { zone: "UTC", prefs: p, now }), "04/03");
     assert.equal(ui.formatListTime(Date.UTC(2025, 2, 4, 8, 15), { zone: "UTC", prefs: p, now }), "04/03/2025");
@@ -70,7 +75,11 @@ test("unknown zones and preferences fall back to UTC and the defaults", () => {
     ui.uiSetAppZone("UTC");
     const p = ui.uiSetDatePrefs("nonsense", "13");
     assert.equal(p.date, "browser");
-    assert.equal(p.time, "24");
+    assert.equal(p.time, "24h");
+    // The earlier per-browser values are not choices any more
+    const old = ui.uiSetDatePrefs("dmy", "12");
+    assert.equal(old.date, "browser");
+    assert.equal(old.time, "24h");
 });
 
 test("UTC round trip", () => {
@@ -119,9 +128,14 @@ test("Asia/Jerusalem: a wall time the clock passes twice is the earlier instant"
 
 test("formatAgo and counts", () => {
     const now = Date.UTC(2026, 0, 1, 12);
-    assert.equal(ui.formatAgo(now - 20 * 1000, now), "just now");
-    assert.equal(ui.formatAgo(now - 5 * 60000, now), "5 min ago");
-    assert.equal(ui.formatAgo(now + 60000, now), "just now");
-    assert.equal(ui.uiCountLabel(1, "entry", "entries"), "1 entry");
-    assert.match(ui.uiCountLabel(1920, "entry", "entries"), /^1.?920 entries$/);
+    assert.equal(ui.formatAgo(now - 20 * 1000, now), ui.t("dates.just-now"));
+    assert.equal(ui.formatAgo(now - 5 * 60000, now), ui.t("dates.min-ago", { n: 5 }));
+    assert.equal(ui.formatAgo(now + 60000, now), ui.t("dates.just-now"));
+    // The one form for 1, the other form for more, with a thousands separator
+    const forms = ui.UI_TEXT["logs.count-entries"];
+    assert.equal(ui.uiCountLabel(1, "logs.count-entries"), forms.one.replace("{n}", "1"));
+    const [before, after] = forms.other.split("{n}");
+    const label = ui.uiCountLabel(1920, "logs.count-entries");
+    assert.ok(label.startsWith(before) && label.endsWith(after), label);
+    assert.match(label.slice(before.length, label.length - after.length), /^1.?920$/);
 });

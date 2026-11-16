@@ -3,92 +3,117 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Auth Service</title>
-    <meta name="description" content="Token management dashboard for Auth Service" />
+    <title data-t="shell.auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:shell.token-management-dashboard-for-auth-service" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
   <body class="ui ui-app">
-    <div id="boot"><div class="ui-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p>Loading the portal...</p></div></div>
+    <div id="boot"><div class="ui-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p data-t="shell.loading-the-portal"></p></div></div>
 
     <div class="ui-shell hidden" id="ui-shell">
-      <!-- Sidebar (wide screens) and icon rail (761 to 1100px) -->
-      <aside class="ui-side" aria-label="Sidebar">
-        <div class="ui-brand">
-          <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
-          <span class="ui-brand-name">Auth Service</span>
-          <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
-            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
-            <span class="ui-bell-badge hidden" aria-hidden="true"></span>
+      <!-- Wide screens: one bar across the top with the brand and the menu toggle, the open
+           page's title and actions (moved up from the page while it is open), the search and
+           the Needs attention bell (NL-6, NL-7, NL-19, SR-1) -->
+      <header class="ui-topbar" id="ui-topbar">
+        <div class="ui-topbar-brand">
+          <div class="ui-brand">
+            <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
+            <span class="ui-brand-name" data-t="shell.auth-service"></span>
+          </div>
+          <button type="button" class="ui-icon-btn ui-nav-toggle" id="ui-nav-toggle" aria-expanded="true" aria-controls="ui-side">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
           </button>
         </div>
-
-        <div class="ui-status-card" aria-label="Service status" role="group">
-          <div class="ui-status-row" data-status="db" data-inventory="shell.status.db"><span class="ui-dot" aria-hidden="true"></span><span>Database</span><b>Not checked yet</b></div>
-          <div class="ui-status-row" data-status="redis" data-inventory="shell.status.redis"><span class="ui-dot" aria-hidden="true"></span><span>Redis</span><b>Not checked yet</b></div>
+        <div class="ui-topbar-title" id="ui-topbar-title"></div>
+        <div class="ui-gs" id="ui-gs" role="search">
+          <div class="ui-gs-box">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+            <input type="search" id="ui-gs-input" autocomplete="off" spellcheck="false" enterkeyhint="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="ui-gs-panel" data-t-attr="aria-label:search.search-everything;placeholder:search.search-everything-placeholder" />
+            <kbd class="ui-gs-key" aria-hidden="true"></kbd>
+            <button type="button" class="ui-gs-cancel" id="ui-gs-cancel" data-cancel data-t="common.cancel"></button>
+          </div>
+          <div class="ui-gs-panel" id="ui-gs-panel"></div>
         </div>
+        <div class="ui-topbar-actions" id="ui-topbar-actions"></div>
+        <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:shell.needs-attention-not-checked-yet;title:shell.needs-attention">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+          <span class="ui-bell-badge hidden" aria-hidden="true"></span>
+        </button>
+      </header>
 
-        <nav class="ui-nav" aria-label="Main">
-          <p class="ui-nav-group">Manage</p>
+      <!-- Sidebar (wide screens) and icon rail (761 to 1100px, or folded) -->
+      <aside class="ui-side" id="ui-side" data-t-attr="aria-label:shell.sidebar">
+        <button type="button" class="ui-status-card" data-status-card aria-haspopup="dialog">
+          <span class="ui-status-row" role="img" data-status="db" data-inventory="shell.status.db"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.database"></span><b data-t="shell.not-checked-yet"></b></span>
+          <span class="ui-status-row" role="img" data-status="redis" data-inventory="shell.status.redis"><span class="ui-dot" aria-hidden="true"></span><span data-t="shell.redis"></span><b data-t="shell.not-checked-yet"></b></span>
+        </button>
+
+        <nav class="ui-nav" data-t-attr="aria-label:shell.main">
+          <p class="ui-nav-group" data-t="shell.manage"></p>
           <a class="ui-nav-item" data-page-link="tokens" data-inventory="shell.nav.tokens" href="/admin/tokens">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-            <span class="ui-nav-label">Tokens</span><span class="ui-fly" aria-hidden="true">Tokens</span>
+            <span class="ui-nav-label" data-t="shell.tokens"></span><span class="ui-nav-count hidden" data-nav-count="tokens"></span><span class="ui-fly" aria-hidden="true" data-t="shell.tokens"></span>
           </a>
           <a class="ui-nav-item" data-page-link="zones" data-inventory="shell.nav.zones" href="/admin/zones">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
-            <span class="ui-nav-label">Zones</span><span class="ui-fly" aria-hidden="true">Zones</span>
+            <span class="ui-nav-label" data-t="shell.zones"></span><span class="ui-fly" aria-hidden="true" data-t="shell.zones"></span>
           </a>
           <a class="ui-nav-item" data-page-link="apikeys" data-inventory="shell.nav.apikeys" href="/admin/api-keys">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-            <span class="ui-nav-label">API Keys</span><span class="ui-fly" aria-hidden="true">API Keys</span>
+            <span class="ui-nav-label" data-t="shell.api-keys"></span><span class="ui-fly" aria-hidden="true" data-t="shell.api-keys"></span>
           </a>
-          <p class="ui-nav-group">Logs</p>
+          <p class="ui-nav-group" data-t="shell.logs"></p>
           <a class="ui-nav-item" data-page-link="activity" data-inventory="shell.nav.activity" href="/admin/logs/activity">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
-            <span class="ui-nav-label">Activity Log</span><span class="ui-fly" aria-hidden="true">Activity Log</span>
+            <span class="ui-nav-label" data-t="shell.activity-log"></span><span class="ui-fly" aria-hidden="true" data-t="shell.activity-log"></span>
           </a>
           <a class="ui-nav-item" data-page-link="access" data-inventory="shell.nav.access" href="/admin/logs/access">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            <span class="ui-nav-label">Access Logs</span><span class="ui-fly" aria-hidden="true">Access Logs</span>
+            <span class="ui-nav-label" data-t="shell.access-logs"></span><span class="ui-fly" aria-hidden="true" data-t="shell.access-logs"></span>
           </a>
           <a class="ui-nav-item" data-page-link="usage" href="/admin/usage">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M8 17V11m4 6V7m4 10v-4"/></svg>
-            <span class="ui-nav-label">Usage</span><span class="ui-fly" aria-hidden="true">Usage</span>
+            <span class="ui-nav-label" data-t="shell.usage"></span><span class="ui-fly" aria-hidden="true" data-t="shell.usage"></span>
           </a>
-          <p class="ui-nav-group">Settings</p>
+          <p class="ui-nav-group" data-t="shell.settings"></p>
           <a class="ui-nav-item" data-page-link="settings" href="/admin/settings">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.559.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.424.07-.764.383-.929.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.398.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.272-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            <span class="ui-nav-label">Settings</span><span class="ui-fly" aria-hidden="true">Settings</span>
+            <span class="ui-nav-label" data-t="shell.settings"></span><span class="ui-fly" aria-hidden="true" data-t="shell.settings"></span>
           </a>
           <a class="ui-nav-item" data-page-link="account" data-inventory="shell.nav.account" href="/admin/account">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            <span class="ui-nav-label">Account</span><span class="ui-fly" aria-hidden="true">Account</span>
+            <span class="ui-nav-label" data-t="shell.account"></span><span class="ui-fly" aria-hidden="true" data-t="shell.account"></span>
           </a>
         </nav>
 
         <div class="ui-side-foot">
           <button type="button" class="ui-tool" data-theme-toggle>
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
-            <span class="ui-tool-label">Theme</span><span class="ui-fly" aria-hidden="true">Theme</span>
+            <span class="ui-tool-label" data-t="shell.theme-2"></span><span class="ui-fly" aria-hidden="true" data-t="shell.theme-2"></span>
           </button>
-          <button type="button" class="ui-tool" data-prefs aria-label="Preferences">
+          <button type="button" class="ui-tool" data-prefs data-t-attr="aria-label:shell.preferences">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/></svg>
-            <span class="ui-tool-label">Preferences</span><span class="ui-fly" aria-hidden="true">Preferences</span>
+            <span class="ui-tool-label" data-t="shell.preferences"></span><span class="ui-fly" aria-hidden="true" data-t="shell.preferences"></span>
           </button>
-          <p class="ui-side-user">Signed in as <bdi dir="auto" data-user data-inventory="shell.user"></bdi></p>
-          <button type="button" class="ui-tool" data-logout data-inventory="shell.logout" aria-label="Log out">
+          <p class="ui-side-user" data-t-tpl="shell.signed-in-as-2"><bdi dir="auto" data-user data-inventory="shell.user" data-t-slot="user"></bdi></p>
+          <button type="button" class="ui-tool" data-logout data-inventory="shell.logout" data-t-attr="aria-label:shell.log-out">
             <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
-            <span class="ui-tool-label">Log out</span><span class="ui-fly" aria-hidden="true">Log out</span>
+            <span class="ui-tool-label" data-t="shell.log-out"></span><span class="ui-fly" aria-hidden="true" data-t="shell.log-out"></span>
           </button>
         </div>
       </aside>
 
       <!-- Phone top bar -->
       <header class="ui-mtop">
-        <a class="ui-mtop-home" data-go="tokens" data-query="" href="/admin/tokens" aria-label="Tokens"><img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" /></a>
-        <div class="ui-mtop-title"><small>Auth Service</small><b id="mtop-page">Tokens</b></div>
-        <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" aria-label="Needs attention, not checked yet" title="Needs attention">
+        <a class="ui-mtop-home" data-go="tokens" data-query="" href="/admin/tokens" data-t-attr="aria-label:shell.tokens"><img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" /></a>
+        <div class="ui-mtop-title"><small data-t="shell.auth-service"></small><b id="mtop-page" data-t="shell.tokens"></b></div>
+        <button type="button" class="ui-icon-btn ui-gs-phone" id="ui-gs-phone" data-t-attr="aria-label:search.search;title:search.search">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+        </button>
+        <button type="button" class="ui-bell" data-bell aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:shell.needs-attention-not-checked-yet;title:shell.needs-attention">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
           <span class="ui-bell-badge hidden" aria-hidden="true"></span>
         </button>
@@ -97,25 +122,25 @@
       <main class="ui-main" id="ui-main">
 
         <!-- ─── Tokens ─── -->
-        <section class="ui-page hidden" data-page="tokens" aria-labelledby="h-tokens">
+        <section class="ui-page hidden" data-page="tokens" aria-labelledby="h-tokens-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-tokens">Tokens</h1>
-              <p>Who can call your services, in which zones, and until when.</p>
+              <h1 class="ui-h1" id="h-tokens"><span id="h-tokens-t" data-t="tokens.tokens"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="tokens" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t="tokens.who-can-call-your-services-in"></p>
             </div>
             <div class="ui-page-actions">
-              <button type="button" class="ui-btn ui-btn-primary" id="tok-new" data-inventory="tokens.new">New Token</button>
+              <button type="button" class="ui-btn ui-btn-primary" id="tok-new" data-inventory="tokens.new" data-t="tokens.new-token"></button>
             </div>
           </div>
 
           <div class="ui-banner ui-banner-ok hidden" id="tok-created" role="status" data-inventory="tokens.created.banner">
             <div>
-              <b>Token created — copy it now, you can reveal it later with MFA.</b>
+              <b data-t="tokens.token-created-copy-it-now-you"></b>
               <code class="ui-secret" id="tok-created-value"></code>
             </div>
             <div class="ui-banner-actions">
-              <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" id="tok-created-copy" data-inventory="tokens.created.copy">Copy token</button>
-              <button type="button" class="ui-btn ui-btn-sm" id="tok-created-dismiss" data-inventory="tokens.created.dismiss">Dismiss</button>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" id="tok-created-copy" data-inventory="tokens.created.copy" data-t="tokens.copy-token"></button>
+              <button type="button" class="ui-btn ui-btn-sm" id="tok-created-dismiss" data-inventory="tokens.created.dismiss" data-t="tokens.dismiss"></button>
             </div>
           </div>
 
@@ -124,32 +149,33 @@
               <div class="ui-fbar-row">
                 <label class="ui-search">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                  <input type="search" id="tok-search" aria-label="Search tokens" placeholder="Search tokens by name or description…" autocomplete="off" data-inventory="tokens.search" />
+                  <input type="search" id="tok-search" autocomplete="off" data-inventory="tokens.search" data-t-attr="aria-label:tokens.search-tokens;placeholder:tokens.search-tokens-by-name-or-description" />
                 </label>
-                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="tok-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="tok-sort" aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:tokens.sort-default-order;title:tokens.sort-default-order">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
                 </button>
               </div>
               <div class="ui-fbar-row">
                 <select id="tok-status" data-inventory="tokens.filter.status">
-                  <option value="all" data-status="all">All</option>
-                  <option value="active" data-status="active" data-dot="ok">Active</option>
-                  <option value="disabled" data-status="disabled" data-dot="">Disabled</option>
-                  <option value="expired" data-status="expired" data-dot="warn">Expired</option>
-                  <option value="expiring" data-status="expiring" data-dot="warn">Expiring soon</option>
+                  <option value="all" data-status="all" data-t="tokens.all-3"></option>
+                  <option value="active" data-status="active" data-dot="ok" data-t="tokens.active"></option>
+                  <option value="disabled" data-status="disabled" data-dot="" data-t="tokens.disabled"></option>
+                  <option value="expired" data-status="expired" data-dot="warn" data-t="tokens.expired"></option>
+                  <option value="expiring" data-status="expiring" data-dot="warn" data-t="tokens.expiring-soon"></option>
                 </select>
-                <select id="tok-zone" data-inventory="tokens.filter.zone"><option value="">All zones</option></select>
+                <select id="tok-zone" data-inventory="tokens.filter.zone"><option value="" data-t="tokens.all-zones"></option></select>
                 <select id="tok-level" data-inventory="tokens.filter.level">
-                  <option value="">All levels</option>
-                  <option value="read">Read</option>
-                  <option value="write">Write</option>
-                  <option value="delete">Delete</option>
-                  <option value="all">All perms</option>
+                  <option value="" data-t="tokens.all-levels"></option>
+                  <option value="read" data-t="tokens.read"></option>
+                  <option value="write" data-t="tokens.write"></option>
+                  <option value="delete" data-t="tokens.delete"></option>
+                  <option value="all" data-t="tokens.all-perms"></option>
                 </select>
               </div>
             </div>
-            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="tok-count"></span><button type="button" class="ui-clear-filters hidden" id="tok-clear" data-inventory="tokens.filter.clear">Clear filters</button></p>
-            <div class="ui-table ui-stack" id="tok-table" role="table" aria-label="Tokens" data-inventory="tokens.table">
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="tok-count"></span><button type="button" class="ui-clear-filters hidden" id="tok-clear" data-inventory="tokens.filter.clear" data-t="tokens.clear-filters"></button></p>
+            <p class="ui-fresh hidden" id="tok-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-table ui-stack" id="tok-table" role="table" data-inventory="tokens.table" data-t-attr="aria-label:tokens.tokens">
               <div class="ui-tr ui-tr-head" role="row" id="tok-head"></div>
               <div class="ui-table-body" id="tok-rows" role="rowgroup"></div>
             </div>
@@ -157,27 +183,27 @@
         </section>
 
         <!-- ─── Zones ─── -->
-        <section class="ui-page hidden" data-page="zones" aria-labelledby="h-zones">
+        <section class="ui-page hidden" data-page="zones" aria-labelledby="h-zones-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-zones">Zones</h1>
-              <p>Zones define allowed API areas for new tokens. Tokens can be granted only the zones listed here.</p>
+              <h1 class="ui-h1" id="h-zones"><span id="h-zones-t" data-t="zones.zones"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="zones" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t="zones.zones-define-allowed-api-areas-for"></p>
             </div>
           </div>
 
           <div class="ui-panel">
-            <div class="ui-panel-head">Add a zone</div>
+            <div class="ui-panel-head" data-t="zones.add-a-zone"></div>
             <form class="ui-panel-body ui-form" id="zone-add" novalidate>
               <div class="ui-form-row">
                 <div class="ui-field">
-                  <label class="ui-label" for="zone-add-name">Zone name</label>
-                  <input class="ui-input" id="zone-add-name" name="name" required autocomplete="off" placeholder="e.g. orders" data-inventory="zones.add.name" />
+                  <label class="ui-label" for="zone-add-name" data-t="zones.zone-name"></label>
+                  <input class="ui-input" id="zone-add-name" name="name" required autocomplete="off" data-inventory="zones.add.name" data-t-attr="placeholder:zones.e-g-orders" />
                 </div>
                 <div class="ui-field">
-                  <label class="ui-label" for="zone-add-desc">Description <small>(optional)</small></label>
-                  <input class="ui-input" id="zone-add-desc" name="description" dir="auto" autocomplete="off" placeholder="What this zone controls" data-inventory="zones.add.description" />
+                  <label class="ui-label" for="zone-add-desc" data-t-tpl="zones.description-2"><small data-t-slot="small" data-t="zones.optional"></small></label>
+                  <input class="ui-input" id="zone-add-desc" name="description" dir="auto" autocomplete="off" data-inventory="zones.add.description" data-t-attr="placeholder:zones.what-this-zone-controls" />
                 </div>
-                <div><button type="submit" class="ui-btn ui-btn-primary" data-inventory="zones.add.submit">Add</button></div>
+                <div><button type="submit" class="ui-btn ui-btn-primary" data-inventory="zones.add.submit" data-t="zones.add"></button></div>
               </div>
               <p class="ui-error hidden" id="zone-err" role="alert"></p>
             </form>
@@ -190,15 +216,16 @@
               <div class="ui-fbar-row">
                 <label class="ui-search">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                  <input type="search" id="zone-search" aria-label="Search zones" placeholder="Search zones…" autocomplete="off" data-inventory="zones.search" />
+                  <input type="search" id="zone-search" autocomplete="off" data-inventory="zones.search" data-t-attr="aria-label:zones.search-zones;placeholder:zones.search-zones-2" />
                 </label>
-                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="zone-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+                <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="zone-sort" aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:zones.sort-default-order;title:zones.sort-default-order">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
                 </button>
               </div>
             </div>
-            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="zone-count"></span><button type="button" class="ui-clear-filters hidden" id="zone-clear">Clear filters</button></p>
-            <div class="ui-table ui-stack" id="zone-table" role="table" aria-label="Zones" data-inventory="zones.table">
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="zone-count"></span><button type="button" class="ui-clear-filters hidden" id="zone-clear" data-t="zones.clear-filters"></button></p>
+            <p class="ui-fresh hidden" id="zone-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-table ui-stack" id="zone-table" role="table" data-inventory="zones.table" data-t-attr="aria-label:zones.zones">
               <div class="ui-tr ui-tr-head" role="row" id="zone-head"></div>
               <div class="ui-table-body" id="zone-rows" role="rowgroup"></div>
             </div>
@@ -206,23 +233,24 @@
         </section>
 
         <!-- ─── API Keys ─── -->
-        <section class="ui-page hidden" data-page="apikeys" aria-labelledby="h-apikeys">
+        <section class="ui-page hidden" data-page="apikeys" aria-labelledby="h-apikeys-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-apikeys">API Keys</h1>
-              <p>API keys allow programmatic access to the Auth Service (e.g. from n8n). Each key can have specific permission scopes.</p>
+              <h1 class="ui-h1" id="h-apikeys"><span id="h-apikeys-t" data-t="apikeys.api-keys-2"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="apikeys" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t="apikeys.api-keys-allow-programmatic-access-to"></p>
             </div>
             <div class="ui-page-actions">
-              <button type="button" class="ui-btn ui-btn-primary" id="key-new" data-inventory="apikeys.new">New Key</button>
+              <button type="button" class="ui-btn ui-btn-primary" id="key-new" data-inventory="apikeys.new" data-t="apikeys.new-key"></button>
             </div>
           </div>
           <div class="ui-panel" id="key-panel">
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="key-count"></span>
-              <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="key-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
+              <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="key-sort" aria-haspopup="dialog" aria-expanded="false" data-t-attr="aria-label:apikeys.sort-default-order;title:apikeys.sort-default-order">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
               </button>
             </p>
-            <div class="ui-table ui-stack" id="key-table" role="table" aria-label="API keys" data-inventory="apikeys.table">
+            <p class="ui-fresh hidden" id="key-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-table ui-stack" id="key-table" role="table" data-inventory="apikeys.table" data-t-attr="aria-label:apikeys.api-keys">
               <div class="ui-tr ui-tr-head" role="row" id="key-head"></div>
               <div class="ui-table-body" id="key-rows" role="rowgroup"></div>
             </div>
@@ -230,11 +258,11 @@
         </section>
 
         <!-- ─── Activity Log ─── -->
-        <section class="ui-page hidden" data-page="activity" aria-labelledby="h-activity">
+        <section class="ui-page hidden" data-page="activity" aria-labelledby="h-activity-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-activity">Activity Log</h1>
-              <p>History of all administrative actions performed on this Auth Service.</p>
+              <h1 class="ui-h1" id="h-activity"><span id="h-activity-t" data-t="activity.activity-log"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="activity" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t="activity.history-of-all-administrative-actions-performed"></p>
             </div>
           </div>
           <div class="ui-panel" id="activity-panel">
@@ -242,43 +270,43 @@
               <div class="ui-fbar-row">
                 <label class="ui-search">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                  <input type="search" id="activity-search" enterkeyhint="search" aria-label="Search (Actor or Entity Name)" placeholder="Filter actor, entity name..." autocomplete="off" data-inventory="activity.search" />
+                  <input type="search" id="activity-search" enterkeyhint="search" autocomplete="off" data-inventory="activity.search" data-t-attr="aria-label:activity.search-actor-or-entity-name;placeholder:activity.filter-actor-entity-name" />
                 </label>
                 <select id="activity-filter" data-inventory="activity.filter.action">
-                  <option value="">All actions</option>
-                  <option value="token_create">Token Create</option>
-                  <option value="token_patch">Token Patch</option>
-                  <option value="token_delete">Token Delete</option>
-                  <option value="token_reveal">Token Reveal</option>
-                  <option value="zone_create">Zone Create</option>
-                  <option value="zone_patch">Zone Patch</option>
-                  <option value="zone_delete">Zone Delete</option>
-                  <option value="api_key_create">API Key Create</option>
-                  <option value="api_key_patch">API Key Patch</option>
-                  <option value="api_key_reveal">API Key Reveal</option>
-                  <option value="api_key_delete">API Key Delete</option>
-                  <option value="passkey_added">Passkey Added</option>
-                  <option value="passkey_renamed">Passkey Renamed</option>
-                  <option value="passkey_deleted">Passkey Deleted</option>
-                  <option value="passkey_failed">Passkey Failed</option>
-                  <option value="login">Login</option>
-                  <option value="logout">Logout</option>
+                  <option value="" data-t="activity.all-actions"></option>
+                  <option value="token_create" data-t="activity.token-create"></option>
+                  <option value="token_patch" data-t="activity.token-patch"></option>
+                  <option value="token_delete" data-t="activity.token-delete"></option>
+                  <option value="token_reveal" data-t="activity.token-reveal"></option>
+                  <option value="zone_create" data-t="activity.zone-create"></option>
+                  <option value="zone_patch" data-t="activity.zone-patch"></option>
+                  <option value="zone_delete" data-t="activity.zone-delete"></option>
+                  <option value="api_key_create" data-t="activity.api-key-create"></option>
+                  <option value="api_key_patch" data-t="activity.api-key-patch"></option>
+                  <option value="api_key_reveal" data-t="activity.api-key-reveal"></option>
+                  <option value="api_key_delete" data-t="activity.api-key-delete"></option>
+                  <option value="passkey_added" data-t="activity.passkey-added"></option>
+                  <option value="passkey_renamed" data-t="activity.passkey-renamed"></option>
+                  <option value="passkey_deleted" data-t="activity.passkey-deleted"></option>
+                  <option value="passkey_failed" data-t="activity.passkey-failed"></option>
+                  <option value="login" data-t="activity.login"></option>
+                  <option value="logout" data-t="activity.logout"></option>
                 </select>
-                <button type="button" class="ui-clear-filters hidden" id="activity-reset" data-inventory="activity.filter.reset">Reset</button>
               </div>
             </div>
-            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="activity-count"></span></p>
-            <div class="ui-table ui-stack" id="activity-table" role="table" aria-label="Activity log" data-nosort>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="activity-count"></span><button type="button" class="ui-clear-filters hidden" id="activity-reset" data-inventory="activity.filter.reset" data-t="activity.reset"></button></p>
+            <p class="ui-fresh hidden" id="activity-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="activity-new"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg><span data-pill-text></span></button></div>
+            <div class="ui-table ui-stack" id="activity-table" role="table" data-nosort data-t-attr="aria-label:activity.activity-log-2">
               <div class="ui-tr ui-tr-head" role="row">
-                <div class="ui-td" role="columnheader">Timestamp</div>
-                <div class="ui-td" role="columnheader">Actor</div>
-                <div class="ui-td" role="columnheader">Action</div>
-                <div class="ui-td" role="columnheader">Entity Type</div>
-                <div class="ui-td" role="columnheader">Entity Name</div>
-                <div class="ui-td" role="columnheader">Details</div>
-                <div class="ui-td" role="columnheader">IP Address</div>
+                <div class="ui-td" role="columnheader" data-t="activity.timestamp"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.actor"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.action"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.entity-type"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.entity-name"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.details"></div>
+                <div class="ui-td" role="columnheader" data-t="activity.ip-address"></div>
               </div>
-              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="activity-new"></button></div>
               <div class="ui-table-body" id="activity-rows" role="rowgroup"></div>
             </div>
             <div class="ui-more-line hidden" id="activity-more" aria-live="polite" data-inventory="activity.loadmore"></div>
@@ -286,41 +314,41 @@
         </section>
 
         <!-- ─── Access Logs ─── -->
-        <section class="ui-page hidden" data-page="access" aria-labelledby="h-access">
+        <section class="ui-page hidden" data-page="access" aria-labelledby="h-access-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-access">Access Logs</h1>
-              <p>History of all token validation requests verified by the <code>/validate</code> endpoint.</p>
+              <h1 class="ui-h1" id="h-access"><span id="h-access-t" data-t="access.access-logs"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="access" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t-tpl="access.history-of-all-token-validation-requests"><code data-t-slot="code" data-t="access.validate"></code></p>
             </div>
           </div>
-          <div class="ui-panel ui-limit-card hidden" id="access-limit" role="status" aria-label="Rate limit"></div>
+          <div class="ui-panel ui-limit-card hidden" id="access-limit" role="status" data-t-attr="aria-label:access.rate-limit"></div>
           <div class="ui-panel" id="access-panel">
             <div class="ui-fbar">
               <div class="ui-fbar-row">
                 <label class="ui-search">
                   <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                  <input type="search" id="access-search" enterkeyhint="search" aria-label="Search (Token Name or Zone)" placeholder="Filter token, area/zone..." autocomplete="off" data-inventory="access.search" />
+                  <input type="search" id="access-search" enterkeyhint="search" autocomplete="off" data-inventory="access.search" data-t-attr="aria-label:access.search-token-name-or-zone;placeholder:access.filter-token-area-zone" />
                 </label>
                 <select id="access-filter" data-inventory="access.filter.result">
-                  <option value="">All results</option>
-                  <option value="true">Allowed (Success)</option>
-                  <option value="false">Denied (Failure)</option>
+                  <option value="" data-t="access.all-results"></option>
+                  <option value="true" data-t="access.allowed-success"></option>
+                  <option value="false" data-t="access.denied-failure"></option>
                 </select>
-                <button type="button" class="ui-picker-btn is-set hidden" id="access-token" aria-label="Remove the token filter"></button>
-                <button type="button" class="ui-clear-filters hidden" id="access-reset" data-inventory="access.filter.reset">Reset</button>
+                <button type="button" class="ui-picker-btn is-set hidden" id="access-token" data-t-attr="aria-label:access.remove-the-token-filter"></button>
               </div>
             </div>
-            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="access-count"></span></p>
-            <div class="ui-table ui-stack" id="access-table" role="table" aria-label="Access logs" data-nosort>
+            <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="access-count"></span><button type="button" class="ui-clear-filters hidden" id="access-reset" data-inventory="access.filter.reset" data-t="access.reset"></button></p>
+            <p class="ui-fresh hidden" id="access-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
+            <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="access-new"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m0 0l-6 6m6-6l6 6"/></svg><span data-pill-text></span></button></div>
+            <div class="ui-table ui-stack" id="access-table" role="table" data-nosort data-t-attr="aria-label:access.access-logs-2">
               <div class="ui-tr ui-tr-head" role="row">
-                <div class="ui-td" role="columnheader">Timestamp</div>
-                <div class="ui-td" role="columnheader">Token Name</div>
-                <div class="ui-td" role="columnheader">Area (Zone)</div>
-                <div class="ui-td" role="columnheader">Level</div>
-                <div class="ui-td" role="columnheader">Result</div>
-                <div class="ui-td" role="columnheader">IP Address</div>
+                <div class="ui-td" role="columnheader" data-t="access.timestamp"></div>
+                <div class="ui-td" role="columnheader" data-t="access.token-name"></div>
+                <div class="ui-td" role="columnheader" data-t="access.area-zone"></div>
+                <div class="ui-td" role="columnheader" data-t="access.level"></div>
+                <div class="ui-td" role="columnheader" data-t="access.result"></div>
+                <div class="ui-td" role="columnheader" data-t="access.ip-address"></div>
               </div>
-              <div class="ui-new-pill-slot"><button type="button" class="ui-new-pill hidden" id="access-new"></button></div>
               <div class="ui-table-body" id="access-rows" role="rowgroup"></div>
             </div>
             <div class="ui-more-line hidden" id="access-more" aria-live="polite" data-inventory="access.loadmore"></div>
@@ -328,81 +356,117 @@
         </section>
 
         <!-- ─── Usage ─── -->
-        <section class="ui-page hidden" data-page="usage" aria-labelledby="h-usage">
+        <section class="ui-page hidden" data-page="usage" aria-labelledby="h-usage-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-usage">Usage</h1>
-              <p>How often each token calls <code>/validate</code>, in which zones, from which addresses, and how many calls were denied.</p>
+              <h1 class="ui-h1" id="h-usage"><span id="h-usage-t" data-t="usage.usage"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="usage" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t-tpl="usage.how-often-each-token-calls-in"><code data-t-slot="code" data-t="usage.validate"></code></p>
             </div>
             <div class="ui-page-actions">
-              <div class="ui-seg" role="group" aria-label="Period" id="usage-range">
-                <button type="button" data-range="24h" aria-pressed="false">24 hours</button>
-                <button type="button" data-range="7d" aria-pressed="true">7 days</button>
-                <button type="button" data-range="30d" aria-pressed="false">30 days</button>
+              <div class="ui-seg" role="group" id="usage-range" data-t-attr="aria-label:usage.period">
+                <button type="button" data-range="24h" aria-pressed="false" data-t="usage.24-hours"></button>
+                <button type="button" data-range="7d" aria-pressed="true" data-t="usage.7-days"></button>
+                <button type="button" data-range="30d" aria-pressed="false" data-t="usage.30-days"></button>
               </div>
-              <button type="button" class="ui-icon-btn ui-sort-menu-btn" id="usage-sort" aria-haspopup="dialog" aria-expanded="false" aria-label="Sort: Default order" title="Sort: Default order">
-                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7h13M3 12h9M3 17h5M17 10v10m0 0l-3-3m3 3l3-3"/></svg>
-              </button>
             </div>
           </div>
+          <p class="ui-fresh hidden" id="usage-fresh"><span data-fresh-text></span> <button type="button" class="ui-btn-link" data-fresh-retry data-t="list.try-again"></button></p>
           <div class="ui-page" id="usage-body"></div>
         </section>
 
         <!-- ─── Settings ─── -->
-        <section class="ui-page hidden" data-page="settings" aria-labelledby="h-settings">
+        <section class="ui-page hidden" data-page="settings" aria-labelledby="h-settings-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-settings">Settings</h1>
-              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, the database and Redis connections, and the address passkeys work at.</p>
+              <h1 class="ui-h1" id="h-settings"><span id="h-settings-t" data-t="settings.settings"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="settings" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t-tpl="settings.the-time-zone-how-long-the"><code data-t-slot="code" data-t="settings.validate"></code><code data-t-slot="code2" data-t="settings.validate-grants"></code></p>
             </div>
           </div>
-          <div class="ui-panel" id="general-panel">
-            <div class="ui-panel-head">General</div>
-            <div class="ui-settings-info" id="general-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="general-body"></div>
+          <!-- Sections, each with its own address (/admin/settings/<section>); the list and the narrow-screen picker are built from SETTINGS_SECTIONS -->
+          <div class="ui-settings" id="settings-layout">
+            <nav class="ui-settings-nav" id="settings-nav" data-t-attr="aria-label:settings.nav.label"></nav>
+            <div class="ui-settings-pick">
+              <label class="ui-sr" for="settings-pick" data-t="settings.nav.picker-label"></label>
+              <select class="ui-select" id="settings-pick"></select>
+            </div>
+            <div class="ui-settings-content" id="settings-content">
+              <div class="ui-settings-section hidden" data-settings-section="general">
+                <h2 class="ui-settings-title" data-t="settings.general"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.general-intro"></p>
+                <div class="ui-panel" id="general-panel">
+                  <div class="ui-settings-info" id="general-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="general-body"></div>
+                </div>
+                <div class="ui-panel" id="display-panel">
+                  <div class="ui-panel-head" data-t="settings.display"></div>
+                  <div class="ui-settings-info" id="display-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="display-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="rate-limit">
+                <h2 class="ui-settings-title" data-t="settings.rate-limit"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.rate-limit-intro"></p>
+                <div class="ui-panel" id="settings-panel">
+                  <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="settings-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="passkeys">
+                <h2 class="ui-settings-title" data-t="settings.passkeys"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.passkeys-intro"></p>
+                <div class="ui-panel" id="settings-pk-panel" data-inventory="settings.passkeys">
+                  <div class="ui-settings-info" id="settings-pk-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="settings-pk-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="database">
+                <h2 class="ui-settings-title" data-t="settings.database"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.database-intro"></p>
+                <div class="ui-panel" id="db-panel" data-inventory="settings.database">
+                  <div class="ui-settings-info" id="db-lock" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="db-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="redis">
+                <h2 class="ui-settings-title" data-t="settings.redis-connection"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.redis-intro"></p>
+                <div class="ui-panel" id="redis-panel">
+                  <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="redis-body"></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="ui-panel" id="settings-panel">
-            <div class="ui-panel-head">Rate limit</div>
-            <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="settings-body"></div>
-          </div>
-          <div class="ui-panel" id="db-panel" data-inventory="settings.database">
-            <div class="ui-panel-head">Database</div>
-            <div class="ui-panel-body" id="db-body"></div>
-          </div>
-          <div class="ui-panel" id="redis-panel">
-            <div class="ui-panel-head">Redis connection</div>
-            <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="redis-body"></div>
-          </div>
-          <div class="ui-panel" id="settings-pk-panel" data-inventory="settings.passkeys">
-            <div class="ui-panel-head">Passkeys</div>
-            <div class="ui-panel-body" id="settings-pk-body"></div>
+          <!-- One save bar for the page (SV-1): the database change has its own button -->
+          <div class="ui-savebar hidden" id="settings-savebar" role="region" data-t-attr="aria-label:settings.savebar.label">
+            <span class="ui-savebar-count" id="settings-savebar-count" aria-live="polite"></span>
+            <button type="button" class="ui-btn" id="settings-discard" data-t="settings.savebar.discard"></button>
+            <button type="button" class="ui-btn ui-btn-primary" id="settings-save" data-t="settings.savebar.save"></button>
           </div>
         </section>
 
         <!-- ─── Account ─── -->
-        <section class="ui-page hidden" data-page="account" aria-labelledby="h-account">
+        <section class="ui-page hidden" data-page="account" aria-labelledby="h-account-t">
           <div class="ui-page-head">
             <div>
-              <h1 class="ui-h1" id="h-account">Account</h1>
-              <p>How you sign in. A passkey signs you in with your fingerprint, face or screen lock in one step. Your password and authenticator code always work too.</p>
+              <h1 class="ui-h1" id="h-account"><span id="h-account-t" data-t="account.account"></span><button type="button" class="ui-icon-btn ui-help-btn" data-help="account" aria-haspopup="dialog"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></button></h1>
+              <p data-t="account.how-you-sign-in-a-passkey"></p>
             </div>
             <div class="ui-page-actions">
-              <button type="button" class="ui-btn ui-btn-primary" id="pk-add" data-inventory="account.passkey.add" disabled>Add a passkey</button>
+              <button type="button" class="ui-btn ui-btn-primary" id="pk-add" data-inventory="account.passkey.add" disabled data-t="account.add-a-passkey"></button>
             </div>
           </div>
           <div class="ui-panel" id="pk-panel">
-            <div class="ui-panel-head">Passkeys</div>
+            <div class="ui-panel-head" data-t="account.passkeys"></div>
             <div class="ui-settings-info" id="pk-info" aria-live="polite"></div>
             <p class="ui-list-summary" aria-live="polite"><span class="ui-count" id="pk-count"></span></p>
-            <div class="ui-table ui-stack" id="pk-table" role="table" aria-label="Passkeys" data-inventory="account.passkeys.table" data-nosort>
+            <div class="ui-table ui-stack" id="pk-table" role="table" data-inventory="account.passkeys.table" data-nosort data-t-attr="aria-label:account.passkeys">
               <div class="ui-tr ui-tr-head" role="row">
-                <div class="ui-td" role="columnheader">Name</div>
-                <div class="ui-td" role="columnheader">Created</div>
-                <div class="ui-td" role="columnheader">Last used</div>
-                <div class="ui-td" role="columnheader">Status</div>
-                <div class="ui-td" role="columnheader"><span class="ui-sr">Actions</span></div>
+                <div class="ui-td" role="columnheader" data-t="account.name"></div>
+                <div class="ui-td" role="columnheader" data-t="account.created"></div>
+                <div class="ui-td" role="columnheader" data-t="account.last-used"></div>
+                <div class="ui-td" role="columnheader" data-t="account.status"></div>
+                <div class="ui-td" role="columnheader"><span class="ui-sr" data-t="account.actions"></span></div>
               </div>
               <div class="ui-table-body" id="pk-rows" role="rowgroup"></div>
             </div>
@@ -411,22 +475,22 @@
       </main>
 
       <!-- Phone tab bar -->
-      <nav class="ui-tabbar" aria-label="Main tabs">
+      <nav class="ui-tabbar" data-t-attr="aria-label:shell.main-tabs">
         <a class="ui-tab" data-page-link="tokens" href="/admin/tokens">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
-          <span>Tokens</span>
+          <span data-t="shell.tokens"></span><span class="ui-tab-pip hidden" data-nav-count="tokens" aria-hidden="true"></span>
         </a>
         <a class="ui-tab" data-page-link="zones" href="/admin/zones">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z"/></svg>
-          <span>Zones</span>
+          <span data-t="shell.zones"></span>
         </a>
         <a class="ui-tab" data-page-link="apikeys" href="/admin/api-keys">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a48.667 48.667 0 00-1.497 8.057M13 10.5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-          <span>API Keys</span>
+          <span data-t="shell.api-keys"></span>
         </a>
-        <button type="button" class="ui-tab" id="tab-more" aria-haspopup="dialog">
+        <button type="button" class="ui-tab" id="tab-more" aria-haspopup="dialog" aria-expanded="false">
           <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
-          <span>More</span>
+          <span data-t="shell.more"></span>
         </button>
       </nav>
     </div>

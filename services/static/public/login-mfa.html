@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Authenticator · Auth Service</title>
-    <meta name="description" content="Enter your authenticator code to sign in" />
+    <title data-t="loginmfa.authenticator-auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:loginmfa.enter-your-authenticator-code-to-sign" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
@@ -15,18 +16,18 @@
         <div class="ui-login-head">
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
-            <h1 class="ui-h1">Authenticator Code</h1>
-            <p>Enter your 6-digit code to continue</p>
+            <h1 class="ui-h1" data-t="loginmfa.authenticator-code"></h1>
+            <p data-t="loginmfa.enter-your-6-digit-code-to"></p>
           </div>
         </div>
         <form id="f" class="ui-form" novalidate>
           <div class="ui-field">
-            <label class="ui-label" for="code">6-digit code</label>
-            <input class="ui-input ui-code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus placeholder="000000" data-inventory="loginmfa.code" />
+            <label class="ui-label" for="code" data-t="loginmfa.6-digit-code"></label>
+            <input class="ui-input ui-code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus data-inventory="loginmfa.code" data-t-attr="placeholder:loginmfa.000000" />
           </div>
           <p class="ui-error hidden" id="err" role="alert"></p>
-          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Sign In</button>
-          <p class="ui-hint"><a id="back-to-login" href="login">Back to sign in</a></p>
+          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block" data-t="loginmfa.sign-in"></button>
+          <p class="ui-hint"><a id="back-to-login" href="login" data-t="loginmfa.back-to-sign-in"></a></p>
         </form>
       </div>
     </main>

@@ -5,7 +5,7 @@
  */
 
 var AUTH_EYE_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>';
-var AUTH_NETWORK_TEXT = "Unable to connect. Check your connection and try again.";
+var AUTH_NETWORK_TEXT = "auth.unable-to-connect-check-your-connection";
 
 // POST with JSON; resolves { ok, status, data } and never rejects
 function authPost(promise) {
@@ -16,8 +16,10 @@ function authPost(promise) {
     });
 }
 
-function authErrorText(res, fallback) {
-    if (res.network) return AUTH_NETWORK_TEXT;
+// The server's own reason is the text; the catalog gives only what the page says
+// when there is no reason (fallback) or no answer at all (network, per page)
+function authErrorText(res, fallback, network) {
+    if (res.network) return network || t(AUTH_NETWORK_TEXT);
     var j = res.data || {};
     if (typeof j.detail === "string" && j.detail) return j.detail;
     if (typeof j.error === "string" && j.error) return j.error;
@@ -57,8 +59,8 @@ function authPasswordHelpers() {
             var show = input.type === "password";
             input.type = show ? "text" : "password";
             b.setAttribute("aria-pressed", String(show));
-            b.setAttribute("aria-label", show ? "Hide password" : "Show password");
-            b.setAttribute("title", show ? "Hide password" : "Show password");
+            b.setAttribute("aria-label", show ? t("auth.hide-password") : t("auth.show-password"));
+            b.setAttribute("title", show ? t("auth.hide-password") : t("auth.show-password"));
         });
     });
     document.querySelectorAll("[data-caps]").forEach(function (note) {
@@ -91,15 +93,15 @@ function authLogin() {
         var pass = form.querySelector('[name="password"]');
         user.removeAttribute("aria-invalid");
         pass.removeAttribute("aria-invalid");
-        if (!user.value.trim()) { authFieldError(user, "Username: enter your username"); return; }
-        if (!pass.value) { authFieldError(pass, "Password: enter your password"); return; }
+        if (!user.value.trim()) { authFieldError(user, t("login.username-enter-your-username")); return; }
+        if (!pass.value) { authFieldError(pass, t("login.password-enter-your-password")); return; }
         var button = form.querySelector("[type=submit]");
-        authBusy(button, true, "Signing in...");
+        authBusy(button, true, t("login.signing-in"));
         authPost(adminApi("/admin/api/login", { method: "POST", body: { username: user.value, password: pass.value } })).then(function (res) {
             authBusy(button, false);
             if (!res.ok) {
                 pass.value = "";
-                authShowError(authErrorText(res, "Failed"));
+                authShowError(authErrorText(res, t("login.no-reason"), t("login.no-network")));
                 pass.focus();
                 return;
             }
@@ -113,7 +115,6 @@ function authLogin() {
 
 // --- passkey sign-in (login) ----------------------------------------------
 
-var AUTH_PASSKEY_BROWSER = UI_PASSKEY_OLD_BROWSER + " Use your password and authenticator code.";
 var authPasskeyRunning = false;
 
 // The passkey button hides when the service has no passkey address: the probe
@@ -128,7 +129,7 @@ function authPasskeyOffer() {
         if (res.status === 409) return;
         var blocked = uiPasskeyBlocked(window, false);
         if (blocked) {
-            note.textContent = blocked === "insecure" ? UI_PASSKEY_INSECURE : AUTH_PASSKEY_BROWSER;
+            note.textContent = blocked === "insecure" ? t(UI_PASSKEY_INSECURE) : t("login.passkey-old-browser");
             note.classList.remove("hidden");
             return;
         }
@@ -150,7 +151,7 @@ function authPasskeySignIn() {
     var button = document.getElementById("pk-signin");
     authHideError();
     authPasskeyRunning = true;
-    authBusy(button, true, "Waiting for your passkey...");
+    authBusy(button, true, t("login.waiting-for-your-passkey"));
     var done = function (text) {
         authPasskeyRunning = false;
         authBusy(button, false);
@@ -160,7 +161,7 @@ function authPasskeySignIn() {
     authPost(adminApi("/admin/api/login/passkey/options", { method: "POST" })).then(function (opt) {
         if (!opt.ok) {
             if (opt.status === 409) document.getElementById("pk-login").classList.add("hidden");
-            done(authErrorText(opt, "Could not start the passkey sign-in. Try again."));
+            done(authErrorText(opt, t("login.could-not-start-the-passkey-sign"), t("login.no-network")));
             return;
         }
         var json = opt.data.publicKey || {};
@@ -168,7 +169,7 @@ function authPasskeySignIn() {
         try {
             publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(json);
         } catch (e) {
-            done("This browser could not read the passkey request. Use your password and authenticator code.");
+            done(t("login.this-browser-could-not-read-the"));
             return;
         }
         navigator.credentials.get({ publicKey: publicKey }).then(function (credential) {
@@ -182,7 +183,7 @@ function authPasskeySignIn() {
                 }
                 // The server has no such passkey: the password manager may drop it
                 if (res.status === 404) authPasskeyForget(json.rpId, encoded.id);
-                done(authErrorText(res, "Could not sign in with the passkey. Try again."));
+                done(authErrorText(res, t("login.could-not-sign-in-with-the"), t("login.no-network")));
             });
         }, function (err) {
             done(uiPasskeyErrorText(err, false));
@@ -204,13 +205,13 @@ function authLoginMfa() {
         event.preventDefault();
         authHideError();
         code.removeAttribute("aria-invalid");
-        if (!code.value.trim()) { authFieldError(code, "Enter the code from your authenticator app."); return; }
+        if (!code.value.trim()) { authFieldError(code, t("loginmfa.enter-the-code-from-your-authenticator")); return; }
         var button = form.querySelector("[type=submit]");
-        authBusy(button, true, "Signing in...");
+        authBusy(button, true, t("loginmfa.signing-in"));
         authPost(adminApi("/admin/api/login/mfa", { method: "POST", body: { code: code.value }, csrf: readCsrf() })).then(function (res) {
             authBusy(button, false);
             if (!res.ok) {
-                authShowError(authErrorText(res, "Failed"));
+                authShowError(authErrorText(res, t("loginmfa.no-reason"), t("loginmfa.no-network")));
                 code.select();
                 return;
             }
@@ -263,7 +264,7 @@ function authSetupDatabase(showRegister) {
     var adopt = document.getElementById("db-adopt");
     var kind = "sqlite";
     var busy = false;
-    document.getElementById("setup-sub").textContent = "Choose where the service keeps its data";
+    document.getElementById("setup-sub").textContent = t("setup.choose-where-the-service-keeps-its");
     pg.innerHTML = '<div class="ui-form">' + uiDbFieldsHtml("db-", { port: 5432 }, false) + "</div>";
     form.classList.remove("hidden");
     var reset = function () {
@@ -302,11 +303,11 @@ function authSetupDatabase(showRegister) {
         if (busy) return;
         authSetError("db-err", "");
         var button = this;
-        setBusy(true, button, "Checking...");
+        setBusy(true, button, t("setup.checking"));
         authPost(adminApi("/admin/api/setup/database/check", { method: "POST", body: body() })).then(function (res) {
             setBusy(false, button);
             if (!res.ok) {
-                authSetError("db-err", authErrorText(res, "The check failed."));
+                authSetError("db-err", authErrorText(res, t("setup.the-check-failed"), t("setup.no-network")));
                 if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
                 return;
             }
@@ -320,17 +321,17 @@ function authSetupDatabase(showRegister) {
         var button = document.getElementById("db-continue");
         var b = body();
         if (adopt.checked) b.adopt = true;
-        setBusy(true, button, "Setting up the database...");
+        setBusy(true, button, t("setup.setting-up-the-database"));
         authPost(adminApi("/admin/api/setup/database", { method: "POST", body: b })).then(function (res) {
             if (!res.ok || !res.data.job) {
                 setBusy(false, button);
-                authSetError("db-err", authErrorText(res, "Could not start the setup."));
+                authSetError("db-err", authErrorText(res, t("setup.could-not-start-the-setup"), t("setup.no-network")));
                 if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
                 return;
             }
             return authWaitJob("/admin/api/setup/database/jobs/" + encodeURIComponent(res.data.job.id)).then(function (job) {
                 setBusy(false, button);
-                if (!job) { authSetError("db-err", "The server stopped answering. Reload the page."); return; }
+                if (!job) { authSetError("db-err", t("setup.the-server-stopped-answering-reload-the")); return; }
                 if (job.state !== "done") {
                     if (job.code === "attach_failed") {
                         // Saved, but the service could not start on it: recovery mode
@@ -339,7 +340,7 @@ function authSetupDatabase(showRegister) {
                     }
                     if (job.code === "confirm_adopt") {
                         adoptRow.classList.remove("hidden");
-                        authSetError("db-err", "This database holds this service's data from an older version or a backup. Tick the box to adopt it, then continue.");
+                        authSetError("db-err", t("setup.this-database-holds-this-service-s"));
                         return;
                     }
                     authSetError("db-err", uiDbCodeText(job.code, job.error));
@@ -359,7 +360,7 @@ function authSetupDatabase(showRegister) {
 function authSetup() {
     var form = document.getElementById("f");
     var showRegister = function () {
-        document.getElementById("setup-sub").textContent = "Create the first administrator account";
+        document.getElementById("setup-sub").textContent = t("setup.create-the-first-administrator-account");
         form.classList.remove("hidden");
         form.querySelector('[name="username"]').focus();
     };
@@ -377,15 +378,15 @@ function authSetup() {
         var pass = form.querySelector('[name="password"]');
         user.removeAttribute("aria-invalid");
         pass.removeAttribute("aria-invalid");
-        if (user.value.trim().length < 2) { authFieldError(user, "Username: use at least 2 characters"); return; }
-        if (pass.value.length < 8) { authFieldError(pass, "Password: use at least 8 characters"); return; }
-        if (new TextEncoder().encode(pass.value).length > 72) { authFieldError(pass, "Password: use at most 72 bytes. Letters outside English, such as Hebrew, and emoji take 2 to 4 bytes each"); return; }
+        if (user.value.trim().length < 2) { authFieldError(user, t("setup.username-use-at-least-2-characters")); return; }
+        if (pass.value.length < 8) { authFieldError(pass, t("setup.password-use-at-least-8-characters")); return; }
+        if (new TextEncoder().encode(pass.value).length > 72) { authFieldError(pass, t("setup.password-use-at-most-72-bytes")); return; }
         var button = form.querySelector("[type=submit]");
-        authBusy(button, true, "Creating the account...");
+        authBusy(button, true, t("setup.creating-the-account"));
         authPost(adminApi("/admin/api/bootstrap/register", { method: "POST", body: { username: user.value, password: pass.value } })).then(function (res) {
             authBusy(button, false);
             if (!res.ok) {
-                authShowError(authErrorText(res, "Failed"));
+                authShowError(authErrorText(res, t("setup.no-reason"), t("setup.no-network")));
                 return;
             }
             writeCsrf(res.data.csrf || "");
@@ -399,8 +400,8 @@ function authSetup() {
 // The setup session ended: start the setup again
 function authSetupExpired(reason) {
     var box = document.getElementById("setup-mfa-box");
-    box.innerHTML = '<div class="ui-banner ui-banner-warn" role="alert"><div><b>Session expired.</b><p class="ui-muted">' + esc(reason || "") +
-        '</p></div><a class="ui-btn ui-btn-sm" id="start-over">Start over</a></div>';
+    box.innerHTML = '<div class="ui-banner ui-banner-warn" role="alert"><div><b>' + esc(t("setupmfa.session-expired")) + '</b><p class="ui-muted">' + esc(reason || "") +
+        '</p></div><a class="ui-btn ui-btn-sm" id="start-over">' + esc(t("setupmfa.start-over")) + '</a></div>';
     document.getElementById("start-over").setAttribute("href", basePath() + "/setup");
 }
 
@@ -420,8 +421,7 @@ function authSetupMfaShow(data) {
     document.getElementById("issuer-hint").classList.toggle("hidden", !!data.issuerLocked);
     locked.classList.toggle("hidden", !data.issuerLocked);
     locked.innerHTML = data.issuerLocked
-        ? UI_LOCK_ICON + "<span>Set by the <code>" + esc(data.issuerEnvName || "TOTP_ISSUER") + "</code> environment variable (" + esc(issuer) +
-          "). Remove it there to change the name here.</span>"
+        ? UI_LOCK_ICON + "<span>" + tHtml("setupmfa.issuer-locked", { env: tRaw("<code>" + esc(data.issuerEnvName || "TOTP_ISSUER") + "</code>"), value: issuer }) + "</span>"
         : "";
 }
 
@@ -436,7 +436,7 @@ function authIssuerSave() {
     input.removeAttribute("aria-invalid");
     if (!name) {
         input.setAttribute("aria-invalid", "true");
-        err.textContent = "Name in authenticator apps: enter a name.";
+        err.textContent = t("setupmfa.name-in-authenticator-apps-enter-a");
         err.classList.remove("hidden");
         return null;
     }
@@ -450,7 +450,7 @@ function authIssuerSave() {
         }
         if (!res.ok || !res.data || !res.data.otpauthUrl) {
             if (res.status === 422) input.setAttribute("aria-invalid", "true");
-            err.textContent = authErrorText(res, "Could not change the name. Try again.");
+            err.textContent = authErrorText(res, t("setupmfa.could-not-change-the-name-try"));
             err.classList.remove("hidden");
             return;
         }
@@ -464,7 +464,7 @@ function authSetupMfa() {
     var code = form.querySelector('[name="code"]');
     adminJson("/admin/api/bootstrap/mfa-enroll").then(function (res) {
         if (!res.ok || !res.data) {
-            authSetupExpired(res.error ? AUTH_NETWORK_TEXT : authErrorText(res, ""));
+            authSetupExpired(res.error ? t(AUTH_NETWORK_TEXT) : authErrorText(res, ""));
             return;
         }
         authSetupMfaShow(res.data);
@@ -487,9 +487,9 @@ function authSetupMfa() {
         }
         authHideError();
         code.removeAttribute("aria-invalid");
-        if (!code.value.trim()) { authFieldError(code, "Enter the code from your authenticator app."); return; }
+        if (!code.value.trim()) { authFieldError(code, t("setupmfa.enter-the-code-from-your-authenticator")); return; }
         var button = form.querySelector("[type=submit]");
-        authBusy(button, true, "Checking...");
+        authBusy(button, true, t("setupmfa.checking"));
         authPost(adminApi("/admin/api/bootstrap/mfa-verify", { method: "POST", body: { code: code.value }, csrf: readCsrf() })).then(function (res) {
             authBusy(button, false);
             if (res.status === 401) {
@@ -497,7 +497,7 @@ function authSetupMfa() {
                 return;
             }
             if (!res.ok) {
-                authShowError(authErrorText(res, "Failed"));
+                authShowError(authErrorText(res, t("setupmfa.no-reason"), t("setupmfa.no-network")));
                 code.select();
                 return;
             }
@@ -530,8 +530,8 @@ function authRecovery() {
         document.getElementById("rec-running").classList.remove("hidden");
     };
     var fail = function (res, fallback) {
-        if (res.status === 429) return "Too many wrong keys from this address. Try again in " + Math.ceil(((res.data && res.data.retryAfter) || 60) / 60) + " minutes.";
-        if (res.error) return res.error === "timeout" ? "The server did not answer in time." : AUTH_NETWORK_TEXT;
+        if (res.status === 429) return t("recovery.too-many-wrong-keys-from-this", { minutes: Math.ceil(((res.data && res.data.retryAfter) || 60) / 60) });
+        if (res.error) return res.error === "timeout" ? t("recovery.the-server-did-not-answer-in") : t(AUTH_NETWORK_TEXT);
         return (res.data && res.data.detail) || fallback;
     };
     var showForm = function (d) {
@@ -540,8 +540,8 @@ function authRecovery() {
         document.getElementById("rec-why").textContent = " " + (d.message || "");
         var c = d.configured;
         var saved = "";
-        if (c && c.backend === "postgres") saved = "Saved connection: " + c.user + "@" + c.host + ":" + c.port + "/" + c.database + " (TLS " + c.sslmode + ").";
-        else if (c && c.backend === "sqlite") saved = "Saved database: the SQLite file " + c.path + ".";
+        if (c && c.backend === "postgres") saved = t("recovery.saved-connection", { user: c.user, host: c.host, port: c.port, database: c.database, sslmode: uiIdWord("db.sslmode.", c.sslmode) });
+        else if (c && c.backend === "sqlite") saved = t("recovery.saved-database-the-sqlite-file", { path: c.path });
         document.getElementById("rec-saved").textContent = saved;
         var pgValues = c && c.backend === "postgres" ? c : { port: 5432 };
         var keep = !!(c && c.backend === "postgres" && d.code !== "config_unreadable");
@@ -553,7 +553,7 @@ function authRecovery() {
             var button = keyForm.querySelector("[type=submit]");
             authBusy(button, false);
             if (!res.ok) {
-                authShowError(fail(res, "The master key is not correct."));
+                authShowError(fail(res, t("recovery.the-master-key-is-not-correct")));
                 return;
             }
             if (res.data.mode !== "recovery") { running(); return; }
@@ -574,8 +574,8 @@ function authRecovery() {
         event.preventDefault();
         authHideError();
         key = document.getElementById("rec-key").value.trim();
-        if (!key) { authShowError("Enter the master key."); return; }
-        authBusy(keyForm.querySelector("[type=submit]"), true, "Checking...");
+        if (!key) { authShowError(t("recovery.enter-the-master-key")); return; }
+        authBusy(keyForm.querySelector("[type=submit]"), true, t("recovery.checking"));
         open();
     });
     authKindSwitch(form, function (k) {
@@ -604,11 +604,11 @@ function authRecovery() {
         if (busy) return;
         authSetError("rec-err", "");
         var button = this;
-        setBusy(true, button, "Checking...");
+        setBusy(true, button, t("recovery.checking"));
         call("POST", "/admin/api/recovery/check", body()).then(function (res) {
             setBusy(false, button);
             if (!res.ok) {
-                authSetError("rec-err", fail(res, "The check failed."));
+                authSetError("rec-err", fail(res, t("recovery.the-check-failed")));
                 if (res.data && res.data.field) uiDbFieldError("rec-", res.data.field);
                 return;
             }
@@ -621,24 +621,24 @@ function authRecovery() {
         authSetError("rec-err", "");
         var confirm = document.getElementById("rec-confirm");
         if (!confirm.checked) {
-            authSetError("rec-err", "Tick the box to confirm that this is the database to use.");
+            authSetError("rec-err", t("recovery.tick-the-box-to-confirm-that"));
             confirm.focus();
             return;
         }
         var b = body();
         b.confirm = true;
         var button = document.getElementById("rec-save");
-        setBusy(true, button, "Connecting...");
+        setBusy(true, button, t("recovery.connecting"));
         call("POST", "/admin/api/recovery/save", b).then(function (res) {
             if (!res.ok || !res.data.job) {
                 setBusy(false, button);
-                authSetError("rec-err", fail(res, "Could not start."));
+                authSetError("rec-err", fail(res, t("recovery.could-not-start")));
                 if (res.data && res.data.field) uiDbFieldError("rec-", res.data.field);
                 return;
             }
             return authWaitJob("/admin/api/recovery/jobs/" + encodeURIComponent(res.data.job.id), { Authorization: "Bearer " + key }).then(function (job) {
                 setBusy(false, button);
-                if (!job) { authSetError("rec-err", "The server stopped answering. Reload the page."); return; }
+                if (!job) { authSetError("rec-err", t("recovery.the-server-stopped-answering-reload-the")); return; }
                 if (job.state !== "done") { authSetError("rec-err", uiDbCodeText(job.code, job.error)); return; }
                 key = "";
                 running();
@@ -657,6 +657,9 @@ function authStart() {
     else if (page === "setup-mfa") authSetupMfa();
     else if (page === "recovery") authRecovery();
 }
+
+// The last script of the page: every word of the parsed page is in place (js/text.js)
+if (typeof document !== "undefined" && document && typeof document.querySelectorAll === "function") uiApplyText(document, true);
 
 if (typeof document !== "undefined" && document.readyState !== undefined) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", authStart);

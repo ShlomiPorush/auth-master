@@ -41,12 +41,21 @@ function uiUserText(value, cls) {
     return '<bdi dir="auto"' + (cls ? ' class="' + esc(cls) + '"' : "") + ">" + esc(value) + "</bdi>";
 }
 
-// Counts with thousands separators and the right singular or plural (FW-3)
+// Counts with thousands separators and the right singular or plural (FW-3).
+// uiCountLabel(n, key) is tn(key, n): a count value of the catalog (js/text.js).
 function uiNum(n) {
     return Number(n || 0).toLocaleString();
 }
-function uiCountLabel(n, one, many) {
-    return uiNum(n) + " " + (Number(n) === 1 ? one : many);
+function uiCountLabel(n, key) {
+    return tn(key, n);
+}
+
+// An identifier from the API shown as a word (a log action, a level, a TLS mode):
+// the catalog's word for it under prefix, or the identifier itself when the
+// catalog has none, so a value the UI does not know yet still shows
+function uiIdWord(prefix, id) {
+    var key = prefix + String(id);
+    return Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? t(key) : String(id);
 }
 
 function uiIsPhone() {
@@ -58,14 +67,23 @@ function uiTouchOnly() {
 
 // ===========================================================================
 // Dates and times (FW-1, FW-2, FW-9). Every date on a page is written here, in
-// the app time zone (from /admin/api/me), in the Date Format and Time Format
-// the user picked in Preferences. Pages never format a date themselves.
+// the app time zone, in the Date Format and Time Format of Settings > General
+// (both from /admin/api/me). Pages never format a date themselves.
 // ===========================================================================
 
 var uiAppZone = "UTC";
-var uiDatePrefs = { date: "browser", time: "24" };
-var UI_DATE_FORMATS = [["browser", "Browser order"], ["dmy", "DD/MM/YYYY"], ["mdy", "MM/DD/YYYY"], ["ymd", "YYYY-MM-DD"]];
-var UI_TIME_FORMATS = [["24", "24-hour"], ["12", "12-hour"]];
+var uiDatePrefs = { date: "browser", time: "24h" };
+// The values the server takes (app/display_settings.py) and the catalog word of each
+var UI_DATE_FORMATS = [["browser", "dates.browser-order"], ["DD/MM/YYYY", "dates.dd-mm-yyyy"], ["MM/DD/YYYY", "dates.mm-dd-yyyy"],
+    ["DD.MM.YYYY", "dates.dd-mm-yyyy-dot"], ["YYYY-MM-DD", "dates.yyyy-mm-dd"]];
+var UI_TIME_FORMATS = [["24h", "dates.24-hour"], ["12h", "dates.12-hour"], ["browser", "dates.browser-clock"]];
+// How each fixed Date Format writes the day, the month and the year
+var UI_DATE_ORDERS = {
+    "DD/MM/YYYY": { order: ["day", "month", "year"], sep: "/" },
+    "MM/DD/YYYY": { order: ["month", "day", "year"], sep: "/" },
+    "DD.MM.YYYY": { order: ["day", "month", "year"], sep: "." },
+    "YYYY-MM-DD": { order: ["year", "month", "day"], sep: "-" },
+};
 var uiZoneFormatters = {};
 
 function uiZoneValid(tz) {
@@ -84,30 +102,12 @@ function uiSetAppZone(tz) {
     return uiAppZone;
 }
 
+// The formats the server sends; an unknown value gives the default (Browser order, 24-hour)
 function uiSetDatePrefs(date, time) {
     var dateOk = UI_DATE_FORMATS.some(function (f) { return f[0] === date; });
     var timeOk = UI_TIME_FORMATS.some(function (f) { return f[0] === time; });
-    uiDatePrefs = { date: dateOk ? date : "browser", time: timeOk ? time : "24" };
+    uiDatePrefs = { date: dateOk ? date : "browser", time: timeOk ? time : "24h" };
     return uiDatePrefs;
-}
-
-function uiLoadDatePrefs() {
-    var date = "browser";
-    var time = "24";
-    try {
-        date = window.localStorage.getItem("uiDateFormat") || date;
-        time = window.localStorage.getItem("uiTimeFormat") || time;
-    } catch (e) { /* defaults */ }
-    return uiSetDatePrefs(date, time);
-}
-
-function uiSaveDatePrefs(date, time) {
-    var prefs = uiSetDatePrefs(date, time);
-    try {
-        window.localStorage.setItem("uiDateFormat", prefs.date);
-        window.localStorage.setItem("uiTimeFormat", prefs.time);
-    } catch (e) { /* applied for this visit only */ }
-    return prefs;
 }
 
 function uiParseInstant(value) {
@@ -147,15 +147,16 @@ function uiZoneOffset(ms, tz) {
     return Math.round((Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - whole) / 60000);
 }
 
-// Date in the order the user picked; numbers only, never month names
+// Date in the order the Date Format names; numbers only, never month names
 function writeDate(p, withYear, prefs) {
-    var pick = (prefs || uiDatePrefs).date;
+    var fixed = UI_DATE_ORDERS[(prefs || uiDatePrefs).date];
     var d = uiPad(p.day);
     var m = uiPad(p.month);
     var y = String(p.year);
-    if (pick === "dmy") return withYear ? d + "/" + m + "/" + y : d + "/" + m;
-    if (pick === "mdy") return withYear ? m + "/" + d + "/" + y : m + "/" + d;
-    if (pick === "ymd") return withYear ? y + "-" + m + "-" + d : m + "-" + d;
+    if (fixed) {
+        var part = { day: d, month: m, year: y };
+        return fixed.order.filter(function (k) { return withYear || k !== "year"; }).map(function (k) { return part[k]; }).join(fixed.sep);
+    }
     // Browser order: the browser's language decides the order and separators of
     // the same numbers (the day itself was already taken in the app zone)
     var opts = withYear ? { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" } : { timeZone: "UTC", month: "2-digit", day: "2-digit" };
@@ -167,10 +168,23 @@ function writeDate(p, withYear, prefs) {
 }
 
 function writeClock(p, seconds, prefs) {
+    var pick = (prefs || uiDatePrefs).time;
+    if (pick === "browser") {
+        // The clock of the browser's language: 1:05 PM on a 12-hour one, 13:05 on a 24-hour one
+        var opts = { timeZone: "UTC", hour: "numeric", minute: "2-digit" };
+        if (seconds) opts.second = "2-digit";
+        try {
+            var cycle = new Intl.DateTimeFormat(undefined, opts).resolvedOptions().hourCycle;
+            if (cycle !== "h11" && cycle !== "h12") opts.hour = "2-digit";
+            return new Intl.DateTimeFormat(undefined, opts).format(new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second || 0)));
+        } catch (e) {
+            pick = "24h";
+        }
+    }
     var tail = ":" + uiPad(p.minute) + (seconds ? ":" + uiPad(p.second) : "");
-    if ((prefs || uiDatePrefs).time === "12") {
+    if (pick === "12h") {
         var h = p.hour % 12 === 0 ? 12 : p.hour % 12;
-        return h + tail + (p.hour < 12 ? " AM" : " PM");
+        return p.hour < 12 ? t("dates.am", { time: h + tail }) : t("dates.pm", { time: h + tail });
     }
     return uiPad(p.hour) + tail;
 }
@@ -221,10 +235,10 @@ function formatAgo(value, now) {
     var ms = uiParseInstant(value);
     if (isNaN(ms)) return "-";
     var diff = Math.max(0, (now === undefined ? Date.now() : now) - ms) / 1000;
-    if (diff < 60) return "just now";
-    if (diff < 3600) return Math.round(diff / 60) + " min ago";
-    if (diff < 172800) return Math.round(diff / 3600) + " h ago";
-    return Math.round(diff / 86400) + " d ago";
+    if (diff < 60) return t("dates.just-now");
+    if (diff < 3600) return t("dates.min-ago", { n: Math.round(diff / 60) });
+    if (diff < 172800) return t("dates.h-ago", { n: Math.round(diff / 3600) });
+    return t("dates.d-ago", { n: Math.round(diff / 86400) });
 }
 
 // A date cell: <time> with the instant, the full timestamp on hover (in zone, else the app zone)
@@ -256,9 +270,9 @@ function uiFromZonedInput(text, tz) {
     var offsets = before === after ? [before] : [before, after];
     var found = [];
     offsets.forEach(function (off) {
-        var t = wall - off * 60000;
-        var p = uiZoneParts(t, zone);
-        if (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) === wall) found.push(t);
+        var instant = wall - off * 60000;
+        var p = uiZoneParts(instant, zone);
+        if (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) === wall) found.push(instant);
     });
     if (found.length) return new Date(Math.min.apply(null, found)).toISOString();
     // Not on the clock: the offset in force before the change places it the gap later
@@ -364,11 +378,19 @@ function uiTextHeld(el) {
 }
 
 // ===========================================================================
-// Toast (FB-2): one at a time, 4 seconds, waits while hovered or focused
+// Toast (FB-2): one at a time, 4 seconds, waits while hovered or focused, and
+// may carry one action
 // ===========================================================================
 
-function showToast(message, type) {
+// opts: { action: { label, ariaLabel, run }, duration }
+//   action: one button; a click runs run() and closes the toast. When run()
+//     returns a promise the toast stays until it settles (further clicks do
+//     nothing), so the message that follows takes its place.
+//   duration: milliseconds before it fades (4000); Infinity keeps it until closed
+function showToast(message, type, opts) {
     if (!uiHasDom()) return null;
+    var o = opts || {};
+    var action = o.action && o.action.label && typeof o.action.run === "function" ? o.action : null;
     var icons = { success: "✓", error: "✗", warning: "!", info: "i" };
     var kind = icons[type] ? type : "info";
     var old = document.getElementById("ui-toast");
@@ -379,19 +401,64 @@ function showToast(message, type) {
     toast.id = "ui-toast";
     toast.className = "ui-toast ui-toast-" + kind;
     toast.setAttribute("role", kind === "error" ? "alert" : "status");
-    toast.innerHTML = '<span class="ui-toast-icon" aria-hidden="true">' + icons[kind] + "</span>" +
-        "<p>" + esc(message) + "</p>" +
-        '<button type="button" class="ui-icon-btn" data-toast-x title="Close" aria-label="Close">' + UI_CLOSE_ICON + "</button>";
-    toast.querySelector("[data-toast-x]").addEventListener("click", function () { toast.remove(); });
+    var icon = document.createElement("span");
+    icon.className = "ui-toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = icons[kind];
+    var text = document.createElement("p");
+    text.textContent = String(message === null || message === undefined ? "" : message);
+    toast.appendChild(icon);
+    toast.appendChild(text);
+    var actionBtn = null;
+    if (action) {
+        actionBtn = document.createElement("button");
+        actionBtn.type = "button";
+        actionBtn.className = "ui-btn ui-btn-sm ui-toast-action";
+        actionBtn.textContent = action.label;
+        if (action.ariaLabel) actionBtn.setAttribute("aria-label", action.ariaLabel);
+        toast.appendChild(actionBtn);
+    }
+    var x = document.createElement("button");
+    x.type = "button";
+    x.className = "ui-icon-btn";
+    x.setAttribute("data-toast-x", "");
+    x.setAttribute("title", t("common.close"));
+    x.setAttribute("aria-label", t("common.close"));
+    x.innerHTML = UI_CLOSE_ICON;
+    toast.appendChild(x);
+    x.addEventListener("click", function () { toast.remove(); });
     document.body.appendChild(toast);
-    if (focusWasInIt) toast.querySelector("button").focus({ preventScroll: true });
+    // The keyboard was in the toast this one replaces: it moves to this one
+    if (focusWasInIt) (actionBtn || x).focus({ preventScroll: true });
 
-    var left = 4000;
+    var duration = typeof o.duration === "number" && o.duration > 0 ? o.duration : 4000;
+    var left = duration;
     var started = Date.now();
     var timer = null;
     var fading = false;
     var removing = null;
-    var hold = function () { return toast.matches(":hover") || toast.contains(document.activeElement); };
+    var busy = false;
+    var hold = function () { return busy || toast.matches(":hover") || toast.contains(document.activeElement); };
+    if (actionBtn) {
+        actionBtn.addEventListener("click", function () {
+            if (busy) return;
+            var result;
+            try { result = action.run(); } catch (e) { result = null; }
+            if (!result || typeof result.then !== "function") {
+                toast.remove();
+                return;
+            }
+            // Running: the toast stays and keeps the keyboard; its button says it is busy
+            busy = true;
+            pause();
+            actionBtn.setAttribute("aria-disabled", "true");
+            var done = function () {
+                busy = false;
+                if (toast.isConnected) toast.remove();
+            };
+            result.then(done, done);
+        });
+    }
     var fade = function () {
         if (!toast.isConnected) return;
         fading = true;
@@ -401,7 +468,8 @@ function showToast(message, type) {
     var run = function () {
         clearTimeout(timer);
         started = Date.now();
-        timer = setTimeout(fade, left);
+        // Infinity: it stays until closed
+        timer = isFinite(left) ? setTimeout(fade, left) : null;
     };
     var pause = function () {
         if (fading) {
@@ -458,7 +526,7 @@ function uiCopyText(text) {
 // A value that copies on a click, shown in mono; the full value is copied
 function uiCopyable(text, cls) {
     if (!text || text === "-") return '<span class="ui-muted">' + esc(text || "-") + "</span>";
-    return '<button type="button" class="ui-copy' + (cls ? " " + esc(cls) : "") + '" data-copy="' + esc(text) + '" title="Click to copy">' +
+    return '<button type="button" class="ui-copy' + (cls ? " " + esc(cls) : "") + '" data-copy="' + esc(text) + '" title="' + esc(t("common.click-to-copy")) + '">' +
         "<bdi>" + esc(text) + "</bdi>" + UI_COPY_ICON + "</button>";
 }
 
@@ -467,10 +535,10 @@ function uiCopyClick(button) {
     uiCopyText(text).then(function (ok) {
         if (!ok) {
             var secure = typeof window !== "undefined" && window.isSecureContext;
-            showToast(secure ? "Failed to copy" : "Copying needs HTTPS. Select the text and copy it yourself.", "error");
+            showToast(secure ? t("common.failed-to-copy") : t("common.copying-needs-https-select-the-text"), "error");
             return;
         }
-        showToast("Copied: " + text, "success");
+        showToast(t("common.copied", { text: text }), "success");
         var svg = button.querySelector("svg");
         if (!svg) return;
         var before = svg.innerHTML;
@@ -509,7 +577,7 @@ function uiDialog(o) {
     var form = opts.form ? opts.form : null;
     var bodyTag = form ? "form" : "div";
     var x = typeof opts.close === "function"
-        ? '<button type="button" class="ui-icon-btn" data-dialog-x title="Close" aria-label="Close">' + UI_CLOSE_ICON + "</button>" : "";
+        ? '<button type="button" class="ui-icon-btn" data-dialog-x title="' + esc(t("common.close")) + '" aria-label="' + esc(t("common.close")) + '">' + UI_CLOSE_ICON + "</button>" : "";
     backdrop.innerHTML =
         '<div class="ui-dialog ' + (sizes[opts.size] || "") + (opts.dialogClass ? " " + opts.dialogClass : "") + '" role="' + role +
         '" aria-labelledby="' + titleId + '"' + (opts.describedBy ? ' aria-describedby="' + esc(opts.describedBy) + '"' : "") + ">" +
@@ -564,8 +632,8 @@ function uiDialogDirty(d) {
 function uiCloseGuarded(d, close) {
     if (!uiDialogDirty(d)) { close(); return Promise.resolve(true); }
     return uiConfirm({
-        title: "Discard your changes?", message: "What you changed in this window is not saved.",
-        confirmText: "Discard", cancelText: "Keep editing", danger: true, focusCancel: true,
+        title: t("common.discard-your-changes"), message: t("common.what-you-changed-in-this-window"),
+        confirmText: t("common.discard"), cancelText: t("common.keep-editing"), danger: true, focusCancel: true,
     }).then(function (ok) { if (ok) close(); return ok; });
 }
 
@@ -578,12 +646,12 @@ function uiConfirm(o) {
     if (uiConfirmClose) uiConfirmClose(false);
     return new Promise(function (resolve) {
         var d = uiDialog({
-            title: opts.title || "Confirm", size: "sm", role: "alertdialog", backdropClass: "ui-confirm",
+            title: opts.title || t("common.confirm"), size: "sm", role: "alertdialog", backdropClass: "ui-confirm",
             noHistory: !!opts.noHistory, describedBy: "ui-confirm-text",
             body: '<p class="ui-confirm-text" id="ui-confirm-text">' + esc(opts.message || "") + "</p>",
-            foot: '<button type="button" class="ui-btn" data-cancel>' + esc(opts.cancelText || "Cancel") + "</button>" +
+            foot: '<button type="button" class="ui-btn" data-cancel>' + esc(opts.cancelText || t("common.cancel")) + "</button>" +
                 '<button type="button" class="ui-btn ' + (opts.danger ? "ui-btn-danger-solid" : "ui-btn-primary") + '" data-confirm>' +
-                esc(opts.confirmText || "Confirm") + "</button>",
+                esc(opts.confirmText || t("common.confirm")) + "</button>",
         });
         var settled = false;
         function done(result) {
@@ -700,9 +768,11 @@ var uiOverlayEntry = false;
 var uiIgnorePop = false;
 var uiLayerQueued = false;
 
+// The phone search over the whole screen (SR-8) is a layer too: Escape and Back
+// close it, and what lies under it is inert
 function uiOpenLayers() {
     if (!uiHasDom()) return [];
-    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop"))
+    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop, .ui-gs.is-sheet"))
         .filter(function (el) { return el.getClientRects().length > 0; })
         .sort(function (a, b) {
             var za = parseInt(getComputedStyle(a).zIndex, 10) || 0;
@@ -754,7 +824,7 @@ function uiLayerFocusBack(opener, below) {
         return;
     }
     if (below) { uiLayerFocusIn(below); return; }
-    var heading = document.querySelector(".ui-page:not(.hidden) h1");
+    var heading = uiPageHeading();
     if (heading) {
         if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
         heading.focus({ preventScroll: true });
@@ -864,7 +934,7 @@ var uiPopConfirmed = false;
 var uiLeaveAsking = false;
 var uiUnsavedSources = [];
 var uiScrolls = {};
-var uiAppTitle = "Auth Service";
+var uiAppTitle = "common.auth-service";
 
 // Who holds unsaved changes: count() returns how many; reset() puts them back
 // to how they were loaded, when the user chose to leave them
@@ -893,9 +963,9 @@ function uiConfirmLeave() {
     var n = uiUnsavedCount();
     uiLeaveAsking = true;
     return uiConfirm({
-        title: "Leave without saving?",
-        message: "You have " + uiCountLabel(n, "unsaved change", "unsaved changes") + ". Leaving drops " + (n === 1 ? "it" : "them") + ".",
-        confirmText: "Leave", cancelText: "Stay", danger: true, focusCancel: true, noHistory: true,
+        title: t("common.leave-without-saving"),
+        message: tn("common.leave-unsaved", n),
+        confirmText: t("common.leave"), cancelText: t("common.stay"), danger: true, focusCancel: true, noHistory: true,
     }).then(function (ok) {
         uiLeaveAsking = false;
         if (ok) uiUnsavedDiscard();
@@ -907,15 +977,61 @@ function uiPagePath(id) {
     return basePath() + uiPages[id].path;
 }
 
-function uiPageFromLocation() {
-    var p = window.location.pathname;
+// A part of a page's address after its own path (a Settings section, NL-3)
+var UI_SUB_ID = /^[a-z0-9_-]+$/;
+
+// The page of an address and the part after the page's path:
+// /admin/settings/redis is { id: "settings", sub: "redis" }. A part that is not
+// an id gives the page with no part, so the page opens its first section.
+function uiParsePath(pathname) {
+    var p = pathname;
     var b = basePath();
     if (b && p.indexOf(b) === 0) p = p.slice(b.length);
     if (p.length > 1 && p.charAt(p.length - 1) === "/") p = p.slice(0, -1);
     for (var id in uiPages) {
-        if (Object.prototype.hasOwnProperty.call(uiPages, id) && uiPages[id].path === p) return id;
+        if (!Object.prototype.hasOwnProperty.call(uiPages, id)) continue;
+        var own = uiPages[id].path;
+        if (own === p) return { id: id, sub: "" };
+        // Only a page with sections owns the addresses under its path (/admin/settings/<section>)
+        if (uiPages[id].sections && p.indexOf(own + "/") === 0) {
+            var rest = p.slice(own.length + 1);
+            var sub = "";
+            try { sub = decodeURIComponent(rest); } catch (e) { sub = ""; }
+            return { id: id, sub: UI_SUB_ID.test(sub) ? sub : "" };
+        }
     }
-    return "";
+    return { id: "", sub: "" };
+}
+
+function uiPageFromLocation() {
+    return uiParsePath(window.location.pathname).id;
+}
+
+// The open page's part of the address ("" when it has none)
+function uiPageSub() {
+    var at = uiParsePath(window.location.pathname);
+    return at.id === uiPageCurrent ? at.sub : "";
+}
+
+// The address of a page, a part of it, a query and a fragment
+function uiPageUrl(id, sub, query, hash) {
+    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
+    return uiPagePath(id) + (sub && UI_SUB_ID.test(sub) ? "/" + encodeURIComponent(sub) : "") + (qs ? "?" + qs : "") +
+        (hash ? "#" + encodeURIComponent(hash) : "");
+}
+
+// The open page switched to another part (a Settings section): one Back step,
+// or a correction of the address without one (replace)
+function uiSetPageSub(sub, replace) {
+    var url = uiPageUrl(uiPageCurrent, sub, "", "");
+    if (url === window.location.pathname + window.location.search) return;
+    if (replace || uiOverlayEntry) {
+        history.replaceState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    } else {
+        uiSaveScroll();
+        uiHistIdx += 1;
+        history.pushState({ page: uiPageCurrent, idx: uiHistIdx }, "", url);
+    }
 }
 
 function uiPageQuery() {
@@ -930,8 +1046,19 @@ function uiSetPageQuery(params) {
     history.replaceState(history.state, "", url);
 }
 
+// The browser tab names the page, and a level opened in it (the Usage of one
+// token, a Settings section) when the page names one with uiSetSubTitle (NL-3)
+var uiTitleSub = "";
 function uiSetTitle(id) {
-    document.title = (uiPages[id] ? uiPages[id].title + " · " : "") + uiAppTitle;
+    if (!uiPages[id]) { document.title = t(uiAppTitle); return; }
+    var withSub = uiTitleSub ? t("common.page-title-sub", { sub: uiTitleSub, page: t(uiPages[id].title), app: t(uiAppTitle) }) : "";
+    document.title = withSub || t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) });
+}
+function uiSetSubTitle(text) {
+    var next = text ? String(text) : "";
+    if (next === uiTitleSub) return;
+    uiTitleSub = next;
+    uiSetTitle(uiPageCurrent);
 }
 
 function uiMainScroller() {
@@ -953,9 +1080,9 @@ function uiRestoreScroll(idx) {
     var stopped = false;
     var stop = function () {
         stopped = true;
-        ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (t) { window.removeEventListener(t, stop, true); });
+        ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) { window.removeEventListener(type, stop, true); });
     };
-    ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (t) { window.addEventListener(t, stop, true); });
+    ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) { window.addEventListener(type, stop, true); });
     var step = function () {
         if (stopped) return;
         var max = m.scrollHeight - m.clientHeight;
@@ -975,7 +1102,7 @@ function uiRouterStart(pages, show) {
     var known = !!id;
     if (!known) id = Object.keys(pages)[0];
     if (history.state && typeof history.state.idx === "number") uiHistIdx = history.state.idx;
-    var url = known ? window.location.pathname + window.location.search : uiPagePath(id);
+    var url = known ? window.location.pathname + window.location.search + window.location.hash : uiPagePath(id);
     history.replaceState({ page: id, idx: uiHistIdx }, "", url);
     if ("scrollRestoration" in history) history.scrollRestoration = "manual";
     window.addEventListener("popstate", uiOnPopState);
@@ -990,20 +1117,24 @@ function uiRouterStart(pages, show) {
 }
 
 function uiShowPage(id, info) {
+    if (id !== uiPageCurrent) uiTitleSub = "";
     uiPageCurrent = id;
     uiSetTitle(id);
     if (uiPageShow) uiPageShow(id, info || {});
 }
 
 // Open a page from the app: one Back step when the address changes; the current
-// page clicked again shows it again without a new entry (NL-4)
+// page clicked again shows it again without a new entry (NL-4).
+// opts.sub: a part of the page (a Settings section); opts.hash: a field in it.
+// Resolves true when the page opened, false when the user stayed (unsaved changes).
 function uiGo(id, query, opts) {
     var o = opts || {};
-    var qs = query ? (typeof query === "string" ? query : query.toString()) : "";
-    var url = uiPagePath(id) + (qs ? "?" + qs : "");
+    var url = uiPageUrl(id, o.sub, query, "");
+    var hash = o.hash ? "#" + encodeURIComponent(o.hash) : "";
     var here = window.location.pathname + window.location.search;
     var proceed = function () {
         if (id === uiPageCurrent && url === here && !o.force) {
+            if (hash !== window.location.hash) history.replaceState(history.state, "", url + hash);
             uiShowPage(id, { again: true });
             return true;
         }
@@ -1011,10 +1142,10 @@ function uiGo(id, query, opts) {
         if (uiOverlayEntry || o.replace) {
             // Moving from inside a layer takes over its history entry
             uiOverlayEntry = false;
-            history.replaceState({ page: id, idx: uiHistIdx }, "", url);
+            history.replaceState({ page: id, idx: uiHistIdx }, "", url + hash);
         } else {
             uiHistIdx += 1;
-            history.pushState({ page: id, idx: uiHistIdx }, "", url);
+            history.pushState({ page: id, idx: uiHistIdx }, "", url + hash);
         }
         uiScrolls[uiHistIdx] = 0;
         var m = uiMainScroller();
@@ -1056,7 +1187,8 @@ function uiOnPopState(event) {
         return;
     }
     var target = st.page && uiPages[st.page] ? st.page : uiPageFromLocation() || Object.keys(uiPages)[0];
-    if (!uiPopConfirmed && delta && uiUnsavedCount()) {
+    // Moving between the sections of one page keeps its unsaved changes (SV-1)
+    if (!uiPopConfirmed && delta && target !== uiPageCurrent && uiUnsavedCount()) {
         uiPopUndo = true;
         history.go(-delta);
         uiConfirmLeave().then(function (ok) {
@@ -1115,6 +1247,64 @@ function uiMutationMark() {
 }
 function uiStaleSince(mark) {
     return mark !== uiMutationGen;
+}
+
+// ===========================================================================
+// Shared list data (WP3): tokens, zones and API keys. The pages and the global
+// search read the same rows. Every create, rename, edit or delete marks its kind
+// stale (uiDataStale), so the next reader reads it again; a database change
+// (uiDataReset) marks every kind stale and starts a new data generation, so an
+// answer that started before it is ignored when it arrives.
+// ===========================================================================
+
+var UI_DATA_KINDS = ["tokens", "zones", "apikeys"];
+var uiDataState = {};
+var uiDataGen = 0;
+
+function uiDataEntry(kind) {
+    if (!Object.prototype.hasOwnProperty.call(uiDataState, kind)) uiDataState[kind] = { version: 0, readAt: 0 };
+    return uiDataState[kind];
+}
+
+// kind: "tokens" | "zones" | "apikeys"; called after every create, rename, edit or delete
+function uiDataStale(kind) {
+    var e = uiDataEntry(kind);
+    e.version += 1;
+    e.readAt = 0;
+}
+
+// Never read, marked stale, or read more than maxAge ms ago
+function uiDataNeedsRead(kind, maxAge, now) {
+    var e = uiDataEntry(kind);
+    return !e.readAt || (now === undefined ? Date.now() : now) - e.readAt >= maxAge;
+}
+
+// Taken when a read starts; uiDataRead(kind, mark) when its answer was applied
+function uiDataMark(kind) {
+    return { kind: kind, version: uiDataEntry(kind).version, gen: uiDataGen };
+}
+
+// The answer of a read that started at mark is in: the kind counts as fresh only
+// when nothing marked it stale and the database did not change meanwhile
+function uiDataRead(kind, mark, now) {
+    var e = uiDataEntry(kind);
+    if (!mark || mark.version !== e.version || mark.gen !== uiDataGen) return false;
+    e.readAt = now === undefined ? Date.now() : now;
+    return true;
+}
+
+// True when the database changed after mark was taken
+function uiDataOld(mark) {
+    return !mark || mark.gen !== uiDataGen;
+}
+
+// The database may have changed (the ui:db-changed event): every kind is stale
+// and answers to reads that started before are dropped
+function uiDataReset() {
+    uiDataGen += 1;
+    UI_DATA_KINDS.forEach(uiDataStale);
+    uiMutated();
+    return uiDataGen;
 }
 
 // The page just loaded its data: count its next refresh from now
@@ -1251,7 +1441,7 @@ function uiPickerOpen(picker) {
     panel.id = (select.id || "ui-picker") + "-panel";
     var listId = panel.id + "-list";
     panel.innerHTML = (withSearch ? '<input type="search" class="ui-input ui-picker-search" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="' +
-        listId + '" aria-label="Search ' + esc(picker.label.toLowerCase()) + '" placeholder="Search">' : "") +
+        listId + '" aria-label="' + esc(t("picker.search", { name: picker.label.toLowerCase() })) + '" placeholder="' + esc(t("picker.search-2")) + '">' : "") +
         '<div class="ui-picker-list" role="listbox" id="' + listId + '" aria-label="' + esc(picker.label) + '">' +
         opts.map(function (opt, i) {
             var on = i === select.selectedIndex;
@@ -1261,7 +1451,7 @@ function uiPickerOpen(picker) {
                 (dot !== null ? '<i class="ui-option-dot' + (dot ? " ui-dot-" + esc(dot) : "") + '" aria-hidden="true"></i>' : "") +
                 "<span>" + esc(opt.textContent) + "</span>" + (hint ? '<small class="ui-num">' + esc(hint) + "</small>" : "") + "</button>";
         }).join("") + "</div>" +
-        (withSearch ? '<p class="ui-picker-none hidden" role="status">No matches</p>' : "");
+        (withSearch ? '<p class="ui-picker-none hidden" role="status">' + esc(t("picker.no-matches")) + '</p>' : "");
     picker.host.appendChild(panel);
     picker.panel = panel;
     picker.button.setAttribute("aria-expanded", "true");
@@ -1411,7 +1601,7 @@ function uiMenu(anchor, items, label) {
     var menu = document.createElement("div");
     menu.className = "ui-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", label || "Actions");
+    menu.setAttribute("aria-label", label || t("common.actions"));
     menu.id = "ui-menu-" + (++uiDialogCount);
     var supported = typeof menu.showPopover === "function";
     if (supported) menu.setAttribute("popover", "auto");
@@ -1484,11 +1674,13 @@ function uiMenuDismiss(returnFocus) {
     var state = uiMenuOpen;
     if (!state) return;
     uiMenuOpen = null;
-    state.anchor.setAttribute("aria-expanded", "false");
-    state.anchor.removeAttribute("aria-controls");
+    // A list drawn again while its menu was open has a new button with the same id
+    var anchor = state.anchor.isConnected || !state.anchor.id ? state.anchor : document.getElementById(state.anchor.id) || state.anchor;
+    anchor.setAttribute("aria-expanded", "false");
+    anchor.removeAttribute("aria-controls");
     try { if (state.supported && state.menu.matches(":popover-open")) state.menu.hidePopover(); } catch (e) { /* closed already */ }
     state.menu.remove();
-    if (returnFocus && state.anchor.isConnected) state.anchor.focus({ preventScroll: true });
+    if (returnFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
 }
 
 var uiPickerScrollQueued = false;
@@ -1530,11 +1722,30 @@ function uiMenuOutside(event) {
 // ===========================================================================
 
 // cols: [{ key, label, kind: "text" | "number" | "date" }]
-function uiSortToggle(state, col) {
-    if (state.key === col.key) state.dir = state.dir === "asc" ? "desc" : "asc";
-    else {
+// def: the column and order a list arrives in ({ key, dir }), for a list that has
+// one; state.key "" is then that order, and a sort that lands on it puts the
+// arrival order back exactly
+function uiSortToggle(state, col, def) {
+    var cur = uiSortEffective(state, def);
+    if (cur.key === col.key) {
+        state.key = col.key;
+        state.dir = cur.dir === "asc" ? "desc" : "asc";
+    } else {
         state.key = col.key;
         state.dir = col.kind === "text" ? "asc" : "desc";
+    }
+    return uiSortReset(state, def);
+}
+
+// The order the list shows: the one picked, else the list's own default
+function uiSortEffective(state, def) {
+    return state.key ? state : def && def.key ? def : state;
+}
+
+function uiSortReset(state, def) {
+    if (def && state.key === def.key && state.dir === def.dir) {
+        state.key = "";
+        state.dir = "";
     }
     return state;
 }
@@ -1556,39 +1767,44 @@ function uiSortRows(rows, state, value) {
         .map(function (e) { return e.row; });
 }
 
-function uiSortAria(state, key) {
-    return state.key === key ? (state.dir === "asc" ? "ascending" : "descending") : "none";
+function uiSortAria(state, key, def) {
+    var cur = uiSortEffective(state, def);
+    return cur.key === key ? (cur.dir === "asc" ? "ascending" : "descending") : "none";
 }
 
 function uiSortWords(kind, dir) {
-    if (kind === "text") return dir === "asc" ? "A to Z" : "Z to A";
-    if (kind === "date") return dir === "asc" ? "Oldest first" : "Newest first";
-    if (kind === "number") return dir === "asc" ? "Low to high" : "High to low";
-    return dir === "asc" ? "Ascending" : "Descending";
+    if (kind === "text") return dir === "asc" ? t("sort.a-to-z") : t("sort.z-to-a");
+    if (kind === "date") return dir === "asc" ? t("sort.oldest-first") : t("sort.newest-first");
+    if (kind === "number") return dir === "asc" ? t("sort.low-to-high") : t("sort.high-to-low");
+    return dir === "asc" ? t("sort.ascending") : t("sort.descending");
 }
 
-// The Sort button's panel: Sort by and Order, applied at once (TB-28)
-function uiSortMenu(anchor, name, cols, state, onChange) {
-    if (uiMenuOpen && uiMenuOpen.anchor === anchor) { uiMenuDismiss(true); return; }
+// The Sort button's panel: Sort by and Order, applied at once (TB-28). A list
+// without a default column and order (def) leads Sort by with Default order,
+// which brings back the order it arrives in; a list with one shows that column
+// and order while nothing else is picked.
+function uiSortMenu(anchor, name, cols, state, onChange, def) {
+    if (uiMenuOpen && (uiMenuOpen.anchor === anchor || (anchor.id && uiMenuOpen.anchor.id === anchor.id))) { uiMenuDismiss(true); return; }
     uiMenuDismiss(false);
     var panel = document.createElement("div");
     panel.className = "ui-menu ui-sort-panel";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "Sort " + name);
+    panel.setAttribute("aria-label", t("sort.sort", { name: name }));
     panel.id = "ui-sort-" + (++uiDialogCount);
     var supported = typeof panel.showPopover === "function";
     if (supported) panel.setAttribute("popover", "auto");
+    var hasDefault = !!(def && def.key);
     var draw = function () {
-        var col = cols.filter(function (c) { return c.key === state.key; })[0];
-        panel.innerHTML = '<fieldset><legend>Sort by</legend>' +
-            cols.map(function (c) {
-                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-by" value="' + esc(c.key) + '"' + (state.key === c.key ? " checked" : "") + "> " + esc(c.label) + "</label>";
-            }).join("") + "</fieldset>" +
-            '<fieldset' + (col ? "" : " disabled") + "><legend>Order</legend>" +
-            ["asc", "desc"].map(function (d) {
-                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-dir" value="' + d + '"' + (state.dir === d ? " checked" : "") + "> " +
-                    esc(uiSortWords(col ? col.kind : "", d)) + "</label>";
-            }).join("") + "</fieldset>";
+        var cur = uiSortEffective(state, def);
+        var col = cols.filter(function (c) { return c.key === cur.key; })[0];
+        var radio = function (group, value, checked, label) {
+            return '<label><input type="radio" class="ui-check" name="' + panel.id + "-" + group + '" value="' + esc(value) + '"' + (checked ? " checked" : "") + "> " + esc(label) + "</label>";
+        };
+        panel.innerHTML = '<fieldset><legend>' + esc(t("sort.sort-by")) + '</legend>' +
+            (hasDefault ? "" : radio("by", "", !cur.key, t("sort.default-order"))) +
+            cols.map(function (c) { return radio("by", c.key, cur.key === c.key, t(c.label)); }).join("") + "</fieldset>" +
+            '<fieldset' + (col ? "" : " disabled") + "><legend>" + esc(t("sort.order")) + "</legend>" +
+            ["asc", "desc"].map(function (d) { return radio("dir", d, !!col && cur.dir === d, uiSortWords(col ? col.kind : "", d)); }).join("") + "</fieldset>";
     };
     draw();
     document.body.appendChild(panel);
@@ -1597,15 +1813,21 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
     anchor.setAttribute("aria-expanded", "true");
     panel.addEventListener("change", function (event) {
         var input = event.target;
-        if (input.name === panel.id + "-by") {
+        var byGroup = input.name === panel.id + "-by";
+        if (byGroup) {
             var col = cols.filter(function (c) { return c.key === input.value; })[0];
-            state.key = col.key;
-            state.dir = col.kind === "text" ? "asc" : "desc";
+            // A column picked starts in its own first order; Default order is no column
+            state.key = col ? col.key : "";
+            state.dir = col ? (col.kind === "text" ? "asc" : "desc") : "";
         } else {
+            var cur = uiSortEffective(state, def);
+            state.key = cur.key;
             state.dir = input.value;
         }
+        uiSortReset(state, def);
+        var after = uiSortEffective(state, def);
         var focusName = input.name;
-        var focusValue = state.key && input.name.slice(-3) === "-by" ? state.key : state.dir;
+        var focusValue = byGroup ? after.key : after.dir;
         draw();
         var again = panel.querySelector('input[name="' + focusName + '"][value="' + focusValue + '"]');
         if (again) again.focus({ preventScroll: true });
@@ -1626,8 +1848,8 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
 // (parseRequestOptionsFromJSON, parseCreationOptionsFromJSON, toJSON()).
 // ===========================================================================
 
-var UI_PASSKEY_INSECURE = "Passkeys need HTTPS (or localhost).";
-var UI_PASSKEY_OLD_BROWSER = "This browser cannot use passkeys here.";
+var UI_PASSKEY_INSECURE = "passkey.passkeys-need-https-or-localhost";
+var UI_PASSKEY_OLD_BROWSER = "passkey.this-browser-cannot-use-passkeys-here";
 var UI_PASSKEY_NAME_MAX = 64;
 
 // Why this page cannot use passkeys: "" when it can, "insecure" outside a secure
@@ -1648,13 +1870,13 @@ function uiPasskeyBlocked(win, create) {
 function uiPasskeyErrorText(err, create) {
     var name = err && err.name;
     if (name === "NotAllowedError" || name === "AbortError") return "";
-    if (name === "InvalidStateError" && create) return "This device already has a passkey here. You can already use it to sign in.";
-    if (name === "SecurityError") return "The browser refused a passkey for this address. Open the service at its passkey address and try again.";
+    if (name === "InvalidStateError" && create) return t("passkey.this-device-already-has-a-passkey");
+    if (name === "SecurityError") return t("passkey.the-browser-refused-a-passkey-for");
     if (name === "NotSupportedError") {
-        return create ? "This device cannot create this kind of passkey. Try another device or password manager."
-            : "This device cannot use this kind of passkey. Try another device.";
+        return create ? t("passkey.this-device-cannot-create-this-kind")
+            : t("passkey.this-device-cannot-use-this-kind");
     }
-    return create ? "The passkey could not be created. Try again." : "The passkey could not be used. Try again.";
+    return create ? t("passkey.the-passkey-could-not-be-created") : t("passkey.the-passkey-could-not-be-used");
 }
 
 // A passkey name as the server keeps it: runs of spaces become one, ends trimmed
@@ -1665,8 +1887,8 @@ function uiPasskeyName(text) {
 // What is wrong with a name, or ""
 function uiPasskeyNameProblem(text) {
     var name = uiPasskeyName(text);
-    if (!name) return "Give the passkey a name.";
-    if (Array.from(name).length > UI_PASSKEY_NAME_MAX) return "The name can have at most " + UI_PASSKEY_NAME_MAX + " characters.";
+    if (!name) return t("passkey.give-the-passkey-a-name");
+    if (Array.from(name).length > UI_PASSKEY_NAME_MAX) return t("passkey.the-name-can-have-at-most", { max: UI_PASSKEY_NAME_MAX });
     return "";
 }
 
@@ -1674,17 +1896,17 @@ function uiPasskeyNameProblem(text) {
 function uiPasskeyDefaultName(nav) {
     var platform = String((nav && nav.userAgentData && nav.userAgentData.platform) || "");
     var ua = String((nav && nav.userAgent) || "");
-    var hint = platform === "macOS" ? "Mac" : platform;
+    var hint = platform === "macOS" ? t("passkey.mac") : platform;
     if (!hint) {
-        if (/iPhone/.test(ua)) hint = "iPhone";
-        else if (/iPad/.test(ua)) hint = "iPad";
-        else if (/Android/.test(ua)) hint = "Android";
-        else if (/CrOS/.test(ua)) hint = "ChromeOS";
-        else if (/Macintosh|Mac OS X/.test(ua)) hint = "Mac";
-        else if (/Windows/.test(ua)) hint = "Windows";
-        else if (/Linux/.test(ua)) hint = "Linux";
+        if (/iPhone/.test(ua)) hint = t("passkey.iphone");
+        else if (/iPad/.test(ua)) hint = t("passkey.ipad");
+        else if (/Android/.test(ua)) hint = t("passkey.android");
+        else if (/CrOS/.test(ua)) hint = t("passkey.chromeos");
+        else if (/Macintosh|Mac OS X/.test(ua)) hint = t("passkey.mac");
+        else if (/Windows/.test(ua)) hint = t("passkey.windows");
+        else if (/Linux/.test(ua)) hint = t("passkey.linux");
     }
-    return hint ? uiPasskeyName("Passkey on " + hint) : "Passkey";
+    return hint ? uiPasskeyName(t("passkey.passkey-on", { device: hint })) : t("passkey.passkey");
 }
 
 // ===========================================================================
@@ -1693,66 +1915,98 @@ function uiPasskeyDefaultName(nav) {
 // ===========================================================================
 
 var UI_DB_SSLMODES = [
-    ["prefer", "prefer: TLS if offered (default)"],
-    ["disable", "disable: no TLS"],
-    ["require", "require: always TLS"],
-    ["verify-full", "verify-full: TLS and certificate check"],
+    ["prefer", "db.prefer-tls-if-offered-default"],
+    ["disable", "db.disable-no-tls"],
+    ["require", "db.require-always-tls"],
+    ["verify-full", "db.verify-full-tls-and-certificate-check"],
 ];
 var UI_DB_SSL_HINT = {
-    prefer: "Encrypted when the server supports TLS, plain otherwise. The server's identity is not checked. Fits a database on the same private network.",
-    disable: "Not encrypted. Use it only on a private network you trust, such as the Docker network of this service.",
-    require: "Always encrypted, but the server's identity is not checked.",
-    "verify-full": "Always encrypted, and the server must prove its name with a certificate your system trusts, or the CA certificate below.",
+    prefer: "db.encrypted-when-the-server-supports-tls",
+    disable: "db.not-encrypted-use-it-only-on",
+    require: "db.always-encrypted-but-the-server-s",
+    "verify-full": "db.always-encrypted-and-the-server-must",
 };
 // Short texts for the server's fixed codes, when it sends no text of its own
 var UI_DB_CODES = {
-    unreachable: "The database server cannot be reached. Check the host and port, and that the server runs.",
-    timeout: "The database server did not answer in time.",
-    tls_failed: "The TLS connection failed. If the server does not use TLS, choose prefer or disable.",
-    auth_failed: "The server refused the user name or password.",
-    database_missing: "This database does not exist on the server.",
-    permission_denied: "The database user lacks a permission the service needs.",
-    read_only: "This server is a standby, or the user's sessions are read-only. Connect to the primary server with a user that can write.",
-    other: "The connection failed.",
+    unreachable: "db.the-database-server-cannot-be-reached",
+    timeout: "db.the-database-server-did-not-answer",
+    tls_failed: "db.the-tls-connection-failed-if-the",
+    auth_failed: "db.the-server-refused-the-user-name",
+    database_missing: "db.this-database-does-not-exist-on",
+    permission_denied: "db.the-database-user-lacks-a-permission",
+    read_only: "db.this-server-is-a-standby-or",
+    other: "db.the-connection-failed",
 };
 
 function uiDbCodeText(code, detail) {
-    return detail || UI_DB_CODES[code] || UI_DB_CODES.other;
+    return detail || t(UI_DB_CODES[code] || UI_DB_CODES.other);
 }
 
-// p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists
-function uiDbFieldsHtml(p, v, keepPassword) {
+// p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists;
+// onDemand (Settings): a saved password and CA certificate read Stored, and their field
+// appears only on Replace (FS-3); the CA certificate can also be removed
+function uiDbFieldsHtml(p, v, keepPassword, onDemand) {
     v = v || {};
     var mode = v.sslmode || "prefer";
     var opts = UI_DB_SSLMODES.map(function (m) {
-        return '<option value="' + m[0] + '"' + (m[0] === mode ? " selected" : "") + ">" + esc(m[1]) + "</option>";
+        return '<option value="' + m[0] + '"' + (m[0] === mode ? " selected" : "") + ">" + esc(t(m[1])) + "</option>";
     }).join("");
     var input = function (id, label, value, extra) {
-        return '<div class="ui-field"><label class="ui-label" for="' + p + id + '">' + label + "</label>" +
+        return '<div class="ui-field"><label class="ui-label" for="' + p + id + '">' + esc(label) + "</label>" +
             '<input class="ui-input" id="' + p + id + '" value="' + esc(value == null ? "" : String(value)) + '" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr"' +
             (extra || "") + " /></div>";
     };
-    return '<div class="ui-form-row">' + input("host", "Host", v.host, ' placeholder="postgres"') +
-        input("port", "Port", v.port || 5432, ' inputmode="numeric" maxlength="5"') + "</div>" +
-        '<div class="ui-form-row">' + input("database", "Database", v.database, ' placeholder="authdb"') +
-        input("user", "User", v.user, ' placeholder="auth"') + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="' + p + 'password">Password</label>' +
-        '<input class="ui-input" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
-        (keepPassword ? ' placeholder="Empty keeps the saved password"' : "") + " /></div>" +
-        '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">TLS</label>' +
+    return '<div class="ui-form-row">' + input("host", t("db.host"), v.host, ' placeholder="' + esc(t("db.postgres")) + '"') +
+        input("port", t("db.port"), v.port || 5432, ' inputmode="numeric" maxlength="5"') + "</div>" +
+        '<div class="ui-form-row">' + input("database", t("db.database"), v.database, ' placeholder="' + esc(t("db.authdb")) + '"') +
+        input("user", t("db.user"), v.user, ' placeholder="' + esc(t("db.auth")) + '"') + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'password">' + esc(t("db.password")) + '</label>' +
+        (onDemand && keepPassword ? uiDbStoredHtml(p, "password", false) : "") +
+        '<input class="ui-input' + (onDemand && keepPassword ? " hidden" : "") + '" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
+        (keepPassword ? ' placeholder="' + esc(onDemand ? t("settings.secret.new-value") : t("db.empty-keeps-the-saved-password")) + '"' : "") + " /></div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">' + esc(t("db.tls")) + '</label>' +
         '<select class="ui-select" id="' + p + 'sslmode" aria-describedby="' + p + 'ssl-hint">' + opts + "</select>" +
-        '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] || "") + "</span></div>" +
-        '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">CA certificate (PEM, optional)</label>' +
-        '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>' +
-        '<span class="ui-hint">Only when the server\'s certificate comes from your own certificate authority.' +
-        (v.caSaved ? " Leave empty to keep the saved certificate." : "") + "</span></div>";
+        '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] ? t(UI_DB_SSL_HINT[mode]) : "") + "</span></div>" +
+        '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">' + esc(t("db.ca-certificate-pem-optional")) + '</label>' +
+        (onDemand && v.caSaved ? uiDbStoredHtml(p, "ca", true) : "") +
+        '<textarea class="ui-textarea' + (onDemand && v.caSaved ? " hidden" : "") + '" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="' + esc(t("db.begin-certificate")) + '"></textarea>' +
+        '<span class="ui-hint">' + esc(v.caSaved ? t("db.ca-hint-saved") : t("db.only-when-the-server-s-certificate")) + "</span></div>";
+}
+
+// A stored secret: Stored, Replace, and for the CA certificate Remove (FS-3)
+function uiDbStoredHtml(p, which, removable) {
+    return '<div class="ui-set-secret" id="' + p + which + '-stored"><span id="' + p + which + '-state">' + esc(t("settings.secret.stored")) + "</span>" +
+        '<button type="button" class="ui-btn ui-btn-sm" data-db-secret="' + which + '">' + esc(t("settings.secret.replace")) + "</button>" +
+        (removable ? '<button type="button" class="ui-btn ui-btn-sm" id="' + p + which + '-remove" data-db-secret="' + which + '-remove">' + esc(t("settings.secret.remove")) + "</button>" : "") +
+        "</div>";
+}
+
+// Stored or replaced: which of a secret's states shows
+function uiDbSecretsSync(p, replacing, caRemove) {
+    var pairs = [["password", !!replacing.password], ["ca", !!replacing.ca]];
+    pairs.forEach(function (pair) {
+        var stored = document.getElementById(p + pair[0] + "-stored");
+        var field = document.getElementById(p + pair[0]);
+        if (!stored || !field) return;
+        stored.classList.toggle("hidden", pair[1]);
+        field.classList.toggle("hidden", !pair[1]);
+    });
+    var state = document.getElementById(p + "ca-state");
+    var remove = document.getElementById(p + "ca-remove");
+    if (state && remove) {
+        var text = caRemove ? t("settings.secret.removed-when-saved") : t("settings.secret.stored");
+        if (state.textContent !== text) state.textContent = text;
+        state.classList.toggle("is-removing", !!caRemove);
+        var label = caRemove ? t("settings.secret.keep") : t("settings.secret.remove");
+        if (remove.textContent !== label) remove.textContent = label;
+    }
 }
 
 // The TLS hint and the CA field follow the chosen mode
 function uiDbFieldsSync(p) {
     var sel = document.getElementById(p + "sslmode");
     if (!sel) return;
-    document.getElementById(p + "ssl-hint").textContent = UI_DB_SSL_HINT[sel.value] || "";
+    document.getElementById(p + "ssl-hint").textContent = UI_DB_SSL_HINT[sel.value] ? t(UI_DB_SSL_HINT[sel.value]) : "";
     document.getElementById(p + "ca-field").classList.toggle("hidden", sel.value !== "verify-full");
 }
 
@@ -1791,48 +2045,235 @@ function uiDbFieldError(p, field) {
     }
 }
 
-// What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text
+// What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text; a note that
+// refuses the connection names its case in kind (failed, user, foreign, incomplete, pending, another)
 function uiDbCheckNote(r, where) {
     if (!r) return null;
-    if (!r.ok) return { tone: " is-fail", title: "The connection failed", text: uiDbCodeText(r.code, r.detail) };
+    if (!r.ok) return { kind: "failed", tone: " is-fail", title: t("db.the-connection-failed-2"), text: uiDbCodeText(r.code, r.detail) };
     if (r.problems && r.problems.length) {
-        return { tone: " is-fail", title: "The database user cannot be used", text: r.problems.join(" ") };
+        return { kind: "user", tone: " is-fail", title: t("db.the-database-user-cannot-be-used"), text: r.problems.join(" ") };
     }
-    if (r.state === "new") return { tone: "", title: "A new database file", text: "The service creates data/auth.db in its data directory." };
-    if (r.state === "empty") return { tone: "", title: "The database is empty", text: "The service creates its tables in it." };
+    if (r.state === "new") return { tone: "", title: t("db.a-new-database-file"), text: t("db.the-service-creates-data-auth-db") };
+    if (r.state === "empty") return { tone: "", title: t("db.the-database-is-empty"), text: t("db.the-service-creates-its-tables-in") };
     if (r.state === "foreign") {
-        return { tone: " is-fail", title: "This database holds other data", text: "It has tables that are not this service's" +
-            (r.others && r.others.length ? " (" + r.others.join(", ") + ")" : "") + ". Use an empty database." };
+        return { kind: "foreign", tone: " is-fail", title: t("db.this-database-holds-other-data"), text: r.others && r.others.length
+            ? t("db.it-has-tables-that-are-not-named", { tables: r.others.join(", ") }) : t("db.it-has-tables-that-are-not") };
     }
     if (r.state === "incomplete") {
-        return { tone: " is-fail", title: "Tables are missing", text: "This database holds this service's installation, but without " +
-            (r.others || []).join(", ") + ". Restore the whole database." };
+        return { kind: "incomplete", tone: " is-fail", title: t("db.tables-are-missing"), text: t("db.this-database-holds-this-service-s", { tables: (r.others || []).join(", ") }) };
     }
     if (r.state === "older") {
-        return { tone: " is-warn", title: "This service's data from an older version or a backup",
-            text: "The service can adopt it: it adds the tables of this version and keeps the data." +
-                (where === "setup" ? "" : " Changes made after it was taken are not in it.") };
+        return { tone: " is-warn", title: t("db.this-service-s-data-from-an"),
+            text: where === "setup" ? t("db.the-service-can-adopt-it-it") : t("db.the-service-can-adopt-it-copy") };
     }
-    if (r.pending) return { tone: " is-fail", title: "An unfinished copy", text: "This database holds a copy that a move did not finish. It is not used." };
+    if (r.pending) return { kind: "pending", tone: " is-fail", title: t("db.an-unfinished-copy"), text: t("db.this-database-holds-a-copy-that") };
     if (where === "settings") {
-        if (r.identity === "same") return { tone: "", title: "The same database", text: "The new connection reaches the database the service uses now." };
+        if (r.identity === "same") return { tone: "", title: t("db.the-same-database"), text: t("db.the-new-connection-reaches-the-database") };
         if (r.identity === "different_copy") {
-            return { tone: " is-warn", title: "A different copy of this database", text: "For example a restored backup. Changes made after the copy was taken will be lost." };
+            return { tone: " is-warn", title: t("db.a-different-copy-of-this-database"), text: t("db.for-example-a-restored-backup-changes") };
         }
-        return { tone: " is-fail", title: "Another installation", text: "This database holds another installation of this service." };
+        return { kind: "another", tone: " is-fail", title: t("db.another-installation"), text: t("db.this-database-holds-another-installation-of") };
     }
     if (where === "setup") {
-        return { tone: "", title: "An existing installation of this service", text: r.hasAdmin
-            ? "The service uses it as it is. You sign in with its admin account; no new admin is created."
-            : "The service uses it as it is, and setup continues with the first admin account." };
+        return { tone: "", title: t("db.an-existing-installation-of-this-service"), text: r.hasAdmin
+            ? t("db.the-service-uses-it-as-it")
+            : t("db.the-service-uses-it-as-it-2") };
     }
-    return { tone: "", title: "An installation of this service", text: "The service can use this database." };
+    return { tone: "", title: t("db.an-installation-of-this-service"), text: t("db.the-service-can-use-this-database") };
 }
 
 function uiDbNoteHtml(n) {
     if (!n) return "";
     return '<div class="ui-alert' + n.tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(n.title) + "</p><small>" +
         esc(n.text) + "</small></div><span></span></div>";
+}
+
+// ===========================================================================
+// Shell (WP3): the top bar on wide screens (NL-6), the sidebar folded into the
+// rail (NL-7), the information dialog with its reading gauge (DS-5), showing
+// where an opened search result landed (SR-6) and the window pan the phone
+// keyboard leaves (MO-1)
+// ===========================================================================
+
+var uiTopbarMoves = [];
+var uiTopbarPage = "";
+
+function uiTopbarMove(el, target) {
+    if (!el || !target || !el.parentNode) return;
+    var mark = document.createComment("topbar");
+    el.parentNode.replaceChild(mark, el);
+    target.appendChild(el);
+    uiTopbarMoves.push([el, mark]);
+}
+
+function uiTopbarRestore() {
+    uiTopbarMoves.reverse().forEach(function (pair) {
+        if (pair[1].parentNode) pair[1].parentNode.replaceChild(pair[0], pair[1]);
+    });
+    uiTopbarMoves = [];
+}
+
+// Wide screens: the open page's title (with its help button) and its own action
+// buttons move into the top bar while the page is open. They are the page's own
+// elements, moved and put back when the page is left or the width crosses 760px,
+// so every id, button and listener stays as it was. Phones keep the page head.
+function uiPlaceTopbar(id) {
+    if (id !== undefined) uiTopbarPage = id;
+    if (!uiHasDom() || !document.getElementById("ui-topbar")) return;
+    uiTopbarRestore();
+    var on = !uiIsPhone();
+    document.documentElement.classList.toggle("ui-has-topbar", on);
+    if (!on || !uiTopbarPage) return;
+    var page = document.querySelector('.ui-page[data-page="' + uiTopbarPage + '"]');
+    var head = page ? page.querySelector(".ui-page-head") : null;
+    var title = head ? head.querySelector(".ui-h1") : null;
+    if (!title) return;
+    uiTopbarMove(title, document.getElementById("ui-topbar-title"));
+    Array.prototype.slice.call(head.children).forEach(function (el) {
+        if (el.classList.contains("ui-page-actions")) uiTopbarMove(el, document.getElementById("ui-topbar-actions"));
+    });
+}
+
+// The open page's title, wherever it is now (in its page or in the top bar)
+function uiPageHeading() {
+    var bar = document.querySelector("#ui-topbar-title .ui-h1");
+    if (bar && bar.getClientRects().length) return bar;
+    return document.querySelector(".ui-page:not(.hidden) h1");
+}
+
+// NL-7: the toggle by the brand folds the sidebar into the rail, remembered in
+// this browser (js/head.js applies it before the first paint)
+function uiNavCollapsed() {
+    return uiHasDom() && document.documentElement.classList.contains("ui-nav-collapsed");
+}
+function uiNavToggleSync() {
+    var b = uiHasDom() ? document.getElementById("ui-nav-toggle") : null;
+    if (!b) return;
+    var folded = uiNavCollapsed();
+    var label = folded ? t("shell.expand-menu") : t("shell.collapse-menu");
+    b.setAttribute("aria-label", label);
+    b.setAttribute("title", label);
+    b.setAttribute("aria-expanded", String(!folded));
+}
+function uiNavToggle() {
+    var folded = document.documentElement.classList.toggle("ui-nav-collapsed");
+    try { window.localStorage.setItem("uiNavCollapsed", folded ? "1" : "0"); } catch (e) { /* storage blocked: for this visit only */ }
+    uiNavToggleSync();
+}
+
+// DS-5: the top of an information dialog (the grip on a phone and the head)
+// fills from the start side as the text is read; a text that does not scroll
+// shows no gauge
+function uiReadProgress(d) {
+    // The head sits right above the body that scrolls
+    var head = d.body.previousElementSibling;
+    var scroller = d.body;
+    if (!head || !scroller) return;
+    var bar = document.createElement("span");
+    bar.className = "ui-read-bar";
+    bar.setAttribute("aria-hidden", "true");
+    bar.innerHTML = "<i></i>";
+    d.dialog.appendChild(bar);
+    var update = function () {
+        var room = scroller.scrollHeight - scroller.clientHeight;
+        bar.classList.toggle("hidden", room <= 1);
+        bar.style.height = (head.offsetTop + head.offsetHeight) + "px";
+        bar.firstElementChild.style.width = (room > 1 ? Math.min(100, scroller.scrollTop / room * 100) : 0) + "%";
+    };
+    scroller.addEventListener("scroll", update, { passive: true });
+    update();
+    requestAnimationFrame(update);
+}
+
+// A text to read (help): the shared dialog, closed by its X, Escape, Back, a
+// click outside or a pull down; every opening starts at the top (DS-6).
+// paragraphs: plain texts, one paragraph each.
+function uiInfoDialog(o) {
+    var d = null;
+    var close = function () { if (d) d.backdrop.remove(); };
+    d = uiDialog({
+        title: o.title, size: "md", close: close, backdropClose: close, bodyClass: "ui-help",
+        body: (o.paragraphs || []).map(function (p) { return "<p>" + esc(p) + "</p>"; }).join(""),
+    });
+    d.body.scrollTop = 0;
+    uiReadProgress(d);
+    return d;
+}
+
+// SR-6: wait for what a page draws after it opens (every 100ms, up to 8 seconds)
+function uiWaitFor(find, timeout) {
+    var limit = timeout === undefined ? 8000 : timeout;
+    return new Promise(function (resolve) {
+        var started = Date.now();
+        var look = function () {
+            var found = null;
+            try { found = find(); } catch (e) { found = null; }
+            if (found || Date.now() - started > limit) resolve(found || null);
+            else setTimeout(look, 100);
+        };
+        look();
+    });
+}
+
+// SR-6: bring what was opened into view inside the page's own scroll area (not
+// with scrollIntoView, which can pan the phone window, MO-1) and ring it for a moment
+function uiReveal(el) {
+    if (!el || !el.isConnected) return;
+    var main = uiMainScroller();
+    if (main && main.contains(el)) {
+        var box = main.getBoundingClientRect();
+        var r = el.getBoundingClientRect();
+        var target = main.scrollTop + (r.top - box.top) - Math.max(0, (main.clientHeight - r.height) / 2);
+        main.scrollTop = Math.max(0, target);
+    }
+    el.classList.add("ui-gs-target");
+    el.classList.remove("ui-gs-flash");
+    void el.offsetWidth;
+    el.classList.add("ui-gs-flash");
+    setTimeout(function () { el.classList.remove("ui-gs-flash"); }, 2000);
+}
+
+// MO-1: the app frame never scrolls the window. A phone keyboard can pan the
+// window and leave it panned; once no field is being edited, it goes back.
+function uiResetWindowPan() {
+    var el = document.activeElement;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+    var se = document.scrollingElement;
+    if (window.scrollX || window.scrollY || (se && se.scrollTop)) window.scrollTo(0, 0);
+}
+
+// ===========================================================================
+// WP2 shared helpers: a page's own sections, each with an address under the
+// page's path (NL-3: /admin/settings/<section>, the router knows such a page by
+// its sections flag)
+// ===========================================================================
+
+// The section the address names on page id, or "" (ids match /^[a-z0-9_-]+$/)
+function uiPageSection(id) {
+    if (!uiPages[id] || typeof window === "undefined" || !window.location) return "";
+    var at = uiParsePath(window.location.pathname);
+    return at.id === id ? at.sub : "";
+}
+
+// A typed dialog whose fields were replaced (a later step): what it holds now is
+// the new starting point for the question before dropping changes (DS-9)
+function uiGuardReset(d) {
+    if (uiGuarded && uiGuarded.has(d.backdrop)) uiGuarded.set(d.backdrop, uiFieldsSnapshot(d.body));
+}
+
+// Put a section in the address: a Back step when the admin chose it, else the
+// address is only corrected (replace)
+function uiSetPageSection(id, section, replace) {
+    if (!uiPages[id]) return;
+    var url = uiPagePath(id) + (section ? "/" + section : "");
+    if (url === window.location.pathname) return;
+    if (replace) {
+        history.replaceState({ page: id, idx: uiHistIdx }, "", url + window.location.hash);
+        return;
+    }
+    uiSaveScroll();
+    uiHistIdx += 1;
+    history.pushState({ page: id, idx: uiHistIdx }, "", url);
 }
 
 // ===========================================================================
@@ -1858,6 +2299,10 @@ function uiInstallGlobalListeners() {
     window.addEventListener("scroll", uiMenuOnScroll, true);
     window.addEventListener("scroll", uiPickerOnScroll, true);
     window.addEventListener("resize", function () { uiMenuDismiss(false); if (uiPickerState.open) uiPickerPlace(uiPickerState.open); });
+    // MO-1: the window pan the phone keyboard leaves is reset
+    window.addEventListener("scroll", uiResetWindowPan, { passive: true });
+    document.addEventListener("focusout", function () { setTimeout(uiResetWindowPan, 300); });
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", function () { setTimeout(uiResetWindowPan, 100); });
     // Click to copy anywhere; inside a clickable row it does not open the row
     document.addEventListener("click", function (event) {
         var b = event.target instanceof Element ? event.target.closest("[data-copy]") : null;

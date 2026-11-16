@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadScripts } = require("./_load.cjs");
 
-const ui = loadScripts(["js/common.js", "js/ui.js"]);
+const ui = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
 
 test("esc escapes the five markup characters", () => {
     assert.equal(ui.esc(`<a href="x" onclick='y'>&</a>`), "&lt;a href=&quot;x&quot; onclick=&#39;y&#39;&gt;&amp;&lt;/a&gt;");

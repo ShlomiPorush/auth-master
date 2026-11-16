@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Initial Setup · Auth Service</title>
-    <meta name="description" content="Choose the database and create the first administrator account for Auth Service" />
+    <title data-t="setup.initial-setup-auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:setup.choose-the-database-and-create-the" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
@@ -15,45 +16,45 @@
         <div class="ui-login-head">
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
-            <h1 class="ui-h1">Initial Setup</h1>
-            <p id="setup-sub">Create the first administrator account</p>
+            <h1 class="ui-h1" data-t="setup.initial-setup"></h1>
+            <p id="setup-sub" data-t="setup.create-the-first-administrator-account"></p>
           </div>
         </div>
-        <div class="ui-banner ui-banner-warn"><div>This page is only available when no admin account exists yet.</div></div>
-        <div class="ui-loading" role="status" id="setup-loading"><span class="ui-spin" aria-hidden="true"></span><p>Loading...</p></div>
+        <div class="ui-banner ui-banner-warn"><div data-t="setup.this-page-is-only-available-when"></div></div>
+        <div class="ui-loading" role="status" id="setup-loading"><span class="ui-spin" aria-hidden="true"></span><p data-t="setup.loading"></p></div>
         <form id="db-form" class="ui-form hidden" novalidate autocomplete="off">
           <div class="ui-field">
-            <span class="ui-label" id="db-kind-label">Where the service keeps its data</span>
+            <span class="ui-label" id="db-kind-label" data-t="setup.where-the-service-keeps-its-data"></span>
             <div class="ui-seg" role="group" aria-labelledby="db-kind-label">
-              <button type="button" data-db-kind="sqlite" aria-pressed="true" data-inventory="setup.database.sqlite">SQLite file</button>
-              <button type="button" data-db-kind="postgres" aria-pressed="false" data-inventory="setup.database.postgres">PostgreSQL server</button>
+              <button type="button" data-db-kind="sqlite" aria-pressed="true" data-inventory="setup.database.sqlite" data-t="setup.sqlite-file"></button>
+              <button type="button" data-db-kind="postgres" aria-pressed="false" data-inventory="setup.database.postgres" data-t="setup.postgresql-server"></button>
             </div>
           </div>
-          <p class="ui-hint" id="db-sqlite-note">A file in the service's data directory (data/auth.db). Nothing else to set up; back up the data directory.</p>
+          <p class="ui-hint" id="db-sqlite-note" data-t="setup.a-file-in-the-service-s"></p>
           <div class="hidden" id="db-pg-fields"></div>
           <div id="db-result" aria-live="polite"></div>
-          <label class="ui-check-label hidden" id="db-adopt-row"><input type="checkbox" class="ui-check" id="db-adopt" /> <span>Adopt this database and keep its data</span></label>
+          <label class="ui-check-label hidden" id="db-adopt-row"><input type="checkbox" class="ui-check" id="db-adopt" /> <span data-t="setup.adopt-this-database-and-keep-its"></span></label>
           <p class="ui-error hidden" id="db-err" role="alert"></p>
           <div class="ui-form-row">
-            <button type="button" class="ui-btn" id="db-check" data-inventory="setup.database.check">Check connection</button>
-            <button type="submit" class="ui-btn ui-btn-primary" id="db-continue">Continue</button>
+            <button type="button" class="ui-btn" id="db-check" data-inventory="setup.database.check" data-t="setup.check-connection"></button>
+            <button type="submit" class="ui-btn ui-btn-primary" id="db-continue" data-t="setup.continue"></button>
           </div>
         </form>
         <form id="f" class="ui-form hidden" novalidate>
           <div class="ui-field">
-            <label class="ui-label" for="username">Username</label>
-            <input class="ui-input" id="username" name="username" required minlength="2" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="admin" data-inventory="setup.username" />
+            <label class="ui-label" for="username" data-t="setup.username"></label>
+            <input class="ui-input" id="username" name="username" required minlength="2" autocomplete="username" autocapitalize="none" spellcheck="false" data-inventory="setup.username" data-t-attr="placeholder:setup.admin" />
           </div>
           <div class="ui-field">
-            <label class="ui-label" for="password">Password (min 8 characters)</label>
+            <label class="ui-label" for="password" data-t="setup.password-min-8-characters"></label>
             <div class="ui-pass">
               <input class="ui-input" type="password" id="password" name="password" required minlength="8" autocomplete="new-password" aria-describedby="password-caps" data-inventory="setup.password" />
-              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" aria-label="Show password" title="Show password"></button>
+              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" data-t-attr="aria-label:auth.show-password;title:auth.show-password"></button>
             </div>
-            <p class="ui-caps hidden" id="password-caps" data-caps="password">Caps Lock is on</p>
+            <p class="ui-caps hidden" id="password-caps" data-caps="password" data-t="setup.caps-lock-is-on"></p>
           </div>
           <p class="ui-error hidden" id="err" role="alert"></p>
-          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Continue</button>
+          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block" data-t="setup.continue"></button>
         </form>
       </div>
     </main>

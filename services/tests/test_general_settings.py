@@ -769,10 +769,10 @@ def test_view_has_every_field(admin):
     admin.login()
     view = admin.get().json()
     assert view["version"] == 0 and view["savedBy"] is None
-    assert view["fields"]["timeZone"] == {"value": "UTC", "source": "default", "locked": False, "envName": "TZ", "envInvalid": False}
-    assert view["fields"]["cookieSecure"] == {"value": False, "source": "default", "locked": False, "envName": "COOKIE_SECURE"}
+    assert view["fields"]["timeZone"] == {"value": "UTC", "source": "default", "locked": False, "envName": "TZ", "default": "UTC", "envInvalid": False}
+    assert view["fields"]["cookieSecure"] == {"value": False, "source": "default", "locked": False, "envName": "COOKIE_SECURE", "default": False}
     assert view["fields"]["accessLogRetentionDays"] == {
-        "value": 30, "source": "default", "locked": False, "envName": "ACCESS_LOG_RETENTION_DAYS", "min": 1, "max": 3650,
+        "value": 30, "source": "default", "locked": False, "envName": "ACCESS_LOG_RETENTION_DAYS", "default": 30, "min": 1, "max": 3650,
     }
     assert "Asia/Jerusalem" in view["timeZones"] and view["timeZones"] == sorted(view["timeZones"])
     assert view["applied"]["version"] == 0 and view["applied"]["lastReloadError"] is None
@@ -854,18 +854,18 @@ def test_empty_cookie_secure_leaves_the_field_on_the_page(admin, monkeypatch, va
     use_env(monkeypatch, COOKIE_SECURE=value)
     admin.login()
     view = admin.get().json()
-    assert view["fields"]["cookieSecure"] == {"value": False, "source": "default", "locked": False, "envName": "COOKIE_SECURE"}
+    assert view["fields"]["cookieSecure"] == {"value": False, "source": "default", "locked": False, "envName": "COOKIE_SECURE", "default": False}
     res = admin.put({"baseVersion": view["version"], "cookieSecure": True}, https=True)
     assert res.status_code == 200, res.text
-    assert res.json()["fields"]["cookieSecure"] == {"value": True, "source": "stored", "locked": False, "envName": "COOKIE_SECURE"}
+    assert res.json()["fields"]["cookieSecure"] == {"value": True, "source": "stored", "locked": False, "envName": "COOKIE_SECURE", "default": False}
 
 
 def test_locked_fields_cannot_be_sent(admin, monkeypatch):
     use_env(monkeypatch, COOKIE_SECURE="true", TZ="")
     admin.login()
     view = admin.get().json()
-    assert view["fields"]["cookieSecure"] == {"value": True, "source": "env", "locked": True, "envName": "COOKIE_SECURE"}
-    assert view["fields"]["timeZone"] == {"value": "UTC", "source": "env", "locked": True, "envName": "TZ", "envInvalid": True}
+    assert view["fields"]["cookieSecure"] == {"value": True, "source": "env", "locked": True, "envName": "COOKIE_SECURE", "default": False}
+    assert view["fields"]["timeZone"] == {"value": "UTC", "source": "env", "locked": True, "envName": "TZ", "default": "UTC", "envInvalid": True}
     for body, field in (({"baseVersion": 0, "cookieSecure": False}, "cookieSecure"), ({"baseVersion": 0, "timeZone": "UTC"}, "timeZone")):
         res = admin.put(body)
         assert res.status_code == 409 and res.json() == {**res.json(), "code": "locked", "field": field}

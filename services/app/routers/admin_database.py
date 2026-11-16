@@ -22,7 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db_config, db_operations as ops, db_runtime
 from app.admin_deps import FullSession, csrf_check
-from app.db_runtime import Busy, OperationError, Runtime
+from app.db_runtime import Busy, OperationError, Pending, Runtime
 from app.logger import get_actor
 from app.step_up import StepUpBody, verify_step_up
 
@@ -135,9 +135,9 @@ def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def _start(rt: Runtime, kind: str, fn: Any) -> JSONResponse:
+def _start(rt: Runtime, kind: str, fn: Any, pending: Pending | None = None) -> JSONResponse:
     try:
-        job = rt.jobs.start(kind, fn)
+        job = rt.jobs.start(kind, fn, pending=pending)
     except Busy as b:
         return _error(409, "busy", "Another database operation is running.", job=b.job.view())
     return JSONResponse(status_code=202, content={"job": job.view()}, headers={"Cache-Control": "no-store"})
@@ -232,12 +232,13 @@ def settings_view(rt: Runtime) -> dict[str, Any]:
     from app.config import get_settings
 
     env = get_settings().env_value("database_url")
-    current = rt.jobs.current
+    # A running job, or {"state": "pending"} while a change request has not started its job yet.
+    busy = rt.jobs.busy()
     view: dict[str, Any] = {
         "source": rt.source,
         "locked": env is not None,
         "envName": "DATABASE_URL",
-        "job": current.view() if current is not None and current.state == "running" else None,
+        "job": busy.view() if busy is not None else None,
         "sslmodes": list(db_config.SSLMODES),
     }
     if env is not None:
@@ -302,13 +303,21 @@ async def put_database_settings(
     admin_row = await db.fetchrow("SELECT totp_secret_enc, totp_enabled FROM admin_users WHERE id = $1", admin_id)
     if not admin_row or not admin_row["totp_enabled"] or not admin_row["totp_secret_enc"]:
         return _error(403, "mfa_required", "MFA not configured")
-    if rt.jobs.current is not None and rt.jobs.current.state == "running":
-        return _error(409, "busy", "Another database operation is running.", job=rt.jobs.current.view())
-    await verify_step_up(request, admin_id, admin_row, body, "database_change")
-    actor = await get_actor(request, sess)
-    ip = _ip(request)
-    app = request.app
-    return _start(rt, "edit", lambda job: ops.run_edit(rt, app, job, params, body.confirmCopy, actor, ip))
+    # The mark goes before the first wait below, so a page whose answer is lost reads
+    # "pending", never "nothing running", while this request has not started its job.
+    try:
+        mark = rt.jobs.mark_pending()
+    except Busy as b:
+        return _error(409, "busy", "Another database operation is running.", job=b.job.view())
+    try:
+        await verify_step_up(request, admin_id, admin_row, body, "database_change")
+        actor = await get_actor(request, sess)
+        ip = _ip(request)
+        app = request.app
+        # Registers the job synchronously; the mark is cleared after that, on every exit.
+        return _start(rt, "edit", lambda job: ops.run_edit(rt, app, job, params, body.confirmCopy, actor, ip), mark)
+    finally:
+        rt.jobs.clear_pending(mark)
 
 
 @router.get("/settings/database/jobs/{job_id}")

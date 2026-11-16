@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>MFA Setup · Auth Service</title>
-    <meta name="description" content="Set up two-factor authentication for your admin account" />
+    <title data-t="setupmfa.mfa-setup-auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:setupmfa.set-up-two-factor-authentication-for" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
@@ -15,34 +16,34 @@
         <div class="ui-login-head">
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
-            <h1 class="ui-h1">Two-Factor Authentication</h1>
-            <p>Scan the QR code with your authenticator app</p>
+            <h1 class="ui-h1" data-t="setupmfa.two-factor-authentication"></h1>
+            <p data-t="setupmfa.scan-the-qr-code-with-your"></p>
           </div>
         </div>
         <div id="setup-mfa-box" class="ui-form">
-          <div class="ui-loading" id="setup-mfa-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p>Preparing your authenticator code...</p></div>
+          <div class="ui-loading" id="setup-mfa-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p data-t="setupmfa.preparing-your-authenticator-code"></p></div>
           <div class="ui-form hidden" id="setup-mfa-ready">
             <form id="issuer-form" class="ui-form" novalidate>
               <div class="ui-field">
-                <label class="ui-label" for="issuer">Name in authenticator apps</label>
+                <label class="ui-label" for="issuer" data-t="setupmfa.name-in-authenticator-apps"></label>
                 <input class="ui-input" id="issuer" name="issuer" maxlength="64" autocomplete="off" spellcheck="false" dir="auto" aria-describedby="issuer-hint" />
                 <p class="ui-locked-note hidden" id="issuer-locked"></p>
-                <span class="ui-hint" id="issuer-hint">Your authenticator app shows this name with the code. A new name updates the QR code below.</span>
+                <span class="ui-hint" id="issuer-hint" data-t="setupmfa.your-authenticator-app-shows-this-name"></span>
               </div>
               <p class="ui-error hidden" id="issuer-err" role="alert"></p>
             </form>
-            <div class="ui-qr" id="qr" role="img" aria-label="QR code for your authenticator app"></div>
+            <div class="ui-qr" id="qr" role="img" data-t-attr="aria-label:setupmfa.qr-code-for-your-authenticator-app"></div>
             <div class="ui-field">
-              <span class="ui-label">Manual entry secret:</span>
+              <span class="ui-label" data-t="setupmfa.manual-entry-secret"></span>
               <div id="sec"></div>
             </div>
             <form id="f" class="ui-form" novalidate>
               <div class="ui-field">
-                <label class="ui-label" for="code">6-digit code</label>
-                <input class="ui-input ui-code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required placeholder="000000" data-inventory="setupmfa.code" />
+                <label class="ui-label" for="code" data-t="setupmfa.6-digit-code"></label>
+                <input class="ui-input ui-code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required data-inventory="setupmfa.code" data-t-attr="placeholder:setupmfa.000000" />
               </div>
               <p class="ui-error hidden" id="err" role="alert"></p>
-              <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Verify &amp; Finish</button>
+              <button type="submit" class="ui-btn ui-btn-primary ui-btn-block" data-t="setupmfa.verify-finish"></button>
             </form>
           </div>
         </div>

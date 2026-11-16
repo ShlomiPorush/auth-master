@@ -16,7 +16,7 @@ const PAGE = {
 };
 
 function load() {
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.toasts = [];
     ctx.showToast = (message, type) => { ctx.toasts.push([message, type]); };
     return ctx;
@@ -176,7 +176,7 @@ test("R12: an expired session tells the user and signs in again without asking a
     ctx.dashSessionExpired();
     assert.equal(ctx.uiUnsavedCount(), 0, "the browser asks nothing on the way out");
     assert.deepEqual(replaced, ["/login?next=" + encodeURIComponent("/admin/zones?q=x")]);
-    assert.deepEqual(ctx.toasts.map((t) => t[0]), ["Your session expired. Sign in again."]);
+    assert.deepEqual(ctx.toasts.map((t) => t[0]), [ctx.t("shell.your-session-expired-sign-in-again")]);
 });
 
 test("R7: a failed update keeps the rows, says so, and tells once per run of failures", async () => {
@@ -188,7 +188,7 @@ test("R7: a failed update keeps the rows, says so, and tells once per run of fai
     await ctx.dashLogRefresh(s);
     assert.equal(s.rows.length, 30);
     assert.equal(s.refreshFailed, "down");
-    assert.deepEqual(ctx.toasts.map((t) => t[0]), ["Failed to load activity logs"]);
+    assert.deepEqual(ctx.toasts.map((t) => t[0]), [ctx.t("logs.failed-to-load-activity-logs")]);
     fakeApi(ctx, () => ({ status: 200, data: page([]) }));
     await ctx.dashLogRefresh(s);
     assert.equal(s.refreshFailed, "");
@@ -305,14 +305,10 @@ test("R8: with storage blocked, a Light or Dark choice holds for this visit", ()
     assert.equal(ctx.uiThemeGet(), "system");
 });
 
-test("R11: the toast takes no action, busy state or duration", () => {
-    const src = require("node:fs").readFileSync(require("node:path").join(__dirname, "../../static/public/js/ui.js"), "utf8");
-    assert.ok(!/opts\.(action|duration)|onAction|ui-toast-action/.test(src));
-});
-
 test("a 413 says the item is too large; other answers keep the server's reason", () => {
     const ctx = load();
-    const big = "This is too large to save. Shorten the text or remove some items, then try again.";
+    const big = ctx.t("shell.this-is-too-large-to-save");
+    assert.ok(big);
     // The server's 413 may be plain text (data null) or JSON
     assert.equal(ctx.apiError({ status: 413, data: null, json: false }, "Save failed"), big);
     assert.equal(ctx.apiError({ status: 413, data: { detail: "Content Too Large" }, json: true }, "Save failed"), big);
@@ -352,8 +348,7 @@ test("token dialog: a zone held in two spellings shows every flag and a notice",
     assert.deepEqual([...rows.billing.flags], ["read", "write"]);
     assert.equal(
         ctx.dashPermNote("billing", rows.billing),
-        "This token holds billing in more than one spelling (billing: read; BILLING: readwrite). " +
-            "Saving stores one grant with the permissions checked here.",
+        ctx.t("tokens.this-token-holds", { area: "billing", grants: "billing: read; BILLING: readwrite" }),
     );
     assert.equal(ctx.dashPermNote("billing", ctx.dashGrantRows(["billing"], [{ area: "billing", level: "read" }]).billing), "");
 });
@@ -367,7 +362,9 @@ test("zones page: groups of zone names that differ only in case", () => {
     );
     assert.deepEqual(JSON.parse(JSON.stringify(ctx.dashZoneCaseGroups([z("billing"), z("orders")]))), []);
     assert.equal(ctx.dashZoneCaseNotice([]), "");
-    assert.match(ctx.dashZoneCaseNotice([["billing", "BILLING"]]), /billing, BILLING.*Rename or delete all but one of each group\./);
+    const notice = ctx.dashZoneCaseNotice([["billing", "BILLING"]]);
+    assert.ok(notice.includes(ctx.esc(ctx.t("zones.zones-whose-names-differ-only-in"))));
+    assert.ok(notice.includes(ctx.tHtml("zones.a-token-for-one-of-them", { groups: ctx.tRaw('<bdi dir="auto">billing, BILLING</bdi>') })));
 });
 
 test("zone names that are Object.prototype keys work in the dialog and the zones page", () => {
