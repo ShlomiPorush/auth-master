@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import db_config, db_operations as ops, db_runtime
+from app import db_config, db_move, db_operations as ops, db_runtime
 from app.admin_deps import FullSession, csrf_check
 from app.db_runtime import Busy, OperationError, Pending, Runtime
 from app.logger import get_actor
@@ -57,6 +57,12 @@ class EditBody(StepUpBody):
 
     postgres: PostgresBody
     confirmCopy: StrictBool = False
+
+
+class MoveBody(StepUpBody):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    postgres: PostgresBody
 
 
 class RecoveryBody(BaseModel):
@@ -251,6 +257,9 @@ def settings_view(rt: Runtime) -> dict[str, Any]:
             assert cfg.pg is not None
             view["connection"] = {"backend": "postgres", **cfg.pg.public()}
     view["editable"] = (env is None and rt.config is not None and rt.config.backend == db_config.POSTGRES)
+    # A SQLite database chosen in setup can be moved to PostgreSQL (app.db_move).
+    view["movable"] = (env is None and rt.mode == db_runtime.READY and rt.source == "file"
+                       and rt.config is not None and rt.config.backend == db_config.SQLITE)
     return view
 
 
@@ -322,7 +331,73 @@ async def put_database_settings(
 
 @router.get("/settings/database/jobs/{job_id}")
 async def database_settings_job(request: Request, job_id: str, _sess: FullSession):
-    return _job(_runtime(request), job_id, {"edit"})
+    return _job(_runtime(request), job_id, {"edit", "move"})
+
+
+# ── Settings page: move from SQLite to PostgreSQL ───────────────
+
+def _movable(rt: Runtime) -> JSONResponse | None:
+    if not settings_view(rt)["movable"]:
+        return _error(409, "not_movable", db_move.MESSAGES["not_movable"])
+    return None
+
+
+@router.post("/settings/database/move/check")
+async def check_database_move(
+    request: Request, sess: FullSession, x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csrf_check(sess, x_csrf_token)
+    rt = _runtime(request)
+    if (refused := _movable(rt)) is not None:
+        return refused
+    body = await _parse(request, MoveBody)
+    if isinstance(body, JSONResponse):
+        return body
+    params = _params(body.postgres)
+    if isinstance(params, JSONResponse):
+        return params
+    try:
+        result = await db_move.check_move(rt, params)
+    except OperationError as e:
+        return JSONResponse(content={"ok": False, "code": e.code, "detail": e.text}, headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        print(f"Checking the move failed ({type(e).__name__})")
+        return JSONResponse(content={"ok": False, "code": "other", "detail": db_runtime.message("other")},
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse(content={"ok": True, **result.view()}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/settings/database/move")
+async def start_database_move(
+    request: Request, sess: FullSession, x_csrf_token: str | None = Header(None, alias="X-CSRF-Token"),
+):
+    csrf_check(sess, x_csrf_token)
+    rt = _runtime(request)
+    if (refused := _movable(rt)) is not None:
+        return refused
+    body = await _parse(request, MoveBody)
+    if isinstance(body, JSONResponse):
+        return body
+    params = _params(body.postgres)
+    if isinstance(params, JSONResponse):
+        return params
+    db = request.app.state.db
+    admin_id = str(sess.get("adminId"))
+    admin_row = await db.fetchrow("SELECT totp_secret_enc, totp_enabled FROM admin_users WHERE id = $1", admin_id)
+    if not admin_row or not admin_row["totp_enabled"] or not admin_row["totp_secret_enc"]:
+        return _error(403, "mfa_required", "MFA not configured")
+    try:
+        mark = rt.jobs.mark_pending()
+    except Busy as b:
+        return _error(409, "busy", "Another database operation is running.", job=b.job.view())
+    try:
+        await verify_step_up(request, admin_id, admin_row, body, "database_move")
+        actor = await get_actor(request, sess)
+        ip = _ip(request)
+        app = request.app
+        return _start(rt, "move", lambda job: db_move.run_move(rt, app, job, params, actor, ip), mark)
+    finally:
+        rt.jobs.clear_pending(mark)
 
 
 # ── Recovery page ───────────────────────────────────────────────

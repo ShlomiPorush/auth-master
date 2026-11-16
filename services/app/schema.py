@@ -60,7 +60,9 @@ SERVICE_TABLES = (
 INSTALLATION_TABLE = "installation"
 
 
-async def ensure_database_schema(db: "Database") -> None:
+async def ensure_database_schema(db: "Database", *, zone_fold_index: bool = True) -> None:
+    """`zone_fold_index` False: the case-fold index on zone names is left to the caller (the
+    move from SQLite creates it after copying the zones, app.db_move)."""
     from app.installation import ensure_table
     from app.zones import ensure_zone_name_index
 
@@ -69,7 +71,8 @@ async def ensure_database_schema(db: "Database") -> None:
     else:
         await _ensure_sqlite(db)
     await ensure_table(db)
-    await ensure_zone_name_index(db)
+    if zone_fold_index:
+        await ensure_zone_name_index(db)
 
 
 async def _ensure_pg(db: "Database") -> None:

@@ -32,6 +32,8 @@ class CheckResult:
     pending: bool = False
     # Settings page: "same" (the live database) or "different_copy"; None when not checked.
     identity: str | None = None
+    # The move from SQLite that filled the database (app.db_move), when it says so.
+    migration_id: str | None = None
 
     def view(self) -> dict[str, Any]:
         return {
@@ -64,6 +66,7 @@ async def _inspect(db: Any) -> CheckResult:
     if state.installation is not None:
         result.installation_id = state.installation.id
         result.pending = state.installation.status != installation.ACTIVE
+        result.migration_id = state.installation.migration_id
     if db.is_pg:
         tables_exist = state.kind in (db_inspect.INSTALLATION, db_inspect.OLDER)
         result.problems = await db_inspect.privilege_problems(db, tables_exist=tables_exist)
@@ -379,9 +382,21 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
         assert params is not None
         path = None
         new_db = await _open_postgres(params)
+    completing: tuple[str, str] | None = None
     try:
         result = await _inspect(new_db)
-        _refuse_state(result, expected_id=expected)
+        if result.state == db_inspect.INSTALLATION and result.pending:
+            # A move from SQLite that passed its commit point: completed here when the
+            # saved configuration or the fenced SQLite file names the same move.
+            if not new_db.is_pg:
+                raise OperationError("database_moved" if result.migration_id else "installation_pending")
+            completing = await _move_to_complete(rt, result)
+            if completing is None:
+                raise OperationError("installation_pending")
+            if expected is not None and result.installation_id != expected:
+                raise OperationError("other_installation")
+        else:
+            _refuse_state(result, expected_id=expected)
         if result.state == db_inspect.EMPTY:
             raise OperationError("database_empty", "The database is empty. Choose the database that holds this service's data.")
         _refuse_problems(result)
@@ -399,6 +414,17 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
             else:
                 await _adopt_sqlite(new_db, iid)
             action = "database.adopted"
+        elif completing is not None:
+            from app import db_move
+
+            iid = result.installation_id
+            job.step = "locking the old database file"
+            try:
+                await asyncio.to_thread(db_move.fence_file, completing[1], iid, completing[0])
+            except db_move.SourceMismatch:
+                raise OperationError("move_source_mismatch") from None
+            await installation.activate(new_db, iid, completing[0])
+            action = "database.move_completed"
         else:
             iid = result.installation_id
             action = "database.connection_recovered"
@@ -407,6 +433,8 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
         raise
     if backend == db_config.SQLITE:
         new_cfg = Config(db_config.SQLITE, iid, sqlite_path=str(path))
+    elif completing is not None:
+        new_cfg = Config(db_config.POSTGRES, iid, pg=params, migration_id=completing[0], moved_from_sqlite=completing[1])
     else:
         new_cfg = Config(db_config.POSTGRES, iid, pg=params)
     logged: dict[str, Any] = {}
@@ -417,6 +445,26 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
 
     await _switch(rt, app, job, new_db, new_cfg, after=after)
     return {"action": action, "warning": logged.get("warning")}
+
+
+async def _move_to_complete(rt: Runtime, result: CheckResult) -> tuple[str, str] | None:
+    """(migration id, SQLite path) when the pending PostgreSQL copy belongs to a move whose
+    commit point passed: the saved configuration names that move, or a SQLite file it
+    would use is fenced by it."""
+    from app import db_move
+
+    mid = result.migration_id
+    if not mid or result.installation_id is None:
+        return None
+    cfg = rt.config
+    if cfg is not None and cfg.migration_id == mid and cfg.moved_from_sqlite:
+        return mid, cfg.moved_from_sqlite
+    candidates = [cfg.sqlite_path] if cfg is not None and cfg.backend == db_config.SQLITE and cfg.sqlite_path else []
+    candidates.append(str(db_config.default_sqlite_path()))
+    for path in dict.fromkeys(candidates):
+        if await asyncio.to_thread(db_move.fenced_by, path, mid, result.installation_id):
+            return mid, path
+    return None
 
 
 def failure_view(rt: Runtime) -> dict[str, Any]:

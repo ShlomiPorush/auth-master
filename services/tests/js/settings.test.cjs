@@ -1077,3 +1077,45 @@ test("the Redis URL field keeps its visible label as its name, also before Repla
     assert.match(body.innerHTML, /<label[^>]*for="redis-url"/);
     assert.match(body.innerHTML, /<input[^>]*id="redis-url"/);
 });
+
+// ---------------------------------------------------------------------------
+// Move to PostgreSQL: the same form and flow, for a SQLite database chosen in setup
+// ---------------------------------------------------------------------------
+
+function sqliteView(job) {
+    return {
+        source: "file", locked: false, envName: "DATABASE_URL", job: job || null, sslmodes: ["prefer"],
+        editable: false, movable: true, connection: { backend: "sqlite", path: "data/auth.db" },
+    };
+}
+
+test("move: a movable SQLite database sends the new password, and the move goes to its own route", async () => {
+    const ctx = load({ document: dbPage({ host: "pg", port: "5432", database: "authdb", user: "auth", password: "typed", sslmode: "prefer", ca: "" }) });
+    const pending = deferredApi(ctx);
+    ctx.dashDb.snap = sqliteView();
+    ctx.dashDb.replacing = { password: true, ca: true };
+    assert.equal(ctx.dashDbMoving(), true);
+    assert.equal(ctx.dashDbRead().password, "typed");
+    ctx.dashDbSend({ postgres: {}, code: "123456" });
+    await answerNext(pending, "POST", "/admin/api/settings/database/move", 202, { job: { id: "m1", kind: "move", state: "running" } });
+    assert.equal(ctx.dashSettings.lock, "running");
+    await answerNext(pending, "GET", "/admin/api/settings/database/jobs/m1", 200,
+        { job: { id: "m1", kind: "move", state: "done", result: { pauseMs: 1234 } } });
+    assert.equal(ctx.dashSettings.lock, "");
+});
+
+test("move: the check note counts what will be copied, and a refusal says why", () => {
+    const ctx = load();
+    let note = ctx.dashDbMoveNote({ ok: true, target: "empty", problems: [], counts: { tokens: 3, zones: 2, access_logs: 50, activity_logs: 2 } });
+    assert.equal(note.tone, "");
+    assert.ok(note.text.includes("3") && note.text.includes("52"), note.text);
+    note = ctx.dashDbMoveNote({ ok: true, target: "earlier_copy", problems: [], counts: {} });
+    assert.ok(note.text.includes(ctx.t("settings.database.move-earlier-copy")));
+    note = ctx.dashDbMoveNote({ ok: false, code: "target_encoding", detail: "Not UTF8." });
+    assert.equal(note.tone, " is-fail");
+    assert.equal(note.text, "Not UTF8.");
+    note = ctx.dashDbMoveNote({ ok: true, problems: ["No CREATE."], counts: {} });
+    assert.equal(note.tone, " is-fail");
+    ctx.dashDb.snap = dbView();
+    assert.equal(ctx.dashDbMoving(), false, "an editable PostgreSQL connection is not a move");
+});

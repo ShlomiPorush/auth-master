@@ -11,6 +11,13 @@ from app.usage_rollup import PURGED_BEFORE_KEY, PurgeMark, purge_access_logs
 MAX_AREA_LEN = 255
 
 
+def no_nul(value: str | None) -> str | None:
+    """NUL replaced with U+FFFD: PostgreSQL text cannot hold NUL, so a log row with it
+    would fail the request that writes it.  Applied on both backends, so the log reads the
+    same after a move from SQLite (app.db_move replaces NUL in old log rows the same way)."""
+    return value.replace("\x00", "\ufffd") if isinstance(value, str) and "\x00" in value else value
+
+
 async def get_actor(request: Request, sess: dict | None = None) -> str:
     """Resolve the current actor's name from session or request state."""
     if sess and "adminId" in sess:
@@ -37,7 +44,10 @@ async def log_activity(
     """Insert a new record into activity_logs."""
     details_str = json.dumps(details) if details is not None else None
     log_id = str(uuid.uuid4())
-    
+    actor, action, entity_type, entity_id, entity_name, ip_address = (
+        no_nul(actor), no_nul(action), no_nul(entity_type), no_nul(entity_id), no_nul(entity_name), no_nul(ip_address)
+    )
+
     if db.is_sqlite:
         await db.execute(
             "INSERT INTO activity_logs (id, actor, action, entity_type, entity_id, entity_name, details, ip_address) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -61,7 +71,8 @@ async def log_access(
 ) -> None:
     """Insert a new record into access_logs, with at most MAX_AREA_LEN characters of area."""
     log_id = str(uuid.uuid4())
-    area = area[:MAX_AREA_LEN]
+    area = no_nul(area[:MAX_AREA_LEN])
+    token_name, level, ip_address = no_nul(token_name), no_nul(level), no_nul(ip_address)
 
     if db.is_sqlite:
         await db.execute(
