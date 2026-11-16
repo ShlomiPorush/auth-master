@@ -134,4 +134,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build the image (not pushed)
-        run: docker build .
+        run: docker build -t auth-master:ci .
+
+      - name: Check the data directory handling of the image
+        run: bash .github/image-check.sh auth-master:ci

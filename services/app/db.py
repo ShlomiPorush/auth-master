@@ -356,8 +356,14 @@ async def create_database(url: str) -> Database:
         # settings) until some later write on this connection commits it.
         conn = await aiosqlite.connect(path, isolation_level=None)
         conn.row_factory = None  # we handle row mapping ourselves
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA foreign_keys=ON")
+        except BaseException:
+            # An open connection's thread keeps the process alive, so a start that fails
+            # here (a file the service cannot write) would hang instead of exiting.
+            await conn.close()
+            raise
         db = SqliteDatabase(conn)
         db.path = path
         return db

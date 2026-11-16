@@ -43,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used by mistake.
 - `/health` adds a `status` field while setup waits for a database (`setup_required`, status
   200) and in recovery mode (`database_unavailable`, status 503).
+- The service runs as the user `app` (uid and gid 10001) instead of root. The container starts
+  as root only to give that user the data directory `/app/data` and the files in it, checks
+  that the user can read and write them, and then starts the service as that user. When the
+  check fails, the container stops and its log lists the paths. See "Data directory and file
+  ownership" in README.md.
+
+### Fixed
+
+- A start that fails because the SQLite file cannot be written now ends the process. Before,
+  the service logged "Application startup failed" and kept running without serving.
 
 ### Upgrade notes
 
@@ -52,6 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changing the database connection needs a single service process for the data directory.
 - The data directory (`data/`) must be writable, also with `DATABASE_URL`: every process
   registers itself there at start, and one that cannot does not start.
+- On the first start, the owner of `./data` and the files in it changes to uid 10001 on the
+  host. Scripts that read or copy `./data` as another user need root or that uid.
+- A SQLite file outside `/app/data` (a `DATABASE_URL` such as `sqlite:////db/auth.db`) is not
+  changed: give it and its directory to uid 10001 before the upgrade.
+- Files in `./data` with more than one hard link, and symlink targets, are not changed. Replace
+  them with regular copies if the service cannot read and write them.
+- The data directory must be mounted writable. On an NFS export with `root_squash`, give it to
+  uid 10001 on the server and start the container with `user: "10001:10001"`.
+- `docker compose exec` still runs as root. Use `--user 10001:10001` for anything that writes
+  to `/app/data`.
+- Rolling back to 2.2.0 works with the same files, because that version runs as root.
 
 ## [2.2.0] - 2026-11-15
 

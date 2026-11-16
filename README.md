@@ -459,7 +459,8 @@ environment the containers were created with, so a changed or removed variable h
 - **Data directory:** the service must be able to write to `data/`, also when `DATABASE_URL` is
   set: each process registers itself there, so that changing the database can make sure no
   other process still uses the old one. A process that cannot write there does not start. The
-  bundled `docker-compose.yml` mounts `./data`, which is writable.
+  bundled `docker-compose.yml` mounts `./data`, and at start the container gives it to the
+  service user, uid 10001. See "Data directory and file ownership" below.
 - **`/health`:** while setup waits for a database or the service is in recovery mode, the answer
   has a `status` field. See [API.md](API.md#health-check).
 
@@ -473,6 +474,45 @@ Version 2.2.x ignores `data/database.json`. It uses `DATABASE_URL`, or else `dat
   whoever opens it first.
 
 The `installation` table stays in the database; 2.2.x does not use it.
+
+### Data directory and file ownership
+
+The service runs as the user `app`, uid and gid 10001, not as root. The container starts as
+root only to prepare the data directory `/app/data` (`./data` in `docker-compose.yml`):
+
+1. It gives uid and gid 10001 the directory and the directories and files in it, and adds the
+   owner's read and write permission where it is missing. Group and other permissions do not
+   change.
+2. It checks that uid 10001 can create a file in the directory and can read and write
+   everything in it.
+3. It starts the service as uid 10001.
+
+When the check fails, the container stops before the service starts, and its log lists the
+paths and what to do.
+
+- **On the host:** the files in `./data` belong to uid 10001. With rootless Docker or
+  `userns-remap`, the host shows the uid that 10001 maps to. Read `./data` for backups as root
+  or as that uid.
+- **Never changed:** symlinks and their targets, files with more than one hard link, other file
+  types, and file systems mounted inside the directory. When the service cannot read and write
+  such a file, stop the service and replace the file with a regular copy. `mktemp` creates a
+  new file that did not exist, so the copy cannot write through an existing link:
+  `tmp=$(mktemp data/auth.db.XXXXXX) && cp data/auth.db "$tmp" && mv "$tmp" data/auth.db`.
+- **Read-only mounts:** the service writes to the data directory, so mount it writable.
+- **NFS with `root_squash`:** root in the container acts as an anonymous user there and cannot
+  prepare the directory. Give uid 10001 the directory and its files on the NFS server, and start
+  the container with `user: "10001:10001"` in the compose file, so it only checks.
+- **Another user:** to run the container as another user, set `user:` in the compose file, for
+  example `user: "1000:1000"`, and give that user read and write access to `./data` and the
+  files in it. The container then only checks.
+- **SQLite outside `/app/data`:** the container does not change a database that `DATABASE_URL`
+  places elsewhere, such as `sqlite:////db/auth.db`. Before you upgrade, stop the service and
+  give uid 10001 that directory and the files in it (`auth.db`, `auth.db-wal`, `auth.db-shm`)
+  on the host: `sudo chown -R 10001:10001 <host directory>`. Otherwise the service cannot write
+  the database and does not start.
+- **Commands in the container:** `docker compose exec` runs as root. Run anything that writes to
+  `/app/data` as the service user: `docker compose exec --user 10001:10001 auth-service <command>`.
+  A file that root creates there is given to uid 10001 at the next start.
 
 ### Upgrade from 2.1.x
 
