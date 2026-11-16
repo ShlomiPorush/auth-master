@@ -234,6 +234,8 @@ function dashShowPage(id, info) {
     }
     var title = document.getElementById("mtop-page");
     if (title) title.textContent = t(PAGES[id].title);
+    // Wide screens: this page's title and actions go up into the top bar (NL-6)
+    uiPlaceTopbar(id);
     if (DASH_PAGE_IMPL[id]) DASH_PAGE_IMPL[id](info || {});
 }
 
@@ -274,6 +276,7 @@ function dashBindShell() {
     if (more) more.addEventListener("click", dashMoreOpen);
     dashThemeLabel();
     document.addEventListener("ui-theme", dashThemeLabel);
+    dashBindShellWp3();
 }
 
 var DASH_THEMES = [["system", "shell.system"], ["light", "shell.light"], ["dark", "shell.dark"]];
@@ -317,14 +320,23 @@ var dashMore = null;
 function dashMoreClose() {
     if (dashMore) dashMore.backdrop.remove();
     dashMore = null;
+    var tab = document.getElementById("tab-more");
+    if (tab) {
+        tab.setAttribute("aria-expanded", "false");
+        tab.removeAttribute("aria-controls");
+    }
 }
 function dashMoreOpen() {
     if (dashMore && dashMore.backdrop.isConnected) { dashMoreClose(); return; }
     var d = null;
     var close = dashMoreClose;
     var link = function (id) {
+        // The same icon and counter as in the sidebar (NL-9, NL-10)
+        var navLink = document.querySelector('.ui-nav [data-page-link="' + id + '"]');
+        var icon = navLink ? navLink.querySelector("svg") : null;
         return '<a class="ui-nav-item" data-page-link="' + id + '" href="' + esc(basePath() + PAGES[id].path) + '"' +
-            (uiPageCurrent === id ? ' aria-current="page"' : "") + '><span class="ui-nav-label">' + esc(t(PAGES[id].title)) + "</span></a>";
+            (uiPageCurrent === id ? ' aria-current="page"' : "") + ">" + (icon ? icon.outerHTML : "") + '<span class="ui-nav-label">' + esc(t(PAGES[id].title)) + "</span>" +
+            dashNavCountHtml(id) + "</a>";
     };
     d = uiDialog({
         title: t("shell.more"), size: "sm", backdropClass: "ui-more-layer", close: close, backdropClose: close,
@@ -335,6 +347,12 @@ function dashMoreOpen() {
             '<button type="button" class="ui-tool" data-more-logout><span class="ui-tool-label">' + esc(t("shell.log-out")) + '</span></button></nav>',
     });
     dashMore = d;
+    d.backdrop.id = "ui-more";
+    var tab = document.getElementById("tab-more");
+    if (tab) {
+        tab.setAttribute("aria-expanded", "true");
+        tab.setAttribute("aria-controls", "ui-more");
+    }
     var themeBtn = d.body.querySelector("[data-more-theme]");
     var themeText = function () {
         var pref = window.uiThemeGet();
@@ -421,15 +439,22 @@ function dashRedrawDates() {
 
 var dashAttn = { health: null, healthFailed: false, checked: false, dialog: null, bell: null, drawn: "" };
 
+// Each item opens where it is handled (NL-12): Database and Redis their Settings sections
 function dashAttnItems() {
     var items = [];
     var h = dashAttn.health;
-    if (h && h.db === false) items.push({ tone: "fail", text: t("attention.database-is-not-responding"), sub: t("attention.tokens-cannot-be-checked-or-changed") });
-    if (h && h.redis === false) items.push({ tone: "fail", text: t("attention.redis-is-not-responding"), sub: t("attention.sessions-and-the-token-cache-need") });
-    var n = dashExpiringCount();
-    if (n > 0) {
+    if (h && h.db === false) {
+        items.push({ tone: "fail", text: t("attention.database-is-not-responding"), sub: t("attention.tokens-cannot-be-checked-or-changed"),
+            go: "settings", sub_: DASH_SETTINGS_SECTION.database, action: t("attention.open-database-settings") });
+    }
+    if (h && h.redis === false) {
+        items.push({ tone: "fail", text: t("attention.redis-is-not-responding"), sub: t("attention.sessions-and-the-token-cache-need"),
+            go: "settings", sub_: DASH_SETTINGS_SECTION.redis, action: t("attention.open-redis-settings") });
+    }
+    var exp = dashExpiryCount(dashTokenStore.rows, Date.now());
+    if (exp.n > 0) {
         items.push({
-            tone: "warn", text: tn("attention.tokens-expire-within-7-days", n),
+            tone: exp.tone, text: tn("attention.tokens-expire-within-7-days", exp.n),
             sub: t("attention.replace-or-extend-them-before-they"), go: "tokens", query: "status=expiring", action: t("attention.open-tokens"),
         });
     }
@@ -437,9 +462,7 @@ function dashAttnItems() {
 }
 
 function dashExpiringCount() {
-    var rows = dashTokenStore.rows || [];
-    var now = Date.now();
-    return rows.filter(function (tok) { return dashTokStatus(tok) === "active" && dashTokExpiring(tok, now); }).length;
+    return dashExpiryCount(dashTokenStore.rows, Date.now()).n;
 }
 
 function dashAttnRefresh() {
@@ -482,9 +505,13 @@ function dashAttnUpdate() {
         document.querySelectorAll('[data-status="' + pair[0] + '"]').forEach(function (row) {
             row.querySelector(".ui-dot").className = "ui-dot" + (w[1] ? " ui-dot-" + w[1] : "");
             row.querySelector("b").textContent = w[0];
-            row.setAttribute("title", (pair[0] === "db" ? t("attention.database") : t("attention.redis")) + ": " + w[0]);
+            // The rail shows only the dot: the row says its state in its name (AX)
+            var name = t("attention.service-state", { service: pair[0] === "db" ? t("attention.database") : t("attention.redis"), state: w[0] });
+            row.setAttribute("title", name);
+            row.setAttribute("aria-label", name);
         });
     });
+    dashNavCountsDraw();
     if (dashAttn.dialog) dashAttnDraw();
 }
 
@@ -522,25 +549,36 @@ function dashAttnOpen(bell) {
         dashAttn.dialog.backdrop.remove();
         dashAttn.dialog = null;
         dashAttn.drawn = "";
-        document.querySelectorAll("[data-bell]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+        document.querySelectorAll("[data-bell], [data-status-card]").forEach(function (b) {
+            b.setAttribute("aria-expanded", "false");
+            b.removeAttribute("aria-controls");
+        });
     };
     var d = uiDialog({ title: t("attention.needs-attention-2"), size: "sm", backdropClass: "ui-attn-layer", close: close, backdropClose: close });
+    d.backdrop.id = "ui-attn";
     dashAttn.dialog = d;
     dashAttn.bell = bell;
     bell.setAttribute("aria-expanded", "true");
-    // Under the bell on a wide screen, its start edge in line with the bell's
+    bell.setAttribute("aria-controls", "ui-attn");
+    // Under the bell on a wide screen, its end edge in line with the bell's (NL-19);
+    // opened from the sidebar's status card, beside the card
     var r = bell.getBoundingClientRect();
     var rtl = getComputedStyle(bell).direction === "rtl";
-    var start = rtl ? window.innerWidth - r.right : r.left;
-    d.backdrop.style.setProperty("--ui-attn-top", Math.round(r.bottom + 8) + "px");
-    d.backdrop.style.setProperty("--ui-attn-start", Math.max(16, Math.round(start)) + "px");
+    if (bell.hasAttribute("data-status-card")) {
+        d.backdrop.style.setProperty("--ui-attn-top", Math.round(r.top) + "px");
+        d.backdrop.style.setProperty("--ui-attn-start", Math.round(rtl ? window.innerWidth - r.left + 8 : r.right + 8) + "px");
+    } else {
+        d.backdrop.style.setProperty("--ui-attn-top", Math.round(r.bottom + 8) + "px");
+        d.backdrop.style.setProperty("--ui-attn-end", Math.max(16, Math.round(rtl ? r.left : window.innerWidth - r.right)) + "px");
+    }
     dashAttnDraw();
     d.body.addEventListener("click", function (event) {
         var go = event.target.closest("[data-attn-go]");
         if (go) {
             var it = dashAttnItems()[Number(go.getAttribute("data-attn-go"))];
-            close();
-            if (it) uiGo(it.go, it.query);
+            if (!it) return;
+            // Closed once the move is made; a move the user cancels over unsaved changes leaves it open
+            uiGo(it.go, it.query, { sub: it.sub_ }).then(function (moved) { if (moved) close(); });
             return;
         }
         if (event.target.closest("[data-attn-retry]")) {
@@ -555,6 +593,595 @@ function dashAttnOpen(bell) {
 }
 
 registerBackgroundRefresh("attention", 30000, dashAttnRefresh);
+
+// ===========================================================================
+// WP3: shell bindings, nav counters (NL-10), help (DS-5) and the global search
+// (SR-1 to SR-8)
+// ===========================================================================
+
+// The Settings sections that Needs attention opens (NL-12); ids of SETTINGS_INDEX
+var DASH_SETTINGS_SECTION = { database: "database", redis: "redis" };
+
+// A token that expires within this time turns its counter red (fixed threshold)
+var TOKEN_EXPIRY_URGENT_MS = 24 * 3600 * 1000;
+
+// Enabled tokens that expire within 7 days, and whether one expires within a day
+function dashExpiryCount(rows, now) {
+    var n = 0;
+    var urgent = false;
+    (rows || []).forEach(function (tok) {
+        if (dashTokStatus(tok) !== "active" || !dashTokExpiring(tok, now)) return;
+        n += 1;
+        if (uiParseInstant(tok.expiresAt) - now <= TOKEN_EXPIRY_URGENT_MS) urgent = true;
+    });
+    return { n: n, tone: urgent ? "fail" : "warn" };
+}
+
+// The counter of a page in the sidebar, the rail and the More sheet: shown only
+// above zero, amber or red by severity, with what it counts as its tooltip
+function dashNavCountHtml(id) {
+    if (id !== "tokens") return "";
+    var c = dashExpiryCount(dashTokenStore.rows, Date.now());
+    if (!c.n) return '<span class="ui-nav-count hidden" data-nav-count="tokens"></span>';
+    return '<span class="ui-nav-count' + (c.tone === "fail" ? " is-fail" : "") + '" data-nav-count="tokens" title="' +
+        esc(tn("attention.tokens-expire-within-7-days", c.n)) + '">' + esc(uiNum(c.n)) + "</span>";
+}
+
+function dashNavCountsDraw() {
+    if (!uiHasDom()) return;
+    var c = dashExpiryCount(dashTokenStore.rows, Date.now());
+    var label = c.n ? tn("attention.tokens-expire-within-7-days", c.n) : "";
+    document.querySelectorAll('[data-nav-count="tokens"]').forEach(function (el) {
+        el.classList.toggle("hidden", !c.n);
+        el.classList.toggle("is-fail", c.tone === "fail");
+        if (el.classList.contains("ui-nav-count")) el.textContent = c.n ? uiNum(c.n) : "";
+        if (label) el.setAttribute("title", label);
+        else el.removeAttribute("title");
+    });
+}
+
+function dashBindShellWp3() {
+    var toggle = document.getElementById("ui-nav-toggle");
+    if (toggle) toggle.addEventListener("click", uiNavToggle);
+    uiNavToggleSync();
+    // The help button beside every page title (NL-15)
+    document.querySelectorAll("[data-help]").forEach(function (b) {
+        var id = b.getAttribute("data-help");
+        if (!PAGES[id]) return;
+        var label = t("help.title", { page: t(PAGES[id].title) });
+        b.setAttribute("aria-label", label);
+        b.setAttribute("title", label);
+        b.addEventListener("click", function () { dashHelpOpen(id); });
+    });
+    // The status card opens Needs attention (NL-12)
+    document.querySelectorAll("[data-status-card]").forEach(function (card) {
+        card.setAttribute("title", t("shell.service-status"));
+        card.setAttribute("aria-expanded", "false");
+        card.addEventListener("click", function () { dashAttnOpen(card); });
+    });
+    // The top bar and the phone search follow the width across 760px (NL-6, SR-8)
+    if (window.matchMedia) {
+        var mq = window.matchMedia("(max-width: 760px)");
+        var cross = function () {
+            dashSearchClose(false);
+            uiPlaceTopbar();
+        };
+        if (mq.addEventListener) mq.addEventListener("change", cross);
+    }
+    dashSearchBind();
+    window.addEventListener("ui:db-changed", dashSearchDbChanged);
+}
+
+// ---------------------------------------------------------------------------
+// Help: one sheet per page from the shared dialog, with the reading gauge
+// ---------------------------------------------------------------------------
+
+// Each page's help, one paragraph per line of its catalog value
+var DASH_HELP = {
+    tokens: "help.tokens",
+    zones: "help.zones",
+    apikeys: "help.apikeys",
+    activity: "help.activity",
+    access: "help.access",
+    usage: "help.usage",
+    settings: "help.settings",
+    account: "help.account",
+};
+
+function dashHelpParagraphs(id) {
+    return t(DASH_HELP[id]).split(/\n+/).map(function (p) { return p.trim(); }).filter(Boolean);
+}
+
+function dashHelpOpen(id) {
+    if (!DASH_HELP[id]) return null;
+    return uiInfoDialog({ title: t("help.title", { page: t(PAGES[id].title) }), paragraphs: dashHelpParagraphs(id) });
+}
+
+// ---------------------------------------------------------------------------
+// Global search: pages, Settings sections and fields (SETTINGS_INDEX), tokens,
+// zones and API keys. Local only: tokens, zones and API keys come from the same
+// shared rows the pages use. A kind marked stale (uiDataStale) or read more than
+// 30 seconds ago is read again when the search opens or the query changes; a
+// database change (ui:db-changed) drops what was read before it.
+// ---------------------------------------------------------------------------
+
+var DASH_SEARCH_MAX_AGE = 30000;
+var DASH_SEARCH_SUMMARY = 3;
+var DASH_SEARCH_LIMIT = 50;
+var DASH_SEARCH_KINDS = [
+    { id: "pages", label: "search.pages" },
+    { id: "settings", label: "shell.settings" },
+    { id: "tokens", label: "shell.tokens" },
+    { id: "zones", label: "shell.zones" },
+    { id: "apikeys", label: "shell.api-keys" },
+];
+var DASH_SEARCH_DATA = ["tokens", "zones", "apikeys"];
+var DASH_SEARCH_PAGE_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6"/></svg>';
+
+// Where each kind's rows live: the shared stores of the pages
+var DASH_SEARCH_SOURCES = {
+    tokens: {
+        rows: function () { return dashTokenStore.rows; },
+        failed: function () { return dashTokenStore.failed; },
+        load: function () { return dashTokensLoad(true); },
+    },
+    zones: {
+        rows: function () { return dash.zonesLoaded ? dash.zones : null; },
+        failed: function () { return dash.zonesFailed; },
+        load: function () { return dashZonesLoad(); },
+    },
+    apikeys: {
+        rows: function () { return dashKeys.rows; },
+        failed: function () { return dashKeys.failed; },
+        load: function () { return dashKeysLoad(true); },
+    },
+};
+
+var dashSearch = { q: "", tab: "all", active: 0, shown: [], open: false, bound: false, data: {} };
+
+// What the search holds of a kind: rows read in data generation gen
+function dashSearchSlot(kind) {
+    if (!dashSearch.data[kind]) dashSearch.data[kind] = { rows: null, gen: -1, failed: "", loading: false, seq: 0, retries: 0, pending: null };
+    return dashSearch.data[kind];
+}
+
+// Read a kind again when it is stale or older than 30 seconds. Only the newest
+// read of a kind applies, and never one that started before a database change.
+function dashSearchRead(kind) {
+    var slot = dashSearchSlot(kind);
+    var src = DASH_SEARCH_SOURCES[kind];
+    if (slot.gen !== uiDataGen && slot.rows) {
+        slot.rows = null;
+        slot.failed = "";
+    }
+    if (slot.loading) return slot.pending;
+    if (slot.rows && !uiDataNeedsRead(kind, DASH_SEARCH_MAX_AGE)) return Promise.resolve();
+    var mark = uiDataMark(kind);
+    var before = src.rows();
+    var seq = ++slot.seq;
+    slot.loading = true;
+    var done = function () {
+        if (seq !== slot.seq) return;
+        slot.loading = false;
+        slot.pending = null;
+        if (uiDataOld(mark)) {
+            // The database changed while this read ran: read from the one now in use
+            if (dashSearch.open) dashSearchRead(kind);
+            return;
+        }
+        var rows = src.rows();
+        if (rows && rows !== before) {
+            slot.rows = rows;
+            slot.gen = mark.gen;
+            slot.failed = "";
+            slot.retries = 0;
+            uiDataRead(kind, mark);
+        } else if (src.failed()) {
+            slot.failed = src.failed();
+        } else if (slot.retries < 2) {
+            // A save started meanwhile and its answer was dropped: read once more
+            slot.retries += 1;
+            dashSearchRender();
+            return dashSearchRead(kind);
+        }
+        dashSearchRender();
+    };
+    slot.pending = Promise.resolve().then(src.load).then(done, function () {
+        if (seq !== slot.seq) return;
+        slot.loading = false;
+        slot.pending = null;
+        slot.failed = slot.failed || t("search.failed");
+        dashSearchRender();
+    });
+    return slot.pending;
+}
+
+// The database may have changed: what the search read is dropped, every kind is
+// stale, answers that started before are ignored, the counters read again
+function dashSearchDbChanged() {
+    uiDataReset();
+    DASH_SEARCH_DATA.forEach(function (kind) {
+        var slot = dashSearchSlot(kind);
+        slot.rows = null;
+        slot.failed = "";
+        slot.loading = false;
+        slot.pending = null;
+        slot.retries = 0;
+        slot.seq += 1;
+    });
+    // The shared token rows serve the counters and the bell: their next read starts anew
+    dashTokenStore.pending = null;
+    dashTokenStore.at = 0;
+    if (dashSearch.open) dashSearchRefresh();
+    dashSearchRender();
+    uiRefreshNow("attention");
+}
+
+// Read what is stale for the open search
+function dashSearchRefresh() {
+    return Promise.all(DASH_SEARCH_DATA.map(dashSearchRead));
+}
+
+function dashSearchHas(text, q) {
+    return String(text === null || text === undefined ? "" : text).toLowerCase().indexOf(q) !== -1;
+}
+
+function dashSearchList(items) {
+    return { items: items.slice(0, DASH_SEARCH_LIMIT), count: items.length, loading: false, failed: "" };
+}
+
+// The results of a query per kind: { items, count, loading, failed }. Pure: it
+// reads the catalog, PAGES, SETTINGS_INDEX and what the search holds.
+function dashSearchResults(query) {
+    var q = String(query || "").trim().toLowerCase();
+    var out = {};
+    if (!q) return out;
+    out.pages = dashSearchList(Object.keys(PAGES).filter(function (id) { return dashSearchHas(t(PAGES[id].title), q); }).map(function (id) {
+        return { kind: "pages", icon: id, title: t(PAGES[id].title), sub: "", page: id };
+    }));
+    // Settings by their shown name first, then by their field id (SR-1); the index
+    // comes from the Settings page (SETTINGS_INDEX), absent until it defines one
+    var index = typeof SETTINGS_INDEX !== "undefined" && Array.isArray(SETTINGS_INDEX) ? SETTINGS_INDEX : [];
+    var sections = {};
+    index.forEach(function (e) { if (e && !e.field && typeof e.key === "string") sections[e.section] = t(e.key); });
+    var byName = [];
+    var byId = [];
+    index.forEach(function (e) {
+        if (!e || typeof e.section !== "string" || !UI_SUB_ID.test(e.section)) return;
+        var field = typeof e.field === "string" ? e.field : "";
+        var name = typeof e.key === "string" && e.key ? t(e.key) : "";
+        var item = { kind: "settings", icon: "settings", title: name || field || e.section, sub: field ? sections[e.section] || "" : "", section: e.section, field: field };
+        if (dashSearchHas(name, q)) byName.push(item);
+        else if (field && dashSearchHas(field, q)) {
+            item.sub = field;
+            byId.push(item);
+        }
+    });
+    out.settings = dashSearchList(byName.concat(byId));
+    DASH_SEARCH_DATA.forEach(function (kind) {
+        var slot = dashSearchSlot(kind);
+        var rows = slot.gen === uiDataGen ? slot.rows : null;
+        if (!rows) {
+            out[kind] = { items: [], count: 0, loading: !slot.failed, failed: slot.failed };
+            return;
+        }
+        var hits = [];
+        rows.forEach(function (r) {
+            if (!r) return;
+            if (kind === "tokens" && (dashSearchHas(r.name, q) || dashSearchHas(r.description, q))) {
+                hits.push({ kind: kind, icon: kind, title: String(r.name || ""), sub: r.description ? String(r.description) : t(TOKEN_STATUS[dashTokStatus(r)].label), id: r.id });
+            } else if (kind === "zones" && (dashSearchHas(r.name, q) || dashSearchHas(r.description, q))) {
+                hits.push({ kind: kind, icon: kind, title: String(r.name || ""), sub: String(r.description || ""), id: r.id });
+            } else if (kind === "apikeys" && dashSearchHas(r.name, q)) {
+                hits.push({ kind: kind, icon: kind, title: String(r.name || ""), sub: String(r.scopes || "").split(",").filter(Boolean).join(", "), id: r.id });
+            }
+        });
+        out[kind] = dashSearchList(hits);
+    });
+    return out;
+}
+
+// The text with the first case-insensitive match of q marked, escaped
+function dashSearchMark(text, q) {
+    var value = String(text === null || text === undefined ? "" : text);
+    var lower = value.toLowerCase();
+    var at = q && lower.length === value.length ? lower.indexOf(q) : -1;
+    if (at < 0) return esc(value);
+    return esc(value.slice(0, at)) + "<mark>" + esc(value.slice(at, at + q.length)) + "</mark>" + esc(value.slice(at + q.length));
+}
+
+function dashNavIcon(id) {
+    if (!uiHasDom()) return "";
+    var link = document.querySelector('.ui-nav [data-page-link="' + id + '"]');
+    var icon = link ? link.querySelector("svg") : null;
+    return icon ? icon.outerHTML : DASH_SEARCH_PAGE_ICON;
+}
+
+function dashSearchItemHtml(item, q, index, active) {
+    return '<button type="button" class="ui-gs-item' + (active ? " is-active" : "") + '" id="ui-gs-opt-' + index + '" data-gs-index="' + index +
+        '" role="option" tabindex="-1" aria-selected="' + active + '"><span class="ui-gs-ic">' + dashNavIcon(item.icon === "pages" ? item.page : item.icon) + "</span>" +
+        '<b><bdi dir="auto">' + dashSearchMark(item.title, q) + "</bdi></b><small>" + (item.sub ? '<bdi dir="auto">' + dashSearchMark(item.sub, q) + "</bdi>" : "") + "</small></button>";
+}
+
+function dashSearchCountText(r) {
+    if (!r) return "";
+    if (r.loading) return "…";
+    if (r.failed) return "!";
+    return uiNum(r.count);
+}
+
+function dashSearchRender() {
+    if (!uiHasDom()) return;
+    var root = document.getElementById("ui-gs");
+    var panel = document.getElementById("ui-gs-panel");
+    var input = document.getElementById("ui-gs-input");
+    if (!root || !panel || !input) return;
+    var q = dashSearch.q;
+    root.classList.toggle("has-q", !!q);
+    dashSearch.shown = [];
+    if (!q || !dashSearch.open) {
+        panel.innerHTML = "";
+        input.removeAttribute("aria-activedescendant");
+        input.setAttribute("aria-expanded", "false");
+        return;
+    }
+    var lq = q.trim().toLowerCase();
+    var res = dashSearchResults(q);
+    var loading = DASH_SEARCH_KINDS.some(function (k) { return res[k.id] && res[k.id].loading; });
+    var total = DASH_SEARCH_KINDS.reduce(function (n, k) { return n + (res[k.id] ? res[k.id].count : 0); }, 0);
+    if (dashSearch.tab !== "all" && !res[dashSearch.tab]) dashSearch.tab = "all";
+    var item = function (it) {
+        var index = dashSearch.shown.push(it) - 1;
+        return dashSearchItemHtml(it, lq, index, index === dashSearch.active);
+    };
+    var tab = function (id, label, count, empty) {
+        var on = dashSearch.tab === id;
+        return '<button type="button" class="ui-gs-tab' + (empty ? " is-empty" : "") + '" role="tab" id="ui-gs-tab-' + id + '" data-gs-tab="' + id +
+            '" aria-selected="' + on + '" tabindex="' + (on ? "0" : "-1") + '"><span>' + esc(label) + '</span><span class="ui-gs-n">' + esc(count) + "</span></button>";
+    };
+    var tabs = tab("all", t("search.all"), loading ? "…" : uiNum(total), false) + DASH_SEARCH_KINDS.map(function (k) {
+        var r = res[k.id];
+        return tab(k.id, t(k.label), dashSearchCountText(r), r && !r.loading && !r.count);
+    }).join("");
+    var body = "";
+    if (dashSearch.tab === "all") {
+        DASH_SEARCH_KINDS.forEach(function (k) {
+            var r = res[k.id];
+            if (!r || !r.count) return;
+            body += '<div class="ui-gs-sec" role="presentation"><span>' + esc(t("search.section", { kind: t(k.label), n: uiNum(r.count) })) + "</span>" +
+                (r.count > DASH_SEARCH_SUMMARY ? '<button type="button" class="ui-btn-link" data-gs-tab="' + k.id + '">' + esc(t("search.see-all")) + "</button>" : "") + "</div>" +
+                r.items.slice(0, DASH_SEARCH_SUMMARY).map(item).join("");
+        });
+        if (!body) body = '<p class="ui-gs-empty" role="status">' + esc(loading ? t("search.searching") : t("search.nothing-found", { q: q.trim() })) + "</p>";
+        else if (loading) body += '<p class="ui-gs-wait" role="status">' + esc(t("search.still-searching")) + "</p>";
+    } else {
+        var r = res[dashSearch.tab];
+        if (r.loading) body = '<p class="ui-gs-empty" role="status">' + esc(t("search.searching")) + "</p>";
+        else if (r.failed && !r.count) body = '<p class="ui-gs-empty" role="status">' + esc(t("search.failed")) + "</p>";
+        else if (!r.count) body = '<p class="ui-gs-empty" role="status">' + esc(t("search.nothing-found", { q: q.trim() })) + "</p>";
+        else {
+            body = r.items.map(item).join("");
+            if (r.count > r.items.length) body += '<p class="ui-gs-wait">' + esc(t("search.first-of", { shown: uiNum(r.items.length), n: uiNum(r.count) })) + "</p>";
+        }
+    }
+    if (dashSearch.active >= dashSearch.shown.length) dashSearch.active = Math.max(0, dashSearch.shown.length - 1);
+    var keys = '<div class="ui-gs-keys" aria-hidden="true">' +
+        '<span><kbd class="is-up"></kbd><kbd class="is-down"></kbd><span>' + esc(t("search.hint-move")) + "</span></span>" +
+        "<span><kbd>" + esc(t("search.key-tab")) + "</kbd><span>" + esc(t("search.hint-kind")) + "</span></span>" +
+        "<span><kbd>" + esc(t("search.key-enter")) + "</kbd><span>" + esc(t("search.hint-open")) + "</span></span>" +
+        "<span><kbd>" + esc(t("search.key-esc")) + "</kbd><span>" + esc(t("search.hint-close")) + "</span></span></div>";
+    panel.innerHTML = '<div class="ui-gs-tabs" role="tablist" aria-label="' + esc(t("search.result-types")) + '">' + tabs + "</div>" +
+        '<div class="ui-gs-body" role="listbox" id="ui-gs-list" aria-label="' + esc(t("search.results")) + '">' + body + "</div>" + keys;
+    // The field keeps the focus while Up and Down move: a screen reader reads the active result
+    input.setAttribute("aria-expanded", "true");
+    var active = panel.querySelector(".ui-gs-item.is-active");
+    if (active) {
+        input.setAttribute("aria-activedescendant", active.id);
+        var list = panel.querySelector(".ui-gs-body");
+        if (active.offsetTop < list.scrollTop) list.scrollTop = active.offsetTop;
+        else if (active.offsetTop + active.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = active.offsetTop + active.offsetHeight - list.clientHeight;
+    } else {
+        input.removeAttribute("aria-activedescendant");
+    }
+}
+
+function dashSearchRun(text) {
+    dashSearch.q = String(text || "");
+    dashSearch.active = 0;
+    if (!dashSearch.q.trim()) dashSearch.tab = "all";
+    // Stale data is read again; each kind fills in when its answer arrives
+    if (dashSearch.q.trim()) dashSearchRefresh();
+    dashSearchRender();
+}
+
+// Phones: the search moves out of its bar and covers the screen (SR-8). The
+// sheet is a layer of js/ui.js: Escape and Back close it through its Cancel.
+function dashSearchSheet(on) {
+    var root = document.getElementById("ui-gs");
+    if (!root) return;
+    if (on && root.parentElement !== document.body) {
+        document.body.appendChild(root);
+        root.classList.add("is-sheet");
+        document.documentElement.classList.add("ui-gs-locked");
+    } else if (!on && root.classList.contains("is-sheet")) {
+        root.classList.remove("is-sheet");
+        document.documentElement.classList.remove("ui-gs-locked");
+        var bar = document.getElementById("ui-topbar");
+        if (bar) bar.insertBefore(root, document.getElementById("ui-topbar-actions"));
+    }
+}
+
+function dashSearchOpen() {
+    var root = document.getElementById("ui-gs");
+    if (!root) return;
+    if (uiIsPhone()) dashSearchSheet(true);
+    root.classList.add("is-open");
+    dashSearch.open = true;
+    dashSearchRefresh();
+    dashSearchRender();
+}
+
+// clear: the field is emptied and the next search starts again on All
+function dashSearchClose(clear) {
+    var root = document.getElementById("ui-gs");
+    var input = document.getElementById("ui-gs-input");
+    if (!root || !input) return;
+    if (clear) {
+        input.value = "";
+        dashSearch.tab = "all";
+        dashSearch.q = "";
+    }
+    dashSearch.open = false;
+    root.classList.remove("is-open");
+    dashSearchRender();
+    dashSearchSheet(false);
+    if (document.activeElement === input) input.blur();
+}
+
+// A kind's tab starts on its first result
+function dashSearchSetTab(id) {
+    dashSearch.tab = id;
+    dashSearch.active = 0;
+    dashSearchRender();
+}
+
+function dashSearchStepTab(step) {
+    var ids = ["all"].concat(DASH_SEARCH_KINDS.map(function (k) { return k.id; }));
+    dashSearchSetTab(ids[(ids.indexOf(dashSearch.tab) + step + ids.length) % ids.length]);
+}
+
+// Opening a result goes to it and shows where it landed (SR-6). A move the user
+// stops over unsaved changes keeps the search open.
+function dashSearchChoose(index) {
+    var item = dashSearch.shown[index];
+    if (!item) return Promise.resolve(false);
+    var go;
+    var find = null;
+    if (item.kind === "pages") {
+        go = uiGo(item.page);
+    } else if (item.kind === "settings") {
+        go = uiGo("settings", "", { sub: item.section, hash: item.field });
+        if (item.field) {
+            find = function () {
+                var el = document.getElementById(item.field) || document.querySelector('[data-page="settings"] [name="' + (window.CSS && CSS.escape ? CSS.escape(item.field) : item.field) + '"]');
+                return el && el.getClientRects().length ? el : null;
+            };
+        }
+    } else {
+        // A drill-down starts clean (NL-13): the list searched for exactly this name
+        var page = item.kind === "apikeys" ? "apikeys" : item.kind;
+        var q = item.kind === "apikeys" ? "" : "q=" + encodeURIComponent(item.title);
+        var rowsId = { tokens: "tok-rows", zones: "zone-rows", apikeys: "key-rows" }[item.kind];
+        go = uiGo(page, q);
+        find = function () {
+            var rows = document.getElementById(rowsId);
+            if (!rows) return null;
+            return Array.prototype.slice.call(rows.querySelectorAll("[data-key]")).filter(function (r) { return r.getAttribute("data-key") === item.id; })[0] || null;
+        };
+    }
+    return go.then(function (moved) {
+        if (!moved) return false;
+        dashSearchClose(true);
+        if (!find) return true;
+        return uiWaitFor(find).then(function (el) {
+            if (!el) return true;
+            var field = el.tabIndex >= 0 ? el : null;
+            uiReveal(el.closest(".ui-field, .ui-switch-row") || el);
+            if (field) field.focus({ preventScroll: true });
+            return true;
+        });
+    });
+}
+
+function dashSearchBind() {
+    var root = document.getElementById("ui-gs");
+    var input = document.getElementById("ui-gs-input");
+    var panel = document.getElementById("ui-gs-panel");
+    if (!root || !input || !panel || dashSearch.bound) return;
+    dashSearch.bound = true;
+    var sheet = function () { return root.classList.contains("is-sheet"); };
+    input.addEventListener("focus", dashSearchOpen);
+    input.addEventListener("input", function () { dashSearchRun(input.value); });
+    // The keys work from the field, a tab or a result (SR-4)
+    root.addEventListener("keydown", function (event) {
+        var onTab = event.target instanceof Element && !!event.target.closest("[data-gs-tab]");
+        var inPanel = panel.contains(event.target);
+        if (event.target !== input && !inPanel) return;
+        var n = dashSearch.shown.length;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!n) return;
+            dashSearch.active = (dashSearch.active + (event.key === "ArrowDown" ? 1 : -1) + n) % n;
+            dashSearchRender();
+            if (inPanel && !sheet()) input.focus({ preventScroll: true });
+        } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && onTab) {
+            event.preventDefault();
+            var rtl = getComputedStyle(root).direction === "rtl";
+            dashSearchStepTab((event.key === "ArrowRight") !== rtl ? 1 : -1);
+            var on = panel.querySelector('.ui-gs-tab[aria-selected="true"]');
+            if (on) on.focus();
+        } else if (event.key === "Enter" && !inPanel) {
+            event.preventDefault();
+            dashSearchChoose(dashSearch.active);
+        } else if (event.key === "Tab" && dashSearch.q.trim()) {
+            event.preventDefault();
+            dashSearchStepTab(event.shiftKey ? -1 : 1);
+            if (inPanel && !sheet()) input.focus({ preventScroll: true });
+        } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            dashSearchClose(true);
+        }
+    });
+    // A click on a result or a tab keeps the focus in the field; on a phone a tab
+    // lets the keyboard go so the results get the room
+    panel.addEventListener("mousedown", function (event) {
+        if (event.target instanceof Element && event.target.closest("button") && !sheet()) event.preventDefault();
+    });
+    panel.addEventListener("click", function (event) {
+        var tabBtn = event.target.closest("[data-gs-tab]");
+        if (tabBtn) {
+            dashSearchSetTab(tabBtn.getAttribute("data-gs-tab"));
+            if (sheet()) input.blur();
+            else input.focus({ preventScroll: true });
+            return;
+        }
+        var it = event.target.closest("[data-gs-index]");
+        if (it) dashSearchChoose(Number(it.getAttribute("data-gs-index")));
+    });
+    var cancel = document.getElementById("ui-gs-cancel");
+    if (cancel) cancel.addEventListener("click", function () { dashSearchClose(true); });
+    var phone = document.getElementById("ui-gs-phone");
+    if (phone) {
+        phone.addEventListener("click", function () {
+            dashSearchOpen();
+            input.focus();
+        });
+    }
+    // A click outside closes it and keeps the text; nothing closes it under a dialog
+    document.addEventListener("mousedown", function (event) {
+        if (!dashSearch.open || sheet() || uiOpenLayers().length) return;
+        if (event.target instanceof Node && !root.contains(event.target)) dashSearchClose(false);
+    });
+    input.addEventListener("blur", function () {
+        setTimeout(function () {
+            if (dashSearch.open && !root.contains(document.activeElement) && !input.value && !sheet() && !uiOpenLayers().length) dashSearchClose(false);
+        }, 0);
+    });
+    // "/" from anywhere that is not a field opens the search, never over a dialog
+    document.addEventListener("keydown", function (event) {
+        if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+        var target = event.target;
+        if (target instanceof Element && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+        if (uiOpenLayers().length || uiPickerState.open) return;
+        event.preventDefault();
+        if (uiIsPhone()) {
+            if (phone) phone.click();
+        } else {
+            input.focus();
+        }
+    });
+}
 
 // ===========================================================================
 // Shared pieces of the list pages

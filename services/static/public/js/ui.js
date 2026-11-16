@@ -709,9 +709,11 @@ var uiOverlayEntry = false;
 var uiIgnorePop = false;
 var uiLayerQueued = false;
 
+// The phone search over the whole screen (SR-8) is a layer too: Escape and Back
+// close it, and what lies under it is inert
 function uiOpenLayers() {
     if (!uiHasDom()) return [];
-    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop"))
+    return Array.prototype.slice.call(document.querySelectorAll(".ui-dialog-backdrop, .ui-gs.is-sheet"))
         .filter(function (el) { return el.getClientRects().length > 0; })
         .sort(function (a, b) {
             var za = parseInt(getComputedStyle(a).zIndex, 10) || 0;
@@ -763,7 +765,7 @@ function uiLayerFocusBack(opener, below) {
         return;
     }
     if (below) { uiLayerFocusIn(below); return; }
-    var heading = document.querySelector(".ui-page:not(.hidden) h1");
+    var heading = uiPageHeading();
     if (heading) {
         if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
         heading.focus({ preventScroll: true });
@@ -1960,6 +1962,160 @@ function uiDbNoteHtml(n) {
 }
 
 // ===========================================================================
+// Shell (WP3): the top bar on wide screens (NL-6), the sidebar folded into the
+// rail (NL-7), the information dialog with its reading gauge (DS-5), showing
+// where an opened search result landed (SR-6) and the window pan the phone
+// keyboard leaves (MO-1)
+// ===========================================================================
+
+var uiTopbarMoves = [];
+var uiTopbarPage = "";
+
+function uiTopbarMove(el, target) {
+    if (!el || !target || !el.parentNode) return;
+    var mark = document.createComment("topbar");
+    el.parentNode.replaceChild(mark, el);
+    target.appendChild(el);
+    uiTopbarMoves.push([el, mark]);
+}
+
+function uiTopbarRestore() {
+    uiTopbarMoves.reverse().forEach(function (pair) {
+        if (pair[1].parentNode) pair[1].parentNode.replaceChild(pair[0], pair[1]);
+    });
+    uiTopbarMoves = [];
+}
+
+// Wide screens: the open page's title (with its help button) and its own action
+// buttons move into the top bar while the page is open. They are the page's own
+// elements, moved and put back when the page is left or the width crosses 760px,
+// so every id, button and listener stays as it was. Phones keep the page head.
+function uiPlaceTopbar(id) {
+    if (id !== undefined) uiTopbarPage = id;
+    if (!uiHasDom() || !document.getElementById("ui-topbar")) return;
+    uiTopbarRestore();
+    var on = !uiIsPhone();
+    document.documentElement.classList.toggle("ui-has-topbar", on);
+    if (!on || !uiTopbarPage) return;
+    var page = document.querySelector('.ui-page[data-page="' + uiTopbarPage + '"]');
+    var head = page ? page.querySelector(".ui-page-head") : null;
+    var title = head ? head.querySelector(".ui-h1") : null;
+    if (!title) return;
+    uiTopbarMove(title, document.getElementById("ui-topbar-title"));
+    Array.prototype.slice.call(head.children).forEach(function (el) {
+        if (el.classList.contains("ui-page-actions")) uiTopbarMove(el, document.getElementById("ui-topbar-actions"));
+    });
+}
+
+// The open page's title, wherever it is now (in its page or in the top bar)
+function uiPageHeading() {
+    var bar = document.querySelector("#ui-topbar-title .ui-h1");
+    if (bar && bar.getClientRects().length) return bar;
+    return document.querySelector(".ui-page:not(.hidden) h1");
+}
+
+// NL-7: the toggle by the brand folds the sidebar into the rail, remembered in
+// this browser (js/head.js applies it before the first paint)
+function uiNavCollapsed() {
+    return uiHasDom() && document.documentElement.classList.contains("ui-nav-collapsed");
+}
+function uiNavToggleSync() {
+    var b = uiHasDom() ? document.getElementById("ui-nav-toggle") : null;
+    if (!b) return;
+    var folded = uiNavCollapsed();
+    var label = folded ? t("shell.expand-menu") : t("shell.collapse-menu");
+    b.setAttribute("aria-label", label);
+    b.setAttribute("title", label);
+    b.setAttribute("aria-expanded", String(!folded));
+}
+function uiNavToggle() {
+    var folded = document.documentElement.classList.toggle("ui-nav-collapsed");
+    try { window.localStorage.setItem("uiNavCollapsed", folded ? "1" : "0"); } catch (e) { /* storage blocked: for this visit only */ }
+    uiNavToggleSync();
+}
+
+// DS-5: the top of an information dialog (the grip on a phone and the head)
+// fills from the start side as the text is read; a text that does not scroll
+// shows no gauge
+function uiReadProgress(d) {
+    // The head sits right above the body that scrolls
+    var head = d.body.previousElementSibling;
+    var scroller = d.body;
+    if (!head || !scroller) return;
+    var bar = document.createElement("span");
+    bar.className = "ui-read-bar";
+    bar.setAttribute("aria-hidden", "true");
+    bar.innerHTML = "<i></i>";
+    d.dialog.appendChild(bar);
+    var update = function () {
+        var room = scroller.scrollHeight - scroller.clientHeight;
+        bar.classList.toggle("hidden", room <= 1);
+        bar.style.height = (head.offsetTop + head.offsetHeight) + "px";
+        bar.firstElementChild.style.width = (room > 1 ? Math.min(100, scroller.scrollTop / room * 100) : 0) + "%";
+    };
+    scroller.addEventListener("scroll", update, { passive: true });
+    update();
+    requestAnimationFrame(update);
+}
+
+// A text to read (help): the shared dialog, closed by its X, Escape, Back, a
+// click outside or a pull down; every opening starts at the top (DS-6).
+// paragraphs: plain texts, one paragraph each.
+function uiInfoDialog(o) {
+    var d = null;
+    var close = function () { if (d) d.backdrop.remove(); };
+    d = uiDialog({
+        title: o.title, size: "md", close: close, backdropClose: close, bodyClass: "ui-help",
+        body: (o.paragraphs || []).map(function (p) { return "<p>" + esc(p) + "</p>"; }).join(""),
+    });
+    d.body.scrollTop = 0;
+    uiReadProgress(d);
+    return d;
+}
+
+// SR-6: wait for what a page draws after it opens (every 100ms, up to 8 seconds)
+function uiWaitFor(find, timeout) {
+    var limit = timeout === undefined ? 8000 : timeout;
+    return new Promise(function (resolve) {
+        var started = Date.now();
+        var look = function () {
+            var found = null;
+            try { found = find(); } catch (e) { found = null; }
+            if (found || Date.now() - started > limit) resolve(found || null);
+            else setTimeout(look, 100);
+        };
+        look();
+    });
+}
+
+// SR-6: bring what was opened into view inside the page's own scroll area (not
+// with scrollIntoView, which can pan the phone window, MO-1) and ring it for a moment
+function uiReveal(el) {
+    if (!el || !el.isConnected) return;
+    var main = uiMainScroller();
+    if (main && main.contains(el)) {
+        var box = main.getBoundingClientRect();
+        var r = el.getBoundingClientRect();
+        var target = main.scrollTop + (r.top - box.top) - Math.max(0, (main.clientHeight - r.height) / 2);
+        main.scrollTop = Math.max(0, target);
+    }
+    el.classList.add("ui-gs-target");
+    el.classList.remove("ui-gs-flash");
+    void el.offsetWidth;
+    el.classList.add("ui-gs-flash");
+    setTimeout(function () { el.classList.remove("ui-gs-flash"); }, 2000);
+}
+
+// MO-1: the app frame never scrolls the window. A phone keyboard can pan the
+// window and leave it panned; once no field is being edited, it goes back.
+function uiResetWindowPan() {
+    var el = document.activeElement;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+    var se = document.scrollingElement;
+    if (window.scrollX || window.scrollY || (se && se.scrollTop)) window.scrollTo(0, 0);
+}
+
+// ===========================================================================
 // Page-wide listeners, installed once by the page
 // ===========================================================================
 
@@ -1982,6 +2138,10 @@ function uiInstallGlobalListeners() {
     window.addEventListener("scroll", uiMenuOnScroll, true);
     window.addEventListener("scroll", uiPickerOnScroll, true);
     window.addEventListener("resize", function () { uiMenuDismiss(false); if (uiPickerState.open) uiPickerPlace(uiPickerState.open); });
+    // MO-1: the window pan the phone keyboard leaves is reset
+    window.addEventListener("scroll", uiResetWindowPan, { passive: true });
+    document.addEventListener("focusout", function () { setTimeout(uiResetWindowPan, 300); });
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", function () { setTimeout(uiResetWindowPan, 100); });
     // Click to copy anywhere; inside a clickable row it does not open the row
     document.addEventListener("click", function (event) {
         var b = event.target instanceof Element ? event.target.closest("[data-copy]") : null;
