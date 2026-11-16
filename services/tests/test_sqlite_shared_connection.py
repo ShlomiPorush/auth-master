@@ -73,3 +73,34 @@ def test_a_write_after_another_connection_committed_during_a_read(tmp_path):
             await db.close()
 
     asyncio.run(go())
+
+
+def test_a_cancelled_read_keeps_the_connection_until_its_cursor_is_closed(tmp_path):
+    """A read cancelled while its statement is queued (a stopped background task, for
+    example) holds the connection until that statement and its cursor are done, so the next
+    write still waits for the lock."""
+    async def go():
+        db = await _database(tmp_path / "t.db")
+        other = await aiosqlite.connect(tmp_path / "t.db", isolation_level=None)
+        try:
+            await other.execute("BEGIN IMMEDIATE")
+            await other.execute("UPDATE t SET v = 'x' WHERE id = 3")
+
+            async def release():
+                await asyncio.sleep(0.3)
+                await other.execute("COMMIT")
+
+            releasing = asyncio.ensure_future(release())
+            read = asyncio.ensure_future(db.fetch("SELECT v FROM t ORDER BY id"))
+            await asyncio.sleep(0)  # the read holds the lock and has queued its statement
+            read.cancel()
+            await db.execute("UPDATE t SET v = 'y' WHERE id = 1")
+            await releasing
+            with pytest.raises(asyncio.CancelledError):
+                await read
+            assert await db.fetchval("SELECT v FROM t WHERE id = 1") == "y"
+        finally:
+            await other.close()
+            await db.close()
+
+    asyncio.run(go())
