@@ -239,18 +239,37 @@ async def save(write_db: Database, base: Stored, value: str) -> bool:
                 "UPDATE app_state SET value = $2 WHERE key = $1 AND value = $3 RETURNING key",
                 KEY, value, base.raw,
             )
-    except sqlite3.OperationalError as e:
-        # SQLite runs in this process: an error means the statement did not take effect
-        raise WriteRefused(busy="locked" in str(e).lower()) from None
     except Exception as e:
-        if _server_refused(e):
-            # PostgreSQL answered with an error: no privilege, a read-only transaction or server
+        # An error can come after the write was committed (for example while the connection is
+        # handed back to the pool), so what the database now holds decides, not the error alone.
+        held = await _held_value(write_db)
+        if held is _UNREADABLE:
+            outcome = None
+        else:
+            outcome = True if held == value else (False if held == base.raw else None)
+        if outcome is True:
+            return True
+        if isinstance(e, sqlite3.OperationalError):
+            # SQLite runs in this process: the statement did not take effect
+            raise WriteRefused(busy="locked" in str(e).lower()) from None
+        if outcome is False and _server_refused(e):
+            # PostgreSQL answered with an error and the stored value is unchanged
             print(f"Display settings were not saved: the database refused the write ({type(e).__name__})")
             raise WriteRefused(busy=False) from None
-        # The connection failed before the answer came: the write may have been committed
         print(f"Display settings: the database did not confirm the write ({type(e).__name__})")
         raise WriteUnknown() from None
     return done is not None
+
+
+_UNREADABLE = object()
+
+
+async def _held_value(db: Database) -> Any:
+    """The stored value of the key right now (None when absent), or _UNREADABLE."""
+    try:
+        return await db.fetchval("SELECT value FROM app_state WHERE key = $1", KEY)
+    except Exception:
+        return _UNREADABLE
 
 
 async def log_change(
@@ -321,6 +340,12 @@ async def sync_from_environment(db: Database, write_db: Database) -> Stored:
         saved = await save(write_db, stored, value)
     except WriteRefused:
         saved = False
+    except WriteUnknown:
+        # The copy may or may not have been stored: read again, keep what was read on failure (R8)
+        try:
+            return await read_current(db)
+        except Exception:
+            return stored
     if not saved:
         print("The display settings set by DATE_FORMAT or TIME_FORMAT were not copied to the Settings page; "
               "they apply while the variables are set.")

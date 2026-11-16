@@ -279,6 +279,10 @@ def test_a_refused_write_is_a_failed_save_never_bad_stored_data(tmp_path):
     class ReadOnly:
         is_pg, is_sqlite = False, True
 
+        # The stored value is unchanged (nothing was ever saved)
+        async def fetchval(self, *_a):
+            return None
+
         async def fetchval_write(self, *_a):
             import sqlite3
 
@@ -315,6 +319,14 @@ def test_a_refused_write_is_a_failed_save_never_bad_stored_data(tmp_path):
         for db in (Dropped(), PgDropped()):
             with pytest.raises(ds.WriteUnknown):
                 await ds.save(db, ds.EMPTY, "{}")
+
+        class Unreadable(NoPrivilege):
+            # A refusal whose result cannot be read back is not proof that nothing was saved
+            async def fetchval(self, *_a):
+                raise ConnectionError("gone")
+
+        with pytest.raises(ds.WriteUnknown):
+            await ds.save(Unreadable(), ds.EMPTY, "{}")
 
     _run(scenario())
 
@@ -561,6 +573,56 @@ def test_a_write_the_database_refuses_is_reported_and_saves_nothing(admin, monke
     assert res.status_code == 503 and res.json()["code"] == "write_refused"
     assert admin.get().json()["version"] == 0
     assert ds.current().date_format == "browser"
+
+
+def test_an_error_after_the_write_was_committed_is_a_save(tmp_path):
+    # R1: asyncpg resets a connection when it goes back to the pool; an error there (here a
+    # cancelled reset, SQLSTATE 57014) comes after the write was committed
+    ds = _ds()
+
+    class CommittedThenCancelled:
+        is_pg, is_sqlite = True, False
+
+        def __init__(self):
+            self.held = None
+
+        async def fetchval(self, *_a):
+            return self.held
+
+        async def fetchval_write(self, _sql, _key, value, *_rest):
+            import asyncpg
+
+            self.held = value
+            raise asyncpg.exceptions.QueryCanceledError("canceling statement due to user request")
+
+    async def scenario():
+        assert await ds.save(CommittedThenCancelled(), ds.EMPTY, "{\"v\": 1}") is True
+
+    _run(scenario())
+
+
+def test_an_unconfirmed_copy_from_the_environment_keeps_what_was_read(monkeypatch):
+    # R8: the start read the stored formats, then the copy of DATE_FORMAT lost its answer
+    ds = _ds()
+    use_env(monkeypatch, DATE_FORMAT="YYYY-MM-DD")
+    stored = ds.dump_value(3, {"dateFormat": "DD/MM/YYYY", "timeFormat": "12h"}, "admin", ds.now_iso())
+
+    class Db:
+        is_pg, is_sqlite = True, False
+
+        async def fetchval(self, *_a):
+            return stored
+
+    async def unconfirmed(*_a, **_k):
+        raise ds.WriteUnknown()
+
+    monkeypatch.setattr(ds, "save", unconfirmed)
+
+    async def scenario():
+        got = await ds.sync_from_environment(Db(), Db())
+        assert got.version == 3 and got.values["timeFormat"] == "12h"
+
+    _run(scenario())
 
 
 def test_a_write_the_database_did_not_confirm_is_reported_as_unknown(admin, monkeypatch):
