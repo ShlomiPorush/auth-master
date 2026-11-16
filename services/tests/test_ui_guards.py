@@ -205,6 +205,7 @@ FLOATING_CSS = {
     ".ui-popover": "picker panels (uiPicker)",
     ".ui-tabbar": "the phone tab bar (NL-9), part of the page",
     ".ui-fly": "the page name beside a rail icon (NL-8)",
+    ".ui-savebar": "the Settings save bar (SV-1), part of the page",
 }
 
 HTML_LAYER_PATTERNS = {
@@ -751,8 +752,10 @@ def catalog_entries(text_js: str) -> tuple[dict, list[str]]:
             out[k] = v
         return out
 
+    # Whole-line comments are notes for the writer ("// brief: ..." above a new key)
+    body = re.sub(r"^[ \t]*//[^\n]*\n", "", m.group(1), flags=re.M)
     try:
-        catalog = json.loads(re.sub(r",(\s*[}\]])", r"\1", m.group(1)), object_pairs_hook=pairs)
+        catalog = json.loads(re.sub(r",(\s*[}\]])", r"\1", body), object_pairs_hook=pairs)
     except ValueError as e:
         return {}, [f"UI_TEXT is not plain data: {e}"]
     for k, v in catalog.items():
@@ -1255,6 +1258,7 @@ DATE_HELPERS = {
     ("js/ui.js", "uiZoneValid"): "checks that a zone name works in this browser",
     ("js/ui.js", "uiZoneParts"): "reads an instant's wall clock in the app zone",
     ("js/ui.js", "writeDate"): "writes a date in the browser's order for Date Format 'Browser order'",
+    ("js/ui.js", "writeClock"): "writes a time on the browser's own clock for Time Format 'Browser'",
 }
 NUMBER_LOCALE = re.compile(r"Number\((?:[^()]|\([^()]*\))*\)\.toLocaleString\s*\(")
 

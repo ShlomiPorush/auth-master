@@ -43,11 +43,12 @@ def _view(stored: rls.Stored, request: Request) -> dict[str, Any]:
         "fields": {
             "maxReq": {
                 "value": eff.max_req, "source": source("maxReq", stored.max_req), "locked": locked["maxReq"],
-                "envName": rls.ENV_FIELDS["maxReq"][1], "min": 1, "max": rls.MAX_REQ_LIMIT,
+                "envName": rls.ENV_FIELDS["maxReq"][1], "min": 1, "max": rls.MAX_REQ_LIMIT, "default": rls.DEFAULT_MAX_REQ,
             },
             "windowMs": {
                 "value": eff.window_ms, "source": source("windowMs", stored.window_ms), "locked": locked["windowMs"],
                 "envName": rls.ENV_FIELDS["windowMs"][1], "minSeconds": 1, "maxSeconds": rls.WINDOW_SECONDS_LIMIT,
+                "default": rls.DEFAULT_WINDOW_MS,
             },
             "exempt": {
                 "value": list(stored.exempt), "source": "stored" if stored.exempt else "default", "locked": False,
@@ -202,7 +203,8 @@ def _general_view(stored: gs.Stored) -> dict[str, Any]:
             source = "env"
         else:
             source = "stored" if stored.values[name] is not None else "default"
-        return {"value": eff.value(name), "source": source, "locked": locked[name], "envName": gs.ENV_FIELDS[name][1]}
+        return {"value": eff.value(name), "source": source, "locked": locked[name], "envName": gs.ENV_FIELDS[name][1],
+                "default": gs.DEFAULTS[name]}
 
     retention = {"min": gs.RETENTION_MIN, "max": gs.RETENTION_MAX}
     s = get_settings()

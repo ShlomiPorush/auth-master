@@ -411,6 +411,85 @@ body.ui-app { overflow: hidden; }
 .ui-locked-note svg { flex: none; }
 .ui-locked-note > span { min-width: 0; overflow-wrap: anywhere; }
 
+/* ---------- WP2 Settings: sections with addresses, rows, marks, secrets, save bar (FS-8, FS-10, FS-6, FS-3, SV-1) ---------- */
+
+/* The section list beside the fields; on narrow screens a sticky picker instead */
+.ui-settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--ui-sp-10); align-items: start; }
+.ui-settings-nav { position: sticky; top: 0; display: grid; gap: var(--ui-sp-1); max-height: calc(100vh - var(--ui-sp-11)); max-height: calc(100dvh - var(--ui-sp-11)); overflow-y: auto; }
+.ui-settings-group { margin: var(--ui-sp-6) 0 var(--ui-sp-2); padding: 0 var(--ui-sp-5); color: var(--ui-muted); font-size: var(--ui-fs-xs);
+    font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.ui-settings-group:first-child { margin-top: 0; }
+.ui-settings-link { display: flex; align-items: center; gap: var(--ui-sp-4); min-height: var(--ui-ctl-h); padding: 0 var(--ui-sp-5);
+    border-radius: var(--ui-radius-sm); color: var(--ui-ink); font-weight: 500; text-decoration: none; }
+.ui-settings-link[aria-current="true"] { background: var(--ui-accent); color: var(--ui-on-accent); font-weight: 650; }
+@media (hover: hover) { .ui-settings-link:not([aria-current="true"]):hover { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); } }
+/* A section that holds an unsaved change */
+.ui-settings-link.has-changes::after { content: ""; flex: none; width: 7px; height: 7px; margin-inline-start: auto; border-radius: 50%; background: var(--ui-info); }
+.ui-settings-pick { display: none; }
+/* The last field is never under the save bar */
+.ui-settings-content { display: grid; gap: var(--ui-gap); min-width: 0; padding-bottom: calc(var(--ui-sp-11) + var(--ui-sp-11) + var(--ui-sp-9)); }
+.ui-settings-section:not(.hidden) { display: grid; gap: var(--ui-gap); min-width: 0; }
+.ui-settings-title { font-size: var(--ui-fs-fig); font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
+.ui-settings-intro { max-width: 75ch; color: var(--ui-muted); line-height: 1.5; }
+
+/* One setting per row: label and explanation at the start, the control at the end */
+.ui-settings-fields.ui-set-rows { gap: 0; }
+.ui-set-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--ui-sp-2) var(--ui-sp-10); align-items: start;
+    padding: var(--ui-sp-7) 0; border-top: 1px solid var(--ui-line); }
+.ui-set-row:first-child { padding-top: 0; border-top: 0; }
+.ui-set-text { display: grid; gap: var(--ui-sp-2); min-width: 0; }
+.ui-set-text > .ui-hint, .ui-hint-line { display: block; }
+.ui-set-label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-3); }
+.ui-set-label .ui-label { color: var(--ui-ink); font-size: var(--ui-fs); font-weight: 600; }
+.ui-set-marks { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-3); }
+.ui-set-marks:empty { display: none; }
+.ui-set-control { display: grid; gap: var(--ui-sp-2); min-width: 0; }
+.ui-set-row .ui-seg { justify-self: start; }
+.ui-set-bool { cursor: pointer; }
+.ui-set-bool .ui-set-control { justify-items: end; }
+.ui-set-bool.is-locked { cursor: not-allowed; }
+.ui-switch:disabled { opacity: .55; cursor: not-allowed; }
+.ui-set-row.is-locked select:disabled, .ui-set-row.is-locked .ui-seg button:disabled { opacity: .7; cursor: not-allowed; }
+.ui-set-note { color: var(--ui-fail); font-size: var(--ui-fs-meta); font-weight: 600; }
+
+/* Changed and the lock, beside the label; Reset names the default (FS-6) */
+.ui-set-pill { display: inline-flex; align-items: center; gap: var(--ui-sp-2); padding: 0 var(--ui-sp-3); border-radius: var(--ui-radius-tag);
+    font-size: var(--ui-fs-xs); font-weight: 700; line-height: 1.7; white-space: nowrap; }
+.ui-set-pill.is-changed { background: color-mix(in srgb, var(--ui-info) 14%, transparent); color: var(--ui-info); }
+.ui-set-pill.is-lock { background: color-mix(in srgb, var(--ui-muted) 14%, transparent); color: var(--ui-muted); }
+.ui-set-pill svg { flex: none; width: 12px; height: 12px; }
+.ui-set-reset { color: var(--ui-info); font-size: var(--ui-fs-meta); }
+
+/* A stored secret: Stored, Replace, Remove; the field shows only on Replace (FS-3) */
+.ui-set-secret:not(.hidden) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-4); min-height: var(--ui-ctl-h); }
+.ui-set-secret > span { font-weight: 600; }
+.ui-set-secret > span.is-removing { color: var(--ui-fail); }
+.ui-set-replace:not(.hidden) { display: flex; align-items: center; gap: var(--ui-sp-4); }
+.ui-set-replace > .ui-input { flex: 1; min-width: 0; }
+
+/* The save bar: shown only while something is unsaved; part of the page */
+.ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; width: fit-content; max-width: calc(100vw - var(--ui-sp-11)); margin: 0 auto;
+    align-items: center; gap: var(--ui-sp-6); padding: var(--ui-sp-4); padding-inline-start: var(--ui-sp-7); border-radius: var(--ui-radius);
+    background: var(--ui-ink); color: var(--ui-bg); box-shadow: 0 12px 30px rgb(0 0 0 / .25); }
+.ui-savebar:not(.hidden) { display: flex; }
+.ui-savebar-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ui-savebar .ui-btn { border-color: color-mix(in srgb, var(--ui-bg) 40%, transparent); background: transparent; color: var(--ui-bg); }
+.ui-savebar .ui-btn-primary { border-color: var(--ui-bg); background: var(--ui-bg); color: var(--ui-ink); }
+@media (hover: hover) { .ui-savebar .ui-btn:not(:disabled):hover { border-color: var(--ui-bg); } }
+.ui-savebar[aria-busy="true"] .ui-btn { opacity: .6; cursor: wait; }
+
+@media (max-width: 1023px) {
+    .ui-settings { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .ui-settings-nav { display: none; }
+    .ui-settings-pick { position: sticky; top: 0; z-index: 4; display: block; padding: var(--ui-sp-4) 0; background: var(--ui-bg); }
+}
+@media (max-width: 760px) {
+    .ui-set-row { grid-template-columns: minmax(0, 1fr); }
+    .ui-set-bool { grid-template-columns: minmax(0, 1fr) auto; }
+    .ui-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; max-width: none; }
+    .ui-savebar-count { flex: 1; min-width: 0; }
+}
+
 /* ---------- Filter bar and count line ---------- */
 
 .ui-fbar { display: grid; gap: var(--ui-sp-5); padding: var(--ui-sp-6) var(--ui-pad-x); border-bottom: 1px solid var(--ui-line); }

@@ -357,28 +357,66 @@
               <p data-t-tpl="settings.the-time-zone-how-long-the"><code data-t-slot="code" data-t="settings.validate"></code><code data-t-slot="code2" data-t="settings.validate-grants"></code></p>
             </div>
           </div>
-          <div class="ui-panel" id="general-panel">
-            <div class="ui-panel-head" data-t="settings.general"></div>
-            <div class="ui-settings-info" id="general-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="general-body"></div>
+          <!-- Sections, each with its own address (/admin/settings/<section>); the list and the narrow-screen picker are built from SETTINGS_SECTIONS -->
+          <div class="ui-settings" id="settings-layout">
+            <nav class="ui-settings-nav" id="settings-nav" data-t-attr="aria-label:settings.nav.label"></nav>
+            <div class="ui-settings-pick">
+              <label class="ui-sr" for="settings-pick" data-t="settings.nav.picker-label"></label>
+              <select class="ui-select" id="settings-pick"></select>
+            </div>
+            <div class="ui-settings-content" id="settings-content">
+              <div class="ui-settings-section hidden" data-settings-section="general">
+                <h2 class="ui-settings-title" data-t="settings.general"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.general-intro"></p>
+                <div class="ui-panel" id="general-panel">
+                  <div class="ui-settings-info" id="general-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="general-body"></div>
+                </div>
+                <div class="ui-panel" id="display-panel">
+                  <div class="ui-panel-head" data-t="settings.display"></div>
+                  <div class="ui-settings-info" id="display-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="display-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="rate-limit">
+                <h2 class="ui-settings-title" data-t="settings.rate-limit"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.rate-limit-intro"></p>
+                <div class="ui-panel" id="settings-panel">
+                  <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="settings-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="passkeys">
+                <h2 class="ui-settings-title" data-t="settings.passkeys"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.passkeys-intro"></p>
+                <div class="ui-panel" id="settings-pk-panel" data-inventory="settings.passkeys">
+                  <div class="ui-settings-info" id="settings-pk-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="settings-pk-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="database">
+                <h2 class="ui-settings-title" data-t="settings.database"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.database-intro"></p>
+                <div class="ui-panel" id="db-panel" data-inventory="settings.database">
+                  <div class="ui-settings-info" id="db-lock" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="db-body"></div>
+                </div>
+              </div>
+              <div class="ui-settings-section hidden" data-settings-section="redis">
+                <h2 class="ui-settings-title" data-t="settings.redis-connection"></h2>
+                <p class="ui-settings-intro" data-t="settings.section.redis-intro"></p>
+                <div class="ui-panel" id="redis-panel">
+                  <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
+                  <div class="ui-panel-body" id="redis-body"></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="ui-panel" id="settings-panel">
-            <div class="ui-panel-head" data-t="settings.rate-limit"></div>
-            <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="settings-body"></div>
-          </div>
-          <div class="ui-panel" id="db-panel" data-inventory="settings.database">
-            <div class="ui-panel-head" data-t="settings.database"></div>
-            <div class="ui-panel-body" id="db-body"></div>
-          </div>
-          <div class="ui-panel" id="redis-panel">
-            <div class="ui-panel-head" data-t="settings.redis-connection"></div>
-            <div class="ui-settings-info" id="redis-info" aria-live="polite"></div>
-            <div class="ui-panel-body" id="redis-body"></div>
-          </div>
-          <div class="ui-panel" id="settings-pk-panel" data-inventory="settings.passkeys">
-            <div class="ui-panel-head" data-t="settings.passkeys"></div>
-            <div class="ui-panel-body" id="settings-pk-body"></div>
+          <!-- One save bar for the page (SV-1): the database change has its own button -->
+          <div class="ui-savebar hidden" id="settings-savebar" role="region" data-t-attr="aria-label:settings.savebar.label">
+            <span class="ui-savebar-count" id="settings-savebar-count" aria-live="polite"></span>
+            <button type="button" class="ui-btn" id="settings-discard" data-t="settings.savebar.discard"></button>
+            <button type="button" class="ui-btn ui-btn-primary" id="settings-save" data-t="settings.savebar.save"></button>
           </div>
         </section>
 

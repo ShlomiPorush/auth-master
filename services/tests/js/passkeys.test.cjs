@@ -248,56 +248,58 @@ function address(version, origin, locked) {
     return { origin, rpId: origin ? new URL(origin).hostname : null, version, locked: !!locked, envName: "PASSKEY_ORIGIN", savedBy: "admin", savedAt: null };
 }
 
+// The passkey address is one save unit of the Settings page (dashboard.js)
+function pkUnit(ctx, view) {
+    const st = ctx.dashPkSet;
+    st.snap = st.baseSnap = view;
+    st.draft = { origin: view.origin || "" };
+    return st;
+}
+
 test("passkey address: the save sends only baseVersion and origin, on top of the version read", async () => {
     const { ctx, calls } = dashboard((path, opts) => (opts && opts.method === "PUT" ? { status: 200, data: address(4, "https://auth.example.test:8443") } : null));
-    const s = ctx.dashPkSet;
-    s.snap = s.base = address(3, "https://auth.example.test");
-    s.draft = "https://auth.example.test:8443";
-    s.dirty = true;
+    const s = pkUnit(ctx, address(3, "https://auth.example.test"));
+    s.draft.origin = "https://auth.example.test:8443";
     let asked = 0;
     ctx.uiConfirm = () => { asked++; return Promise.resolve(true); };
-    ctx.dashPkSetSave();
-    await settle();
+    assert.equal(await ctx.dashPkSetSave(), "saved");
     assert.equal(asked, 0, "the same host name keeps the passkeys usable: no question");
     const put = calls.find((c) => c.method === "PUT");
     assert.equal(put.path, "/admin/api/settings/passkeys");
     assert.deepEqual(JSON.parse(JSON.stringify(put.body)), { baseVersion: 3, origin: "https://auth.example.test:8443" });
-    assert.equal(s.base.version, 4);
+    assert.equal(s.baseSnap.version, 4);
     assert.equal(s.dirty, false);
 });
 
 test("passkey address: removing it or moving to another host asks first; No sends nothing", async () => {
     for (const draft of ["", "https://other.example.test"]) {
         const { ctx, calls } = dashboard(() => null);
-        const s = ctx.dashPkSet;
-        s.snap = s.base = address(3, "https://auth.example.test");
-        s.draft = draft;
-        s.dirty = true;
+        const s = pkUnit(ctx, address(3, "https://auth.example.test"));
+        s.draft.origin = draft;
         const questions = [];
         ctx.uiConfirm = (o) => { questions.push(o); return Promise.resolve(false); };
-        ctx.dashPkSetSave();
-        await settle();
+        assert.equal(await ctx.dashPkSetSave(), "cancelled");
         assert.equal(questions.length, 1, JSON.stringify(draft));
         assert.equal(questions[0].danger, true);
         assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
+        assert.equal(s.draft.origin, draft, "the draft stays");
     }
 });
 
-test("passkey address: a conflict (409) keeps the draft and offers Reload; a refresh does not overwrite it", async () => {
+test("passkey address: a conflict (409) keeps the draft and shows what was saved; a refresh does not overwrite it", async () => {
     const answers = [{ status: 409, data: { detail: "Someone else changed the passkey address after you opened the page. Reload and try again." } }];
     const { ctx } = dashboard((path, opts) => (opts && opts.method === "PUT" ? answers.shift() : { status: 200, data: address(5, "https://new.example.test") }));
-    const s = ctx.dashPkSet;
-    s.snap = s.base = address(3, null);
-    s.draft = "https://auth.example.test";
-    s.dirty = true;
-    ctx.dashPkSetSave();
-    await settle();
-    assert.equal(s.stale, true);
-    assert.match(s.error, /Reload and try again/);
+    const s = pkUnit(ctx, address(3, null));
+    s.draft.origin = "https://auth.example.test";
+    assert.equal(await ctx.dashPkSetSave(), "conflict");
+    assert.equal(s.conflict.version, 5);
     await ctx.dashPkSetLoad();
-    assert.equal(s.draft, "https://auth.example.test");
-    assert.equal(s.base.version, 3);
+    assert.equal(s.draft.origin, "https://auth.example.test");
+    assert.equal(s.baseSnap.version, 3);
     assert.equal(s.snap.version, 5);
+    // Keep my changes: the draft now goes on top of the other admin's version
+    ctx.dashPanelKeep(ctx.DASH_SET_PANELS.passkeys);
+    assert.equal(s.baseSnap.version, 5);
 });
 
 test("sign-in: a probe that fails for another reason keeps the button; the click reports the failure", async () => {
@@ -310,25 +312,25 @@ test("sign-in: a probe that fails for another reason keeps the button; the click
     assert.equal(els.err.textContent, "Service unavailable");
 });
 
-test("passkey address form: locked by PASSKEY_ORIGIN shows the variable and no field or Save; unlocked escapes the draft", () => {
+test("passkey address form: locked by PASSKEY_ORIGIN shows the variable and a disabled field; unlocked escapes the draft", () => {
+    const body = { innerHTML: "" };
     const { ctx } = dashboard(() => null);
-    const s = ctx.dashPkSet;
-    s.snap = s.base = address(2, "https://auth.example.test", true);
-    s.draft = "https://auth.example.test";
-    const locked = ctx.dashPkSetFormHtml();
-    assert.ok(locked.includes("<code>PASSKEY_ORIGIN</code> environment variable (https://auth.example.test)"));
-    assert.ok(!locked.includes('id="set-pk-origin"'));
-    assert.ok(!locked.includes('id="set-pk-save"'));
+    ctx.document = { ...PAGE, getElementById: (id) => (id === "settings-pk-body" ? body : null) };
+    pkUnit(ctx, address(2, "https://auth.example.test", true));
+    ctx.dashPkSetDrawForm();
+    const locked = body.innerHTML;
+    assert.ok(locked.includes("PASSKEY_ORIGIN environment variable (https://auth.example.test)"));
+    assert.ok(/id="set-pk-origin"[^>]*disabled/.test(locked), "the value shows in a disabled field");
+    assert.ok(!locked.includes("set-pk-save"), "the save bar saves; no Save of its own");
     assert.ok(locked.includes("Passkeys made for another address stop working"));
 
-    s.snap = s.base = address(0, null);
-    s.draft = '"><img src=x>';
-    const open = ctx.dashPkSetFormHtml();
-    assert.ok(open.includes('id="set-pk-origin"'));
+    const s = pkUnit(ctx, address(0, null));
+    s.draft.origin = '"><img src=x>';
+    ctx.dashPkSetDrawForm();
+    const open = body.innerHTML;
     assert.ok(open.includes('value="&quot;&gt;&lt;img src=x&gt;"'));
     assert.ok(!open.includes("<img"));
     assert.ok(open.includes("Not set yet"));
-    assert.ok(open.includes('id="set-pk-save"'));
 });
 
 test("Account page notes: HTTPS, old browser, no address, another address, locked", () => {

@@ -67,14 +67,23 @@ function uiTouchOnly() {
 
 // ===========================================================================
 // Dates and times (FW-1, FW-2, FW-9). Every date on a page is written here, in
-// the app time zone (from /admin/api/me), in the Date Format and Time Format
-// the user picked in Preferences. Pages never format a date themselves.
+// the app time zone, in the Date Format and Time Format of Settings > General
+// (both from /admin/api/me). Pages never format a date themselves.
 // ===========================================================================
 
 var uiAppZone = "UTC";
-var uiDatePrefs = { date: "browser", time: "24" };
-var UI_DATE_FORMATS = [["browser", "dates.browser-order"], ["dmy", "dates.dd-mm-yyyy"], ["mdy", "dates.mm-dd-yyyy"], ["ymd", "dates.yyyy-mm-dd"]];
-var UI_TIME_FORMATS = [["24", "dates.24-hour"], ["12", "dates.12-hour"]];
+var uiDatePrefs = { date: "browser", time: "24h" };
+// The values the server takes (app/display_settings.py) and the catalog word of each
+var UI_DATE_FORMATS = [["browser", "dates.browser-order"], ["DD/MM/YYYY", "dates.dd-mm-yyyy"], ["MM/DD/YYYY", "dates.mm-dd-yyyy"],
+    ["DD.MM.YYYY", "dates.dd-mm-yyyy-dot"], ["YYYY-MM-DD", "dates.yyyy-mm-dd"]];
+var UI_TIME_FORMATS = [["24h", "dates.24-hour"], ["12h", "dates.12-hour"], ["browser", "dates.browser-clock"]];
+// How each fixed Date Format writes the day, the month and the year
+var UI_DATE_ORDERS = {
+    "DD/MM/YYYY": { order: ["day", "month", "year"], sep: "/" },
+    "MM/DD/YYYY": { order: ["month", "day", "year"], sep: "/" },
+    "DD.MM.YYYY": { order: ["day", "month", "year"], sep: "." },
+    "YYYY-MM-DD": { order: ["year", "month", "day"], sep: "-" },
+};
 var uiZoneFormatters = {};
 
 function uiZoneValid(tz) {
@@ -93,30 +102,12 @@ function uiSetAppZone(tz) {
     return uiAppZone;
 }
 
+// The formats the server sends; an unknown value gives the default (Browser order, 24-hour)
 function uiSetDatePrefs(date, time) {
     var dateOk = UI_DATE_FORMATS.some(function (f) { return f[0] === date; });
     var timeOk = UI_TIME_FORMATS.some(function (f) { return f[0] === time; });
-    uiDatePrefs = { date: dateOk ? date : "browser", time: timeOk ? time : "24" };
+    uiDatePrefs = { date: dateOk ? date : "browser", time: timeOk ? time : "24h" };
     return uiDatePrefs;
-}
-
-function uiLoadDatePrefs() {
-    var date = "browser";
-    var time = "24";
-    try {
-        date = window.localStorage.getItem("uiDateFormat") || date;
-        time = window.localStorage.getItem("uiTimeFormat") || time;
-    } catch (e) { /* defaults */ }
-    return uiSetDatePrefs(date, time);
-}
-
-function uiSaveDatePrefs(date, time) {
-    var prefs = uiSetDatePrefs(date, time);
-    try {
-        window.localStorage.setItem("uiDateFormat", prefs.date);
-        window.localStorage.setItem("uiTimeFormat", prefs.time);
-    } catch (e) { /* applied for this visit only */ }
-    return prefs;
 }
 
 function uiParseInstant(value) {
@@ -156,15 +147,16 @@ function uiZoneOffset(ms, tz) {
     return Math.round((Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - whole) / 60000);
 }
 
-// Date in the order the user picked; numbers only, never month names
+// Date in the order the Date Format names; numbers only, never month names
 function writeDate(p, withYear, prefs) {
-    var pick = (prefs || uiDatePrefs).date;
+    var fixed = UI_DATE_ORDERS[(prefs || uiDatePrefs).date];
     var d = uiPad(p.day);
     var m = uiPad(p.month);
     var y = String(p.year);
-    if (pick === "dmy") return withYear ? d + "/" + m + "/" + y : d + "/" + m;
-    if (pick === "mdy") return withYear ? m + "/" + d + "/" + y : m + "/" + d;
-    if (pick === "ymd") return withYear ? y + "-" + m + "-" + d : m + "-" + d;
+    if (fixed) {
+        var part = { day: d, month: m, year: y };
+        return fixed.order.filter(function (k) { return withYear || k !== "year"; }).map(function (k) { return part[k]; }).join(fixed.sep);
+    }
     // Browser order: the browser's language decides the order and separators of
     // the same numbers (the day itself was already taken in the app zone)
     var opts = withYear ? { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" } : { timeZone: "UTC", month: "2-digit", day: "2-digit" };
@@ -176,8 +168,21 @@ function writeDate(p, withYear, prefs) {
 }
 
 function writeClock(p, seconds, prefs) {
+    var pick = (prefs || uiDatePrefs).time;
+    if (pick === "browser") {
+        // The clock of the browser's language: 1:05 PM on a 12-hour one, 13:05 on a 24-hour one
+        var opts = { timeZone: "UTC", hour: "numeric", minute: "2-digit" };
+        if (seconds) opts.second = "2-digit";
+        try {
+            var cycle = new Intl.DateTimeFormat(undefined, opts).resolvedOptions().hourCycle;
+            if (cycle !== "h11" && cycle !== "h12") opts.hour = "2-digit";
+            return new Intl.DateTimeFormat(undefined, opts).format(new Date(Date.UTC(2000, 0, 1, p.hour, p.minute, p.second || 0)));
+        } catch (e) {
+            pick = "24h";
+        }
+    }
     var tail = ":" + uiPad(p.minute) + (seconds ? ":" + uiPad(p.second) : "");
-    if ((prefs || uiDatePrefs).time === "12") {
+    if (pick === "12h") {
         var h = p.hour % 12 === 0 ? 12 : p.hour % 12;
         return p.hour < 12 ? t("dates.am", { time: h + tail }) : t("dates.pm", { time: h + tail });
     }
@@ -924,6 +929,10 @@ function uiPageFromLocation() {
     for (var id in uiPages) {
         if (Object.prototype.hasOwnProperty.call(uiPages, id) && uiPages[id].path === p) return id;
     }
+    // A page with sections owns the addresses under its path (WP2: /admin/settings/<section>)
+    for (var sid in uiPages) {
+        if (Object.prototype.hasOwnProperty.call(uiPages, sid) && uiPages[sid].sections && p.indexOf(uiPages[sid].path + "/") === 0) return sid;
+    }
     return "";
 }
 
@@ -1065,7 +1074,8 @@ function uiOnPopState(event) {
         return;
     }
     var target = st.page && uiPages[st.page] ? st.page : uiPageFromLocation() || Object.keys(uiPages)[0];
-    if (!uiPopConfirmed && delta && uiUnsavedCount()) {
+    // Moving between the sections of one page keeps its unsaved changes (SV-1)
+    if (!uiPopConfirmed && delta && target !== uiPageCurrent && uiUnsavedCount()) {
         uiPopUndo = true;
         history.go(-delta);
         uiConfirmLeave().then(function (ok) {
@@ -1729,8 +1739,10 @@ function uiDbCodeText(code, detail) {
     return detail || t(UI_DB_CODES[code] || UI_DB_CODES.other);
 }
 
-// p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists
-function uiDbFieldsHtml(p, v, keepPassword) {
+// p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists;
+// onDemand (Settings): a saved password and CA certificate read Stored, and their field
+// appears only on Replace (FS-3); the CA certificate can also be removed
+function uiDbFieldsHtml(p, v, keepPassword, onDemand) {
     v = v || {};
     var mode = v.sslmode || "prefer";
     var opts = UI_DB_SSLMODES.map(function (m) {
@@ -1746,14 +1758,45 @@ function uiDbFieldsHtml(p, v, keepPassword) {
         '<div class="ui-form-row">' + input("database", t("db.database"), v.database, ' placeholder="' + esc(t("db.authdb")) + '"') +
         input("user", t("db.user"), v.user, ' placeholder="' + esc(t("db.auth")) + '"') + "</div>" +
         '<div class="ui-field"><label class="ui-label" for="' + p + 'password">' + esc(t("db.password")) + '</label>' +
-        '<input class="ui-input" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
-        (keepPassword ? ' placeholder="' + esc(t("db.empty-keeps-the-saved-password")) + '"' : "") + " /></div>" +
+        (onDemand && keepPassword ? uiDbStoredHtml(p, "password", false) : "") +
+        '<input class="ui-input' + (onDemand && keepPassword ? " hidden" : "") + '" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
+        (keepPassword ? ' placeholder="' + esc(onDemand ? t("settings.secret.new-value") : t("db.empty-keeps-the-saved-password")) + '"' : "") + " /></div>" +
         '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">' + esc(t("db.tls")) + '</label>' +
         '<select class="ui-select" id="' + p + 'sslmode" aria-describedby="' + p + 'ssl-hint">' + opts + "</select>" +
         '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] ? t(UI_DB_SSL_HINT[mode]) : "") + "</span></div>" +
         '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">' + esc(t("db.ca-certificate-pem-optional")) + '</label>' +
-        '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="' + esc(t("db.begin-certificate")) + '"></textarea>' +
+        (onDemand && v.caSaved ? uiDbStoredHtml(p, "ca", true) : "") +
+        '<textarea class="ui-textarea' + (onDemand && v.caSaved ? " hidden" : "") + '" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="' + esc(t("db.begin-certificate")) + '"></textarea>' +
         '<span class="ui-hint">' + esc(v.caSaved ? t("db.ca-hint-saved") : t("db.only-when-the-server-s-certificate")) + "</span></div>";
+}
+
+// A stored secret: Stored, Replace, and for the CA certificate Remove (FS-3)
+function uiDbStoredHtml(p, which, removable) {
+    return '<div class="ui-set-secret" id="' + p + which + '-stored"><span id="' + p + which + '-state">' + esc(t("settings.secret.stored")) + "</span>" +
+        '<button type="button" class="ui-btn ui-btn-sm" data-db-secret="' + which + '">' + esc(t("settings.secret.replace")) + "</button>" +
+        (removable ? '<button type="button" class="ui-btn ui-btn-sm" id="' + p + which + '-remove" data-db-secret="' + which + '-remove">' + esc(t("settings.secret.remove")) + "</button>" : "") +
+        "</div>";
+}
+
+// Stored or replaced: which of a secret's states shows
+function uiDbSecretsSync(p, replacing, caRemove) {
+    var pairs = [["password", !!replacing.password], ["ca", !!replacing.ca]];
+    pairs.forEach(function (pair) {
+        var stored = document.getElementById(p + pair[0] + "-stored");
+        var field = document.getElementById(p + pair[0]);
+        if (!stored || !field) return;
+        stored.classList.toggle("hidden", pair[1]);
+        field.classList.toggle("hidden", !pair[1]);
+    });
+    var state = document.getElementById(p + "ca-state");
+    var remove = document.getElementById(p + "ca-remove");
+    if (state && remove) {
+        var text = caRemove ? t("settings.secret.removed-when-saved") : t("settings.secret.stored");
+        if (state.textContent !== text) state.textContent = text;
+        state.classList.toggle("is-removing", !!caRemove);
+        var label = caRemove ? t("settings.secret.keep") : t("settings.secret.remove");
+        if (remove.textContent !== label) remove.textContent = label;
+    }
 }
 
 // The TLS hint and the CA field follow the chosen mode
@@ -1799,33 +1842,34 @@ function uiDbFieldError(p, field) {
     }
 }
 
-// What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text
+// What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text; a note that
+// refuses the connection names its case in kind (failed, user, foreign, incomplete, pending, another)
 function uiDbCheckNote(r, where) {
     if (!r) return null;
-    if (!r.ok) return { tone: " is-fail", title: t("db.the-connection-failed-2"), text: uiDbCodeText(r.code, r.detail) };
+    if (!r.ok) return { kind: "failed", tone: " is-fail", title: t("db.the-connection-failed-2"), text: uiDbCodeText(r.code, r.detail) };
     if (r.problems && r.problems.length) {
-        return { tone: " is-fail", title: t("db.the-database-user-cannot-be-used"), text: r.problems.join(" ") };
+        return { kind: "user", tone: " is-fail", title: t("db.the-database-user-cannot-be-used"), text: r.problems.join(" ") };
     }
     if (r.state === "new") return { tone: "", title: t("db.a-new-database-file"), text: t("db.the-service-creates-data-auth-db") };
     if (r.state === "empty") return { tone: "", title: t("db.the-database-is-empty"), text: t("db.the-service-creates-its-tables-in") };
     if (r.state === "foreign") {
-        return { tone: " is-fail", title: t("db.this-database-holds-other-data"), text: r.others && r.others.length
+        return { kind: "foreign", tone: " is-fail", title: t("db.this-database-holds-other-data"), text: r.others && r.others.length
             ? t("db.it-has-tables-that-are-not-named", { tables: r.others.join(", ") }) : t("db.it-has-tables-that-are-not") };
     }
     if (r.state === "incomplete") {
-        return { tone: " is-fail", title: t("db.tables-are-missing"), text: t("db.this-database-holds-this-service-s", { tables: (r.others || []).join(", ") }) };
+        return { kind: "incomplete", tone: " is-fail", title: t("db.tables-are-missing"), text: t("db.this-database-holds-this-service-s", { tables: (r.others || []).join(", ") }) };
     }
     if (r.state === "older") {
         return { tone: " is-warn", title: t("db.this-service-s-data-from-an"),
             text: where === "setup" ? t("db.the-service-can-adopt-it-it") : t("db.the-service-can-adopt-it-copy") };
     }
-    if (r.pending) return { tone: " is-fail", title: t("db.an-unfinished-copy"), text: t("db.this-database-holds-a-copy-that") };
+    if (r.pending) return { kind: "pending", tone: " is-fail", title: t("db.an-unfinished-copy"), text: t("db.this-database-holds-a-copy-that") };
     if (where === "settings") {
         if (r.identity === "same") return { tone: "", title: t("db.the-same-database"), text: t("db.the-new-connection-reaches-the-database") };
         if (r.identity === "different_copy") {
             return { tone: " is-warn", title: t("db.a-different-copy-of-this-database"), text: t("db.for-example-a-restored-backup-changes") };
         }
-        return { tone: " is-fail", title: t("db.another-installation"), text: t("db.this-database-holds-another-installation-of") };
+        return { kind: "another", tone: " is-fail", title: t("db.another-installation"), text: t("db.this-database-holds-another-installation-of") };
     }
     if (where === "setup") {
         return { tone: "", title: t("db.an-existing-installation-of-this-service"), text: r.hasAdmin
@@ -1839,6 +1883,45 @@ function uiDbNoteHtml(n) {
     if (!n) return "";
     return '<div class="ui-alert' + n.tone + '"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(n.title) + "</p><small>" +
         esc(n.text) + "</small></div><span></span></div>";
+}
+
+// ===========================================================================
+// WP2 shared helpers: a page's own sections, each with an address under the
+// page's path (NL-3: /admin/settings/<section>, the router knows such a page by
+// its sections flag)
+// ===========================================================================
+
+// The section the address names on page id, or "" (ids match /^[a-z0-9_-]+$/)
+function uiPageSection(id) {
+    var page = uiPages[id];
+    if (!page || typeof window === "undefined" || !window.location) return "";
+    var p = window.location.pathname;
+    var b = basePath();
+    if (b && p.indexOf(b) === 0) p = p.slice(b.length);
+    if (p.indexOf(page.path + "/") !== 0) return "";
+    var rest = p.slice(page.path.length + 1);
+    return /^[a-z0-9_-]+$/.test(rest) ? rest : "";
+}
+
+// A typed dialog whose fields were replaced (a later step): what it holds now is
+// the new starting point for the question before dropping changes (DS-9)
+function uiGuardReset(d) {
+    if (uiGuarded && uiGuarded.has(d.backdrop)) uiGuarded.set(d.backdrop, uiFieldsSnapshot(d.body));
+}
+
+// Put a section in the address: a Back step when the admin chose it, else the
+// address is only corrected (replace)
+function uiSetPageSection(id, section, replace) {
+    if (!uiPages[id]) return;
+    var url = uiPagePath(id) + (section ? "/" + section : "");
+    if (url === window.location.pathname) return;
+    if (replace) {
+        history.replaceState({ page: id, idx: uiHistIdx }, "", url + window.location.hash);
+        return;
+    }
+    uiSaveScroll();
+    uiHistIdx += 1;
+    history.pushState({ page: id, idx: uiHistIdx }, "", url);
 }
 
 // ===========================================================================

@@ -16,7 +16,7 @@ var PAGES = {
     activity: { path: "/admin/logs/activity", title: "shell.activity-log" },
     access: { path: "/admin/logs/access", title: "shell.access-logs" },
     usage: { path: "/admin/usage", title: "shell.usage" },
-    settings: { path: "/admin/settings", title: "shell.settings" },
+    settings: { path: "/admin/settings", title: "shell.settings", sections: true },
     account: { path: "/admin/account", title: "shell.account" },
 };
 
@@ -173,7 +173,6 @@ function dashZonesLoad() {
 
 function dashBoot() {
     uiInstallGlobalListeners();
-    uiLoadDatePrefs();
     dashBindShell();
     adminJson("/admin/api/setup/status").then(function (st) {
         if (st.ok && st.data && st.data.needsSetup) {
@@ -195,6 +194,8 @@ function dashBoot() {
             dash.allowedAreas = me.data.allowedAreas || [];
             dash.zoneAsked = me.data.timeZone || "";
             uiSetAppZone(dash.zoneAsked);
+            // Settings > General decides how dates are written (FW-9)
+            uiSetDatePrefs(me.data.dateFormat, me.data.timeFormat);
             document.querySelectorAll("[data-user]").forEach(function (el) { el.textContent = dash.user; });
             document.getElementById("ui-shell").classList.remove("hidden");
             document.getElementById("boot").classList.add("hidden");
@@ -296,20 +297,27 @@ function dashThemeCycle() {
     window.uiThemeSet(DASH_THEMES[(i + 1) % DASH_THEMES.length][0]);
 }
 
+// Signing out asks first when something is unsaved, and drops the unsaved changes only
+// once the sign-out worked; a failed sign-out keeps them guarded (SV-1)
 function dashLogout() {
     var go = function () {
-        api("POST", "/admin/api/logout").then(function (res) {
+        return api("POST", "/admin/api/logout").then(function (res) {
             if (!res.ok && res.status !== 401) {
                 showToast(t("shell.could-not-sign-out-try-again"), "error");
-                return;
+                return false;
             }
             uiUnsavedRelease();
             writeCsrf("");
             window.location.href = basePath() + "/login";
+            return true;
         });
     };
-    if (uiUnsavedCount()) uiConfirmLeave().then(function (ok) { if (ok) go(); });
-    else go();
+    var n = uiUnsavedCount();
+    if (!n) return go();
+    return uiConfirm({
+        title: t("common.leave-without-saving"), message: tn("common.leave-unsaved", n),
+        confirmText: t("common.leave"), cancelText: t("common.stay"), danger: true, focusCancel: true, noHistory: true,
+    }).then(function (ok) { return ok ? go() : false; });
 }
 
 // The phone's More sheet: every page not on the tab bar and the tools (NL-9)
@@ -351,7 +359,8 @@ function dashMoreOpen() {
     }, true);
 }
 
-// Preferences: theme, Date Format and Time Format, kept in this browser (FW-9)
+// Preferences: the theme of this browser, and the zone dates are shown in. The
+// Date Format and Time Format are server settings in Settings > General (FW-9)
 function dashPrefsOpen() {
     var d = null;
     var close = function () { if (d) d.backdrop.remove(); };
@@ -367,43 +376,35 @@ function dashPrefsOpen() {
         title: t("shell.preferences"), size: "sm", close: close, backdropClose: close,
         body: '<div class="ui-form">' +
             '<div class="ui-field"><span class="ui-label">' + esc(t("shell.theme-2")) + '</span>' + seg(t("shell.theme-2"), DASH_THEMES, window.uiThemeGet()) + "</div>" +
-            '<div class="ui-field"><label class="ui-label" for="pref-date">' + esc(t("shell.date-format")) + '</label><select id="pref-date" class="ui-select">' +
-            UI_DATE_FORMATS.map(function (f) { return '<option value="' + f[0] + '"' + (uiDatePrefs.date === f[0] ? " selected" : "") + ">" + esc(t(f[1])) + "</option>"; }).join("") +
-            '</select><p class="ui-hint">' + esc(t("shell.select-your-date-format-default-browser")) + '</p></div>' +
-            '<div class="ui-field"><span class="ui-label">' + esc(t("shell.time-format")) + '</span>' + seg(t("shell.time-format"), UI_TIME_FORMATS, uiDatePrefs.time) +
-            '<p class="ui-hint">' + esc(t("shell.select-your-time-format-default-24")) + '</p></div>' +
-            '<p class="ui-hint" id="pref-example" aria-live="polite"></p>' +
-            '<p class="ui-hint">' + esc(zoneNote) + "</p></div>",
+            '<p class="ui-hint">' + esc(zoneNote) + "</p>" +
+            '<p class="ui-hint"><a href="' + esc(basePath() + PAGES.settings.path + "/general") + '" id="pref-formats">' + esc(t("shell.date-formats-in-settings")) + "</a></p></div>",
         foot: '<button type="button" class="ui-btn" data-cancel>' + esc(t("shell.close")) + '</button>',
     });
     d.foot.querySelector("[data-cancel]").addEventListener("click", close);
-    var dateSel = d.body.querySelector("#pref-date");
-    uiPicker(dateSel, { label: t("shell.date-format"), field: true });
     var segs = d.body.querySelectorAll(".ui-seg");
-    var example = function () { d.body.querySelector("#pref-example").textContent = t("shell.example", { time: formatTime(Date.now(), { seconds: false }) }); };
-    var applyDates = function (date, time) {
-        uiSaveDatePrefs(date, time);
-        example();
-        dashRedrawDates();
-    };
     segs[0].addEventListener("click", function (event) {
         var b = event.target.closest("button[data-value]");
         if (!b) return;
         window.uiThemeSet(b.getAttribute("data-value"));
         segs[0].querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
     });
-    segs[1].addEventListener("click", function (event) {
-        var b = event.target.closest("button[data-value]");
-        if (!b) return;
-        segs[1].querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
-        applyDates(uiDatePrefs.date, b.getAttribute("data-value"));
+    // The link opens Settings > General in place of the dialog
+    d.body.querySelector("#pref-formats").addEventListener("click", function (event) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        dashSettings.section = "general";
+        uiGo("settings");
     });
-    dateSel.addEventListener("change", function () { applyDates(dateSel.value, uiDatePrefs.time); });
-    example();
 }
 
-// Dates are drawn again in the new format
+// Dates are drawn again in the new format or zone
 function dashRedrawDates() {
+    // The Settings sections write their saved times, and the formats example
+    if (typeof DASH_SET_ORDER !== "undefined") {
+        DASH_SET_ORDER.forEach(function (name) { if (DASH_SET_PANELS[name].st.snap) DASH_SET_PANELS[name].draw(); });
+    }
     dashTokDraw(true);
     dashZonesDraw(true);
     dashKeysDraw(true);
@@ -1011,7 +1012,11 @@ function dashTokenDialog(type) {
         '<div class="ui-field"><label class="ui-label" for="tf-desc">' + esc(t("tokens.description")) + ' <small>' + esc(t("tokens.optional")) + '</small></label><input id="tf-desc" class="ui-input" name="description" dir="auto" autocomplete="off" placeholder="' +
         (editing ? esc(t("tokens.token-description")) : esc(t("tokens.what-this-token-is-used-for"))) + '" data-inventory="tokens.form.description"></div>' +
         (editing
-            ? '<div class="ui-field"><label class="ui-label" for="tf-token">' + esc(t("tokens.replace-token-optional")) + '</label><input id="tf-token" class="ui-input ui-mono" name="token" autocomplete="off" spellcheck="false" placeholder="' + esc(t("tokens.leave-empty-to-keep-current-token")) + '" data-inventory="tokens.form.replace"></div>'
+            ? '<div class="ui-field"><label class="ui-label" for="tf-token">' + esc(t("tokens.replace-token-optional")) + '</label>' +
+              '<div class="ui-set-secret" id="tf-token-stored"><span>' + esc(t("settings.secret.stored")) + '</span><button type="button" class="ui-btn ui-btn-sm" id="tf-token-replace">' +
+              esc(t("tokens.form.replace-token")) + "</button></div>" +
+              '<div class="ui-set-replace hidden" id="tf-token-new"><input id="tf-token" class="ui-input ui-mono" name="token" autocomplete="off" spellcheck="false" placeholder="' + esc(t("tokens.leave-empty-to-keep-current-token")) + '" data-inventory="tokens.form.replace">' +
+              '<button type="button" class="ui-btn ui-btn-sm" id="tf-token-keep">' + esc(t("settings.secret.keep")) + "</button></div></div>"
             : '<div class="ui-field"><label class="ui-label" for="tf-token">' + esc(t("tokens.existing-token-optional")) + '</label><input id="tf-token" class="ui-input ui-mono" name="token" autocomplete="off" spellcheck="false" placeholder="' + esc(t("tokens.leave-empty-to-auto-generate")) + '" data-inventory="tokens.form.existing"></div>') +
         '<div class="ui-field"><span class="ui-label" id="tf-perm-label">' + esc(t("tokens.zone-permissions")) + '</span>' +
         '<div class="ui-perm-tools"><label class="ui-search">' + DASH_SEARCH_ICON + '<input type="search" id="tf-filter" placeholder="' + esc(t("tokens.filter-zones")) + '" aria-label="' + esc(t("tokens.filter-zones-2")) + '" data-inventory="tokens.form.zonefilter"></label>' +
@@ -1047,6 +1052,17 @@ function dashTokenDialog(type) {
     }
     uiGuardDialog(d);
     d.foot.querySelector("[data-cancel]").addEventListener("click", guardedClose);
+    if (editing) {
+        // Replace shows the field and takes the focus; Keep drops what was typed
+        var tokReplace = function (on) {
+            if (!on) tokEl.value = "";
+            f.querySelector("#tf-token-stored").classList.toggle("hidden", on);
+            f.querySelector("#tf-token-new").classList.toggle("hidden", !on);
+            (on ? tokEl : f.querySelector("#tf-token-replace")).focus();
+        };
+        f.querySelector("#tf-token-replace").addEventListener("click", function () { tokReplace(true); });
+        f.querySelector("#tf-token-keep").addEventListener("click", function () { tokReplace(false); });
+    }
     f.querySelector("#tf-exp-clear").addEventListener("click", function () { expEl.value = ""; expEl.focus(); });
     f.querySelector("#tf-filter").addEventListener("input", function (event) {
         var q = event.target.value.trim().toLowerCase();
@@ -1145,10 +1161,12 @@ function dashMfaDialog(kind, item) {
         closed = true;
         if (d) d.backdrop.remove();
     };
+    // A typed code is asked about before it is dropped (DS-9)
+    var guardedClose = function () { uiCloseGuarded(d, close); };
     var formId = "mfa-form";
     var what = kind === "token" ? t("reveal.the-token") : t("reveal.the-key");
     d = uiDialog({
-        title: t("reveal.mfa-verification"), size: "sm", close: close,
+        title: t("reveal.mfa-verification"), size: "sm", close: guardedClose,
         body: '<div class="ui-form"><p id="mfa-text">' + (kind === "token" ? esc(t("reveal.enter-your-6-digit-authenticator-code")) : esc(t("reveal.enter-your-6-digit-authenticator-code-2"))) + "</p>" +
             '<p class="ui-hint">' + tHtml(kind === "token" ? "reveal.token" : "reveal.api-key", { name: tRaw('<bdi dir="auto">' + esc(item.name) + "</bdi>") }) + "</p>" +
             '<div class="ui-field hidden" id="mfa-pk"><button type="button" class="ui-btn ui-btn-block" id="mfa-pk-btn" data-inventory="mfa.passkey">' + esc(t("reveal.use-a-passkey")) + '</button>' +
@@ -1159,7 +1177,8 @@ function dashMfaDialog(kind, item) {
             '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '">' + esc(t("reveal.verify-copy")) + '</button>',
         form: { id: formId, onSubmit: function () { submit(); } },
     });
-    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    uiGuardDialog(d);
+    d.foot.querySelector("[data-cancel]").addEventListener("click", guardedClose);
     d.backdrop.addEventListener("ui-drop", function () { closed = true; });
     var code = d.body.querySelector("#mfa-code");
     var err = d.foot.querySelector("#mfa-err");
@@ -1244,6 +1263,7 @@ function dashMfaCopyStep(d, kind, secret, close) {
     d.foot.innerHTML = '<button type="button" class="ui-btn" data-cancel>' + esc(t("reveal.close")) + '</button>' +
         '<button type="button" class="ui-btn ui-btn-primary" data-copy-now>' + esc(label) + "</button>";
     d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    uiGuardReset(d);
     var copyBtn = d.foot.querySelector("[data-copy-now]");
     copyBtn.addEventListener("click", function () {
         uiCopyText(secret).then(function (ok) {
@@ -1999,6 +2019,8 @@ var DASH_LOG_SETTINGS = {
         ["cookieSecure", "logs.secure-cookie", "onoff"],
     ],
     redis: [["url", "logs.redis-url", ""]],
+    // Settings > General, Date Format and Time Format (WP2): the values are the format names
+    display: [["dateFormat", "shell.date-format", ""], ["timeFormat", "shell.time-format", ""]],
 };
 
 function dashLogSettingValue(v, kind) {
@@ -2767,34 +2789,83 @@ DASH_PAGE_IMPL.usage = function () {
 registerPageRefresh("usage", 60000, function (isCurrent) { return dashUseLoad(isCurrent); });
 
 // ===========================================================================
-// Settings: three panels, each with its own saved versions and Save. General
-// (time zone, log retention, the session cookie), the rate limit and the
-// addresses exempt from it, and the Redis connection. Each form edits a draft
-// based on one saved version (base); a refresh never touches a changed draft,
-// and the base only moves on a save or an explicit choice after a conflict.
+// Settings (FS-8, FS-10, SV-1): sections with their own address
+// (/admin/settings/<section>), one save bar over the save units, and the
+// database connection change as its own flow. Each save unit edits a draft
+// based on one saved version (base); a refresh never touches a changed draft
+// or a part the admin works in, and the base only moves on a save or an
+// explicit choice after a conflict.
 // ===========================================================================
 
 var DASH_LOCK_ICON = '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>';
 
+// The sections, in the order of the section list (NL-3: /admin/settings/<id>)
+var SETTINGS_SECTIONS = [
+    { id: "general", group: "settings.nav.group-service", label: "settings.general", intro: "settings.section.general-intro" },
+    { id: "rate-limit", group: "settings.nav.group-service", label: "settings.rate-limit", intro: "settings.section.rate-limit-intro" },
+    { id: "passkeys", group: "settings.nav.group-service", label: "settings.passkeys", intro: "settings.section.passkeys-intro" },
+    { id: "database", group: "settings.nav.group-connections", label: "settings.database", intro: "settings.section.database-intro" },
+    { id: "redis", group: "settings.nav.group-connections", label: "settings.redis-connection", intro: "settings.section.redis-intro" },
+];
+
+// Every Settings section and field for the global search: the catalog key of its
+// label; the address of a field is /admin/settings/<section>#<field>
+var SETTINGS_INDEX = [
+    { section: "general", field: "", key: "settings.general" },
+    { section: "general", field: "gen-tz", key: "settings.general.time-zone" },
+    { section: "general", field: "gen-activity", key: "settings.general.activity-log-retention-in-days" },
+    { section: "general", field: "gen-access", key: "settings.general.access-log-retention-in-days" },
+    { section: "general", field: "gen-cookie", key: "settings.general.secure-session-cookie" },
+    { section: "general", field: "gen-root", key: "settings.general.url-path-prefix" },
+    { section: "general", field: "disp-date", key: "shell.date-format" },
+    { section: "general", field: "disp-time", key: "shell.time-format" },
+    { section: "rate-limit", field: "", key: "settings.rate-limit" },
+    { section: "rate-limit", field: "set-max", key: "settings.ratelimit.requests-per-window-from-one-address" },
+    { section: "rate-limit", field: "set-window", key: "settings.ratelimit.window-in-seconds" },
+    { section: "rate-limit", field: "set-proxy", key: "settings.ratelimit.reverse-proxy-addresses" },
+    { section: "rate-limit", field: "set-exempt", key: "settings.ratelimit.exempt-addresses-and-networks" },
+    { section: "passkeys", field: "", key: "settings.passkeys" },
+    { section: "passkeys", field: "set-pk-origin", key: "settings.passkeys.passkey-address" },
+    { section: "database", field: "", key: "settings.database" },
+    { section: "database", field: "dbs-host", key: "db.host" },
+    { section: "database", field: "dbs-port", key: "db.port" },
+    { section: "database", field: "dbs-database", key: "db.database" },
+    { section: "database", field: "dbs-user", key: "db.user" },
+    { section: "database", field: "dbs-password", key: "db.password" },
+    { section: "database", field: "dbs-sslmode", key: "db.tls" },
+    { section: "database", field: "dbs-ca", key: "db.ca-certificate-pem-optional" },
+    { section: "redis", field: "", key: "settings.redis-connection" },
+    { section: "redis", field: "redis-url", key: "settings.redis.new-connection-url" },
+];
+
+// The page: the open section, the save run, and the lock while the database changes
+// lock: "" | "sending" | "running" | "recovering" | "read-failed" | "unknown" (DB change, P23 to P30)
+var dashSettings = { section: "", bound: false, saving: false, lock: "", loadedOnce: false };
+
 function dashSetPanelState() {
     return { snap: null, baseSnap: null, draft: null, dirty: false, saving: false, failed: "", refreshFailed: "",
-        conflict: null, error: "", errorField: "", seq: 0 };
+        conflict: null, error: "", errorField: "", unknown: false, seq: 0 };
 }
 
 var dashSet = {
     snap: null, baseSnap: null, draft: null, dirty: false, saving: false, failed: "", refreshFailed: "",
-    conflict: null, error: "", errorField: "", askOwn: false, seq: 0, bound: false,
+    conflict: null, error: "", errorField: "", unknown: false, askOwn: null, seq: 0, bound: false,
 };
-// askPurge / askCookie / askRestart: the server asked to confirm the values it was sent
-// ({ ..., ok }); they go as soon as one of those values changes
+// askPurge / askCookie / askRestart / askOwn: the server asked to confirm the values it
+// was sent; the admin answered in the shared question, and the confirmation is bound
+// to those values: it goes as soon as one of them changes, or on a conflict
 var dashGen = dashSetPanelState();
 dashGen.askPurge = null;
 dashGen.askCookie = null;
+var dashDisp = dashSetPanelState();
 var dashRedis = dashSetPanelState();
 dashRedis.askRestart = null;
+dashRedis.replacing = false;
+var dashPkSet = dashSetPanelState();
+dashPkSet.bound = false;
 
 // ---------------------------------------------------------------------------
-// Shared by the panels
+// Shared by the panels: marks, locks, alerts
 // ---------------------------------------------------------------------------
 
 function dashSetSourceHint(field) {
@@ -2803,8 +2874,33 @@ function dashSetSourceHint(field) {
     return "";
 }
 
+// A field the environment sets: a lock pill naming the variable (FS-6)
+function dashSetLockPill(field, shown) {
+    return '<span class="ui-set-pill is-lock" title="' + esc(t("settings.set-by-the", { env: field.envName, value: shown })) + '">' + DASH_LOCK_ICON +
+        "<span>" + esc(t("settings.field.set-by-env", { env: field.envName })) + "</span></span>";
+}
+
+// The lock as a sentence, for parts that have no control of their own
 function dashSetLocked(field, shown) {
     return '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.set-by-the", { env: tRaw("<code>" + esc(field.envName) + "</code>"), value: shown }) + "</span></p>";
+}
+
+// Changed (differs from the default) and Reset to default, for a field that is not
+// locked and not a secret (FS-6). shownDefault: the default as words
+function dashSetMarks(name, changed, shownDefault) {
+    if (!changed) return "";
+    return '<span class="ui-set-pill is-changed" title="' + esc(t("settings.field.changed-title")) + '">' + esc(t("settings.field.changed")) + "</span>" +
+        '<button type="button" class="ui-btn-link ui-set-reset" data-set-reset="' + esc(name) + '">' + esc(t("settings.field.reset-to-default", { value: shownDefault })) + "</button>";
+}
+
+// One setting: label and explanation at the start, the control at the end (FS-8)
+function dashSetRow(o) {
+    return '<div class="ui-set-row' + (o.locked ? " is-locked" : "") + '" id="' + esc(o.id) + '-row">' +
+        '<div class="ui-set-text"><div class="ui-set-label">' + (o.forId ? '<label class="ui-label" id="' + esc(o.id) + '-label" for="' + esc(o.forId) + '">'
+            : '<span class="ui-label" id="' + esc(o.id) + '-label">') +
+        esc(o.label) + (o.forId ? "</label>" : "</span>") + '<span class="ui-set-marks" id="' + esc(o.id) + '-marks">' + (o.marks || "") + "</span></div>" +
+        (o.hint ? '<p class="ui-hint" id="' + esc(o.id) + '-hint">' + o.hint + "</p>" : "") + "</div>" +
+        '<div class="ui-set-control">' + o.control + '<p class="ui-set-note hidden" id="' + esc(o.id) + '-note" role="alert"></p></div></div>';
 }
 
 function dashSetAlert(tone, title, sub, actions) {
@@ -2837,6 +2933,10 @@ function dashSetAppliedAlerts(s, alerts) {
         : esc(t("settings.this-server-process-enforces-version", { version: uiNum(a.version || 0) }));
 }
 
+// ---------------------------------------------------------------------------
+// The save unit framework: load, draw, saved, conflict, failed, unknown
+// ---------------------------------------------------------------------------
+
 function dashPanelLoad(p, isCurrent) {
     var st = p.st;
     var seq = ++st.seq;
@@ -2854,11 +2954,14 @@ function dashPanelLoad(p, isCurrent) {
         st.failed = "";
         st.refreshFailed = "";
         st.snap = d;
-        if (!st.dirty && !st.saving && !st.conflict) {
-            // A panel with a key keeps its form while the saved values stay the same (an open
+        var form = document.getElementById(p.ids.form);
+        // Never redraw a part the admin works in: a change, the focus, a selection (SV-6)
+        if (!st.dirty && !st.saving && !st.conflict && !(form && uiAreaHeld(form))) {
+            // A panel keeps its form while the saved values stay the same (an open
             // picker or a focused field survives the 30-second refresh)
             var same = p.formKey && st.baseSnap && p.formKey(st.baseSnap) === p.formKey(d);
             st.baseSnap = d;
+            st.unknown = false;
             if (!same) {
                 st.draft = p.draftFrom(d);
                 st.error = "";
@@ -2893,23 +2996,29 @@ function dashPanelDraw(p) {
     }
     p.alerts(st.snap, alerts);
     var html = alerts.join("");
-    if (!uiTextHeld(info)) uiKeepFocus(info, function () { info.innerHTML = html; });
+    if (info.getAttribute("data-drawn") !== html && !uiTextHeld(info)) {
+        info.setAttribute("data-drawn", html);
+        uiKeepFocus(info, function () { info.innerHTML = html; });
+    }
     if (!document.getElementById(p.ids.form)) p.drawForm();
     p.sync();
+    dashSaveBarSync();
 }
 
 // A save that went through: the answer is the new base
-function dashPanelSaved(p, d, message) {
+function dashPanelSaved(p, d) {
     var st = p.st;
     st.snap = d;
     st.baseSnap = d;
     st.draft = p.draftFrom(d);
     st.dirty = false;
     st.conflict = null;
+    st.unknown = false;
+    st.error = "";
+    st.errorField = "";
     p.clearAsks(st);
     p.drawForm();
     p.draw();
-    showToast(d.warning || message, d.warning ? "error" : "success");
 }
 
 // Another admin saved first: the draft and its base stay until the admin chooses
@@ -2917,13 +3026,25 @@ function dashPanelConflict(p, current) {
     var st = p.st;
     st.conflict = current;
     st.snap = current;
+    p.clearAsks(st);
     p.draw();
 }
 
 function dashPanelFail(p, message, field) {
     p.st.error = message;
-    p.st.errorField = field;
+    p.st.errorField = field || "";
     p.sync();
+}
+
+// No answer to a save: it may have been saved or not. The draft stays, nothing is
+// sent again by itself, and the saved values are read again (the next save then
+// meets a conflict if this one went through)
+function dashPanelUnknown(p) {
+    p.st.unknown = true;
+    p.st.error = t("settings.save.result-unknown");
+    p.st.errorField = "";
+    p.sync();
+    dashPanelLoad(p);
 }
 
 function dashPanelDiscard(p) {
@@ -2934,6 +3055,7 @@ function dashPanelDiscard(p) {
     st.draft = p.draftFrom(to);
     st.dirty = false;
     st.conflict = null;
+    st.unknown = false;
     p.clearAsks(st);
     st.error = "";
     st.errorField = "";
@@ -2941,236 +3063,38 @@ function dashPanelDiscard(p) {
     p.draw();
 }
 
-// An explicit choice: the draft now changes the version saved by the other admin. In panels
-// whose confirmations are bound to values (asksBound), the confirmations go too
+// An explicit choice: the draft now changes the version saved by the other admin;
+// the confirmations go too
 function dashPanelKeep(p) {
     var st = p.st;
     st.baseSnap = st.conflict;
     st.conflict = null;
-    if (p.asksBound) p.clearAsks(st);
+    p.clearAsks(st);
     p.input();
     p.draw();
 }
 
-// The error line, the invalid field, the busy state and Discard follow the state
+// The error line, the invalid field and the busy state follow the state
 function dashPanelSyncCommon(p, pairs) {
     var st = p.st;
     var err = document.getElementById(p.ids.err);
-    err.textContent = st.error;
-    err.classList.toggle("hidden", !st.error);
+    if (err) {
+        err.textContent = st.error;
+        err.classList.toggle("hidden", !st.error);
+    }
     pairs.forEach(function (pair) {
         var el = document.getElementById(pair[0]);
         if (!el) return;
         if (st.errorField === pair[1]) el.setAttribute("aria-invalid", "true");
-        else el.removeAttribute("aria-invalid");
+        else if (!el.hasAttribute("data-check-failed")) el.removeAttribute("aria-invalid");
     });
-    document.getElementById(p.ids.fields).disabled = st.saving;
-    var save = document.getElementById(p.ids.save);
-    if (save) save.textContent = st.saving ? t("settings.saving") : t("settings.save");
-    var discard = document.getElementById(p.ids.discard);
-    if (discard) discard.classList.toggle("hidden", !st.dirty);
+    var fields = document.getElementById(p.ids.fields);
+    if (fields) fields.disabled = st.saving || !!dashSettings.lock;
 }
 
-// A confirmation box inside a form: the server's words and a checkbox, drawn again only when it changes
-function dashSetAskHtml(id, title, sub, label, ok) {
-    return '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(title) + "</p><small>" + sub + "</small>" +
-        '<label class="ui-check-label"><input type="checkbox" class="ui-check" id="' + id + '"' + (ok ? " checked" : "") + " /> <span>" + esc(label) +
-        "</span></label></div><span></span></div>";
-}
-
-function dashSetAsksDraw(id, html) {
-    var box = document.getElementById(id);
-    if (!box || box.getAttribute("data-drawn") === html) return;
-    box.setAttribute("data-drawn", html);
-    uiKeepFocus(box, function () { box.innerHTML = html; });
-}
-
-// ---------------------------------------------------------------------------
-// Rate limit
-// ---------------------------------------------------------------------------
-
-function dashSetDraftFrom(s) {
-    var f = s.fields;
-    return {
-        maxReq: String(f.maxReq.value),
-        windowSeconds: String(f.windowMs.value / 1000),
-        exempt: f.exempt.value.join("\n"),
-    };
-}
-
-function dashSetExemptList(text) {
-    return text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l; });
-}
-
-function dashSetChanges() {
-    var base = dashSetDraftFrom(dashSet.baseSnap);
-    var d = dashSet.draft;
-    var f = dashSet.baseSnap.fields;
-    var out = {};
-    if (!f.maxReq.locked && d.maxReq.trim() !== base.maxReq) out.maxReq = d.maxReq.trim();
-    if (!f.windowMs.locked && d.windowSeconds.trim() !== base.windowSeconds) out.windowSeconds = d.windowSeconds.trim();
-    if (dashSetExemptList(d.exempt).join("\n") !== dashSetExemptList(base.exempt).join("\n")) out.exempt = dashSetExemptList(d.exempt);
-    return out;
-}
-
-function dashSettingsLoad(isCurrent) {
-    return dashPanelLoad(DASH_SET_PANELS.rate, isCurrent);
-}
-
-function dashSettingsLoadAll(isCurrent) {
-    return Promise.all([dashGenLoad(isCurrent), dashSettingsLoad(isCurrent), dashRedisLoad(isCurrent)]);
-}
-
-// True when FORWARDED_ALLOW_IPS lists only loopback addresses, as uvicorn reads it
-// (comma-separated, spaces around items ignored). The bundled compose file passes
-// uvicorn's default "127.0.0.1,::1", so such a value names no proxy at another address.
-function dashProxyLoopbackOnly(value) {
-    var items = String(value).split(",").map(function (item) { return item.trim(); }).filter(Boolean);
-    return items.length > 0 && items.every(function (item) { return item === "127.0.0.1" || item === "::1"; });
-}
-
-function dashSettingsDrawForm() {
-    var body = document.getElementById("settings-body");
-    if (!body || !dashSet.baseSnap) return;
-    var f = dashSet.baseSnap.fields;
-    var d = dashSet.draft;
-    var own = dashSet.snap.yourAddress;
-    var proxy = dashSet.snap.proxyNetwork || { envName: "FORWARDED_ALLOW_IPS", value: null };
-    var proxySet = proxy.value !== null && proxy.value !== undefined;
-    var proxyLoopback = proxySet && dashProxyLoopbackOnly(proxy.value);
-    var proxyField = !proxySet
-        ? '<p class="ui-hint">' + tHtml("settings.ratelimit.is-not-set-so-uvicorn-trusts", { env: dashCode(proxy.envName), header: dashCode(t("settings.ratelimit.x-forwarded-for")),
-            a: dashCode("127.0.0.1"), b: dashCode("::1") }) + "</p>"
-        : proxyLoopback
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.loopback-addresses-only-uvicorn-trusts", { env: dashCode(proxy.envName),
-            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
-        : proxy.value === ""
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.environment-variable-to-an-empty-value", { env: dashCode(proxy.envName),
-            header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
-        : proxy.value
-        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.uvicorn-takes-the-caller-s-address", { env: dashCode(proxy.envName),
-            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
-        : "";
-    // Shown whether the field is locked or not.
-    var maxScope = esc(t("settings.ratelimit.an-ipv6-64-network-counts-as"));
-    var maxField = f.maxReq.locked
-        ? dashSetLocked(f.maxReq, tn("settings.ratelimit.count-requests", f.maxReq.value)) + '<span class="ui-hint">' + maxScope + "</span>"
-        : '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
-          '" step="1" required value="' + esc(d.maxReq) + '" aria-describedby="set-max-hint" />' +
-          '<span class="ui-hint" id="set-max-hint">' + esc(t("settings.ratelimit.from-1-to", { source: dashSetSourceHint(f.maxReq), max: uiNum(f.maxReq.max),
-            scope: t("settings.ratelimit.an-ipv6-64-network-counts-as") })) + "</span>";
-    var winField = f.windowMs.locked
-        ? dashSetLocked(f.windowMs, t("settings.ratelimit.ms", { n: uiNum(f.windowMs.value) }))
-        : '<input class="ui-input" id="set-window" type="number" inputmode="numeric" min="' + esc(f.windowMs.minSeconds) + '" max="' +
-          esc(f.windowMs.maxSeconds) + '" step="1" required value="' + esc(d.windowSeconds) + '" aria-describedby="set-window-hint" />' +
-          '<span class="ui-hint" id="set-window-hint">' + esc(t("settings.ratelimit.whole-seconds-from-1-to", { source: dashSetSourceHint(f.windowMs), max: uiNum(f.windowMs.maxSeconds) })) + "</span>";
-    body.innerHTML =
-        '<form class="ui-form" id="settings-form" novalidate><fieldset class="ui-settings-fields" id="settings-fields">' +
-        '<div class="ui-form-row">' +
-        '<div class="ui-field"><label class="ui-label" for="set-max">' + esc(t("settings.ratelimit.requests-per-window-from-one-address")) + '</label>' + maxField + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="set-window">' + esc(t("settings.ratelimit.window-in-seconds")) + '</label>' + winField + "</div>" +
-        "</div>" +
-        '<div class="ui-field"><span class="ui-label">' + esc(t("settings.ratelimit.reverse-proxy-addresses")) + '</span>' + proxyField + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="set-exempt">' + esc(t("settings.ratelimit.exempt-addresses-and-networks")) + ' <small>' + esc(t("settings.ratelimit.one-per-line-up-to", { max: uiNum(f.exempt.max) })) + "</small></label>" +
-        '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint" placeholder="' + esc(t("settings.ratelimit.203-0-113-10-172-18")) + '">' +
-        esc(d.exempt) + "</textarea>" +
-        '<span class="ui-hint" id="set-exempt-hint">' + (own
-            ? tHtml("settings.ratelimit.your-request-to-this-page-came", { example: dashCode("172.18.0.0/16"), own: dashCode(own) })
-            : tHtml("settings.ratelimit.ipv4-or-ipv6-addresses-or-networks", { example: dashCode("172.18.0.0/16") })) + "</span>" +
-        (proxySet && proxy.value && !proxyLoopback ? "" :
-            '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.ratelimit.an-exempt-address-is-not-limited")) + '</p>' +
-            "<small>" + tHtml("settings.ratelimit.if-a-reverse-proxy-sits-in", { env: dashCode(t("settings.ratelimit.forwarded-allow-ips")) }) + "</small></div><span></span></div>") +
-        '<label class="ui-check-label hidden" id="set-own-wrap"><input type="checkbox" class="ui-check" id="set-own" />' + ' ' + '<span>' + tHtml("settings.ratelimit.exempt", { own: dashCode(own || "") }) + "</span></label>" +
-        "</div>" +
-        '<p class="ui-error hidden" id="set-err" role="alert"></p>' +
-        '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-save">' + esc(t("settings.ratelimit.save")) + '</button>' +
-        '<button type="button" class="ui-btn hidden" id="set-discard" data-set-discard="rate">' + esc(t("settings.ratelimit.discard-changes")) + '</button></div>' +
-        "</fieldset></form>";
-    dashSettingsSyncForm();
-}
-
-// Parts of the form that follow the draft and the last answer, without redrawing the inputs
-function dashSettingsSyncForm() {
-    var form = document.getElementById("settings-form");
-    if (!form) return;
-
-    var wrap = document.getElementById("set-own-wrap");
-    // Shown when the server answered that the change exempts the admin's own address
-    wrap.classList.toggle("hidden", !dashSet.askOwn);
-    if (!dashSet.askOwn) document.getElementById("set-own").checked = false;
-    dashPanelSyncCommon(DASH_SET_PANELS.rate, [["set-max", "maxReq"], ["set-window", "windowMs"], ["set-exempt", "exempt"]]);
-}
-
-function dashSettingsDraw() {
-    dashPanelDraw(DASH_SET_PANELS.rate);
-}
-
-function dashSettingsAlerts(s, alerts) {
-    var applied = dashSetAppliedAlerts(s, alerts);
-    var saved = dashSetSavedLine(s, esc(t("settings.ratelimit.nothing-saved-here-yet-the-values")));
-    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), tHtml("settings.ratelimit.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
-}
-
-function dashSettingsConflictText(c) {
-    var f = c.fields;
-    return tHtml("settings.ratelimit.saved-now", { requests: tn("settings.ratelimit.count-requests", f.maxReq.value), seconds: uiNum(f.windowMs.value / 1000),
-        exempt: tRaw(f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : esc(t("settings.ratelimit.none"))) });
-}
-
-function dashSettingsInput() {
-    var d = dashSet.draft;
-    var max = document.getElementById("set-max");
-    var win = document.getElementById("set-window");
-    if (max) d.maxReq = max.value;
-    if (win) d.windowSeconds = win.value;
-    d.exempt = document.getElementById("set-exempt").value;
-    var changes = dashSetChanges();
-    dashSet.dirty = Object.keys(changes).length > 0;
-    dashSettingsSyncForm();
-}
-
-function dashSettingsSave() {
-    if (dashSet.saving) return;
-    var changes = dashSetChanges();
-    var body = { baseVersion: dashSet.baseSnap.version };
-    var whole = /^\d+$/;
-    if ("maxReq" in changes) {
-        if (!whole.test(changes.maxReq)) return dashSettingsFail(t("settings.ratelimit.requests-per-window-must-be-a"), "maxReq");
-        body.maxReq = Number(changes.maxReq);
-    }
-    if ("windowSeconds" in changes) {
-        if (!whole.test(changes.windowSeconds)) return dashSettingsFail(t("settings.ratelimit.the-window-must-be-a-whole"), "windowMs");
-        body.windowSeconds = Number(changes.windowSeconds);
-    }
-    if ("exempt" in changes) body.exempt = changes.exempt;
-    var ownBox = document.getElementById("set-own");
-    if (ownBox && ownBox.checked) body.confirmOwnAddress = true;
-    dashSet.saving = true;
-    dashSet.error = "";
-    dashSet.errorField = "";
-    dashSettingsSyncForm();
-    dashSet.seq += 1; // a load that started before this save must not draw over its result
-    uiMutated();
-    return api("PUT", "/admin/api/settings/rate-limit", body).then(function (res) {
-        dashSet.saving = false;
-        dashSet.seq += 1; // and so must a load that started while it ran
-        var d = res.data || {};
-        if (res.ok && d.fields) {
-            dashPanelSaved(DASH_SET_PANELS.rate, d, t("settings.ratelimit.settings-saved"));
-            return;
-        }
-        if (res.status === 409 && d.code === "conflict" && d.current) {
-            dashPanelConflict(DASH_SET_PANELS.rate, d.current);
-            return;
-        }
-        if (res.status === 409 && d.code === "own_address") dashSet.askOwn = true;
-        dashSettingsFail(apiError(res, t("settings.ratelimit.could-not-save-the-settings")), d.field || "");
-        if (d.code === "locked") dashSettingsLoad();
-    });
-}
-
-function dashSettingsFail(message, field) {
-    dashPanelFail(DASH_SET_PANELS.rate, message, field);
+// The shared question for a confirmation the server asked for (DS-12)
+function dashSetAsk(o) {
+    return uiConfirm({ title: o.title, message: o.message, confirmText: o.confirmText, danger: !!o.danger });
 }
 
 // ---------------------------------------------------------------------------
@@ -3229,28 +3153,20 @@ function dashGenInput() {
     if (!d) return;
     var tz = document.getElementById("gen-tz");
     var cookie = document.getElementById("gen-cookie");
-    if (tz) d.timeZone = tz.value;
-    if (cookie) d.cookieSecure = cookie.checked;
+    if (tz && !tz.disabled) d.timeZone = tz.value;
+    if (cookie && !cookie.disabled) d.cookieSecure = cookie.checked;
     DASH_GEN_RETENTION.forEach(function (r) {
         var el = document.getElementById(r[1]);
-        if (el) d[r[0]] = el.value;
+        if (el && !el.disabled) d[r[0]] = el.value;
     });
     dashGenDraftChanged();
     dashGenSyncForm();
 }
 
-// The admin ticked or cleared a confirmation box
-function dashGenConfirm(kind, ok) {
-    var ask = kind === "purge" ? dashGen.askPurge : dashGen.askCookie;
-    if (ask) ask.ok = !!ok;
-}
-
-function dashGenRetentionField(f, r, d) {
+function dashGenRetentionControl(f, r, d) {
     var field = f[r[0]];
-    if (field.locked) return dashSetLocked(field, tn("settings.general.count-days", field.value));
     return '<input class="ui-input" id="' + r[1] + '" type="number" inputmode="numeric" min="' + esc(field.min) + '" max="' + esc(field.max) +
-        '" step="1" required value="' + esc(d[r[0]]) + '" aria-describedby="' + r[1] + '-hint" />' +
-        '<span class="ui-hint" id="' + r[1] + '-hint">' + esc(t("settings.general.whole-days-from", { source: dashSetSourceHint(field), min: uiNum(field.min), max: uiNum(field.max) })) + "</span>";
+        '" step="1" required value="' + esc(field.locked ? field.value : d[r[0]]) + '"' + (field.locked ? " disabled" : "") + ' aria-describedby="' + r[1] + '-hint" />';
 }
 
 function dashGenDrawForm() {
@@ -3261,80 +3177,92 @@ function dashGenDrawForm() {
     var d = dashGen.draft;
     // Only zones this browser can show dates in; the current value stays so it is not changed silently
     var zones = (Array.isArray(s.timeZones) ? s.timeZones : []).filter(function (z) { return uiZoneValid(z); });
-    if (zones.indexOf(d.timeZone) === -1) zones.unshift(d.timeZone);
-    var tzField = f.timeZone.locked
-        ? dashSetLocked(f.timeZone, f.timeZone.envInvalid ? t("settings.general.not-a-time-zone-so-utc") : f.timeZone.value)
-        : '<select class="ui-select" id="gen-tz" aria-describedby="gen-tz-hint">' + zones.map(function (z) {
-            return '<option value="' + esc(z) + '"' + (z === d.timeZone ? " selected" : "") + ">" + esc(z) + "</option>";
-        }).join("") + "</select>" +
-          '<span class="ui-hint" id="gen-tz-hint">' + esc(t("settings.general.dates-on-every-page-and-the", { source: dashSetSourceHint(f.timeZone) })) + "</span>";
-    var cookieField = f.cookieSecure.locked
-        ? dashSetLocked(f.cookieSecure, f.cookieSecure.value ? "true" : "false")
-        : '<label class="ui-check-label"><input type="checkbox" class="ui-check" id="gen-cookie"' + (d.cookieSecure ? " checked" : "") +
-          ' aria-describedby="gen-cookie-hint" />' + ' ' + '<span>' + esc(t("settings.general.send-the-session-cookie-over-https")) + '</span></label>' +
-          '<span class="ui-hint" id="gen-cookie-hint">' + esc(t("settings.general.turn-it-on-when-admins-reach", { source: dashSetSourceHint(f.cookieSecure) })) + "</span>";
+    var zone = f.timeZone.locked ? f.timeZone.value : d.timeZone;
+    if (zones.indexOf(zone) === -1) zones.unshift(zone);
+    var tzControl = '<select class="ui-select" id="gen-tz" aria-describedby="gen-tz-hint"' + (f.timeZone.locked ? " disabled" : "") + ">" + zones.map(function (z) {
+        return '<option value="' + esc(z) + '"' + (z === zone ? " selected" : "") + ">" + esc(z) + "</option>";
+    }).join("") + "</select>";
+    var cookieOn = f.cookieSecure.locked ? f.cookieSecure.value === true : d.cookieSecure;
     var root = s.rootPath || { envName: "ROOT_PATH", value: null };
     var rootField = root.value === null || root.value === undefined
         ? '<p class="ui-hint">' + tHtml("settings.general.is-not-set-so-the-portal", { env: dashCode(root.envName) }) + "</p>"
         : '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + (root.value
             ? tHtml("settings.general.environment-variable", { env: dashCode(root.envName), value: dashCode(root.value) })
             : tHtml("settings.general.to-an-empty-value-so-the", { env: dashCode(root.envName) })) + "</span></p>";
-    var locked = f.timeZone.locked && f.cookieSecure.locked && f.activityLogRetentionDays.locked && f.accessLogRetentionDays.locked;
     body.innerHTML =
-        '<form class="ui-form" id="general-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="general-fields">' +
-        '<div class="ui-field"><label class="ui-label" for="gen-tz">' + esc(t("settings.general.time-zone")) + '</label>' + tzField + "</div>" +
-        '<div class="ui-form-row">' + DASH_GEN_RETENTION.map(function (r) {
-            return '<div class="ui-field"><label class="ui-label" for="' + r[1] + '">' + esc(t(r[2])) + "</label>" + dashGenRetentionField(f, r, d) + "</div>";
-        }).join("") + "</div>" +
-        '<div class="ui-field"><span class="ui-label">' + esc(t("settings.general.secure-session-cookie")) + '</span>' + cookieField + "</div>" +
-        '<div class="ui-field"><span class="ui-label">' + esc(t("settings.general.url-path-prefix")) + '</span>' + rootField + "</div>" +
-        '<div class="ui-settings-asks" id="gen-asks" aria-live="polite"></div>' +
+        '<form class="ui-form" id="general-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields ui-set-rows" id="general-fields">' +
+        dashSetRow({ id: "gen-tz", forId: "gen-tz", label: t("settings.general.time-zone"), locked: f.timeZone.locked, control: tzControl,
+            hint: esc(t("settings.general.dates-on-every-page-and-the", { source: dashSetSourceHint(f.timeZone) })) }) +
+        DASH_GEN_RETENTION.map(function (r) {
+            return dashSetRow({ id: r[1], forId: r[1], label: t(r[2]), locked: f[r[0]].locked, control: dashGenRetentionControl(f, r, d),
+                hint: esc(t("settings.general.whole-days-from", { source: dashSetSourceHint(f[r[0]]), min: uiNum(f[r[0]].min), max: uiNum(f[r[0]].max) })) });
+        }).join("") +
+        // The whole row is the label of its switch (FS-1)
+        '<label class="ui-set-row ui-set-bool' + (f.cookieSecure.locked ? " is-locked" : "") + '" id="gen-cookie-row" for="gen-cookie">' +
+        '<span class="ui-set-text"><span class="ui-set-label"><span class="ui-label">' + esc(t("settings.general.secure-session-cookie")) + '</span>' +
+        '<span class="ui-set-marks" id="gen-cookie-marks"></span></span>' +
+        '<span class="ui-hint" id="gen-cookie-hint">' + esc(t("settings.general.send-the-session-cookie-over-https")) + "</span>" +
+        '<span class="ui-hint">' + esc(t("settings.general.turn-it-on-when-admins-reach", { source: dashSetSourceHint(f.cookieSecure) })) + "</span></span>" +
+        '<span class="ui-set-control"><input type="checkbox" class="ui-switch" id="gen-cookie" role="switch"' + (cookieOn ? " checked" : "") +
+        (f.cookieSecure.locked ? " disabled" : "") + ' aria-describedby="gen-cookie-hint" /><span class="ui-set-note hidden" id="gen-cookie-note" role="alert"></span></span></label>' +
+        '<div class="ui-set-row" id="gen-root-row"><div class="ui-set-text"><div class="ui-set-label"><span class="ui-label" id="gen-root">' + esc(t("settings.general.url-path-prefix")) + '</span></div></div>' +
+        '<div class="ui-set-control">' + rootField + "</div></div>" +
         '<p class="ui-error hidden" id="gen-err" role="alert"></p>' +
-        (locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="gen-save">' + esc(t("settings.general.save")) + '</button>' +
-            '<button type="button" class="ui-btn hidden" id="gen-discard" data-set-discard="general">' + esc(t("settings.general.discard-changes")) + '</button></div>') +
         "</fieldset></form>";
     var sel = document.getElementById("gen-tz");
-    if (sel) uiPicker(sel, { label: t("settings.general.time-zone"), field: true });
+    if (sel && !sel.disabled) uiPicker(sel, { label: t("settings.general.time-zone"), field: true });
     dashGenSyncForm();
-}
-
-// True when the confirmation lowers this retention below the value the page was showing.
-function dashGenLowered(ask, name) {
-    var snap = dashGen.snap;
-    var cur = snap && snap.fields && snap.fields[name] ? snap.fields[name].value : null;
-    return !!ask.confirm && typeof cur === "number" && ask.confirm[name] < cur;
-}
-
-function dashGenAsksHtml() {
-    var st = dashGen;
-    var html = "";
-    if (st.askPurge) {
-        var e = st.askPurge.estimate || {};
-        var rows = function (n, unknownKey, countKey) { return n === null || n === undefined ? t(unknownKey) : t("settings.general.about", { count: tn(countKey, n) }); };
-        // Only the logs whose retention goes down; the server leaves the other estimate out.
-        var parts = [];
-        if (dashGenLowered(st.askPurge, "activityLogRetentionDays")) parts.push(rows(e.activityLogs, "settings.general.unknown-activity-log-entries", "settings.general.count-activity-log-entries"));
-        if (dashGenLowered(st.askPurge, "accessLogRetentionDays")) parts.push(rows(e.accessLogs, "settings.general.unknown-access-log-entries", "settings.general.count-access-log-entries"));
-        html += dashSetAskHtml("gen-purge-ok", t("settings.general.lowering-the-retention-deletes-older-entries"),
-            parts.length ? esc(t("settings.general.older-than-the-new-limit", { detail: st.askPurge.detail || "",
-                parts: parts.length > 1 ? t("settings.general.and", { first: parts[0], second: parts[1] }) : parts[0] })) : esc(st.askPurge.detail || ""),
-            t("settings.general.delete-them-when-i-save"), st.askPurge.ok);
-    }
-    if (st.askCookie) {
-        html += dashSetAskHtml("gen-cookie-ok", t("settings.general.this-page-was-opened-over-plain"), esc(st.askCookie.detail || ""),
-            t("settings.general.turn-on-the-secure-cookie-anyway"), st.askCookie.ok);
-    }
-    return html;
 }
 
 function dashGenSyncForm() {
     var form = document.getElementById("general-form");
     if (!form) return;
-    dashSetAsksDraw("gen-asks", dashGenAsksHtml());
+    var s = dashGen.baseSnap;
+    var f = s.fields;
+    var d = dashGen.draft;
+    var marks = function (id, field, html) {
+        var box = document.getElementById(id + "-marks");
+        if (box && box.getAttribute("data-drawn") !== html) {
+            box.setAttribute("data-drawn", html);
+            box.innerHTML = html;
+        }
+    };
+    marks("gen-tz", f.timeZone, f.timeZone.locked ? dashSetLockPill(f.timeZone, f.timeZone.envInvalid ? t("settings.general.not-a-time-zone-so-utc") : f.timeZone.value)
+        : dashSetMarks("timeZone", d.timeZone !== f.timeZone["default"], f.timeZone["default"]));
+    DASH_GEN_RETENTION.forEach(function (r) {
+        var field = f[r[0]];
+        marks(r[1], field, field.locked ? dashSetLockPill(field, tn("settings.general.count-days", field.value))
+            : dashSetMarks(r[0], d[r[0]].trim() !== String(field["default"]), tn("settings.general.count-days", field["default"])));
+    });
+    marks("gen-cookie", f.cookieSecure, f.cookieSecure.locked ? dashSetLockPill(f.cookieSecure, f.cookieSecure.value ? t("settings.general.on") : t("settings.general.off"))
+        : dashSetMarks("cookieSecure", d.cookieSecure !== (f.cookieSecure["default"] === true), f.cookieSecure["default"] ? t("settings.general.on") : t("settings.general.off")));
     dashPanelSyncCommon(DASH_SET_PANELS.general, [["gen-tz-pick", "timeZone"], ["gen-cookie", "cookieSecure"],
         ["gen-activity", "activityLogRetentionDays"], ["gen-access", "accessLogRetentionDays"]]);
     var pick = document.getElementById("gen-tz");
     if (pick && pick.uiPicker) uiPickerSync(pick);
+}
+
+function dashGenReset(name) {
+    var f = dashGen.baseSnap.fields;
+    var d = dashGen.draft;
+    if (name === "timeZone") {
+        d.timeZone = f.timeZone["default"];
+        var sel = document.getElementById("gen-tz");
+        if (sel) { sel.value = d.timeZone; if (sel.uiPicker) uiPickerSync(sel); }
+    } else if (name === "cookieSecure") {
+        d.cookieSecure = f.cookieSecure["default"] === true;
+        var box = document.getElementById("gen-cookie");
+        if (box) box.checked = d.cookieSecure;
+    } else {
+        DASH_GEN_RETENTION.forEach(function (r) {
+            if (r[0] !== name) return;
+            d[name] = String(f[name]["default"]);
+            var el = document.getElementById(r[1]);
+            if (el) el.value = d[name];
+        });
+    }
+    dashGenDraftChanged();
+    dashGenSyncForm();
 }
 
 function dashGenDraw() {
@@ -3370,20 +3298,54 @@ function dashGenConflictText(c) {
         access: tn("settings.general.count-days", f.accessLogRetentionDays.value), cookie: f.cookieSecure.value ? t("settings.general.on") : t("settings.general.off") }));
 }
 
+// The fields the page checks before a save (SV-1): the first problem, or null
+function dashGenCheck() {
+    var f = dashGen.baseSnap.fields;
+    var changes = dashGenChanges();
+    for (var i = 0; i < DASH_GEN_RETENTION.length; i++) {
+        var r = DASH_GEN_RETENTION[i];
+        if (!(r[0] in changes)) continue;
+        var v = changes[r[0]];
+        var n = Number(v);
+        if (!/^\d+$/.test(v) || n < f[r[0]].min || n > f[r[0]].max) {
+            return { id: r[1], label: t(r[2]), text: t("settings.check.whole-number-from", { min: uiNum(f[r[0]].min), max: uiNum(f[r[0]].max) }) };
+        }
+    }
+    return null;
+}
+
+// The question for a shorter retention: the server's words and its estimate
+function dashGenPurgeMessage(ask) {
+    var e = ask.estimate || {};
+    var rows = function (n, unknownKey, countKey) { return n === null || n === undefined ? t(unknownKey) : t("settings.general.about", { count: tn(countKey, n) }); };
+    // Only the logs whose retention goes down; the server leaves the other estimate out.
+    var parts = [];
+    if (dashGenLowered(ask, "activityLogRetentionDays")) parts.push(rows(e.activityLogs, "settings.general.unknown-activity-log-entries", "settings.general.count-activity-log-entries"));
+    if (dashGenLowered(ask, "accessLogRetentionDays")) parts.push(rows(e.accessLogs, "settings.general.unknown-access-log-entries", "settings.general.count-access-log-entries"));
+    return parts.length ? t("settings.general.older-than-the-new-limit", { detail: ask.detail || "",
+        parts: parts.length > 1 ? t("settings.general.and", { first: parts[0], second: parts[1] }) : parts[0] }) : ask.detail || "";
+}
+
+// True when the confirmation lowers this retention below the value the page was showing.
+function dashGenLowered(ask, name) {
+    var snap = dashGen.snap;
+    var cur = snap && snap.fields && snap.fields[name] ? snap.fields[name].value : null;
+    return !!ask.confirm && typeof cur === "number" && ask.confirm[name] < cur;
+}
+
+// Save General; resolves "saved", "none", "conflict", "cancelled", "failed" or "unknown"
 function dashGenSave() {
     var st = dashGen;
-    if (st.saving || !st.baseSnap) return;
+    var p = DASH_SET_PANELS.general;
+    if (st.saving || !st.baseSnap) return Promise.resolve("none");
     var changes = dashGenChanges();
+    if (!Object.keys(changes).length) return Promise.resolve("none");
     var body = { baseVersion: st.baseSnap.version };
-    var whole = /^\d+$/;
     if ("timeZone" in changes) body.timeZone = changes.timeZone;
     if ("cookieSecure" in changes) body.cookieSecure = changes.cookieSecure;
-    for (var i = 0; i < DASH_GEN_RETENTION.length; i++) {
-        var key = DASH_GEN_RETENTION[i][0];
-        if (!(key in changes)) continue;
-        if (!whole.test(changes[key])) return dashPanelFail(DASH_SET_PANELS.general, t("settings.general.retention-must-be-a-whole-number"), key);
-        body[key] = Number(changes[key]);
-    }
+    DASH_GEN_RETENTION.forEach(function (r) {
+        if (r[0] in changes) body[r[0]] = Number(changes[r[0]]);
+    });
     if (st.askPurge && st.askPurge.ok) body.confirmPurge = st.askPurge.confirm;
     if (st.askCookie && st.askCookie.ok) body.confirmCookieSecure = true;
     // The values this request asks about; a confirmation the server asks for is bound to them
@@ -3401,30 +3363,48 @@ function dashGenSave() {
         st.seq += 1;
         var d = res.data || {};
         if (res.ok && d.fields) {
-            dashPanelSaved(DASH_SET_PANELS.general, d, t("settings.general.settings-saved"));
+            dashPanelSaved(p, d);
             var zone = d.fields.timeZone && d.fields.timeZone.value;
             if (zone && zone !== zoneBefore) dashGenZoneSaved(zone);
-            return;
+            return "saved";
         }
         if (res.status === 409 && d.code === "conflict" && d.current) {
-            dashGenClearAsks(st);
-            dashPanelConflict(DASH_SET_PANELS.general, d.current);
+            dashPanelConflict(p, d.current);
             dashGenSyncForm();
-            return;
+            return "conflict";
         }
         if (res.status === 409 && d.code === "confirm_purge" && d.confirm) {
-            st.askPurge = { confirm: d.confirm, estimate: d.estimate || {}, detail: d.detail || "", ok: false,
+            var purge = { confirm: d.confirm, estimate: d.estimate || {}, detail: d.detail || "", ok: false,
                 activityLogRetentionDays: sent.activityLogRetentionDays, accessLogRetentionDays: sent.accessLogRetentionDays };
+            st.askPurge = purge;
             dashGenSyncForm();
-            return;
+            return dashSetAsk({ title: t("settings.general.lowering-the-retention-deletes-older-entries"), message: dashGenPurgeMessage(purge),
+                confirmText: t("settings.confirm.delete-and-save"), danger: true }).then(function (ok) {
+                // Cancelled, or the values changed while the question was open: nothing is sent
+                if (!ok || st.askPurge !== purge) { if (st.askPurge === purge) st.askPurge = null; return "cancelled"; }
+                purge.ok = true;
+                return dashGenSave();
+            });
         }
         if (res.status === 409 && d.code === "confirm_cookie_secure") {
-            st.askCookie = { detail: d.detail || "", ok: false, cookieSecure: sent.cookieSecure };
+            var cookie = { detail: d.detail || "", ok: false, cookieSecure: sent.cookieSecure };
+            st.askCookie = cookie;
             dashGenSyncForm();
-            return;
+            return dashSetAsk({ title: t("settings.general.this-page-was-opened-over-plain"), message: cookie.detail,
+                confirmText: t("settings.general.turn-on-the-secure-cookie-anyway"), danger: true }).then(function (ok) {
+                if (!ok || st.askCookie !== cookie) { if (st.askCookie === cookie) st.askCookie = null; return "cancelled"; }
+                cookie.ok = true;
+                return dashGenSave();
+            });
         }
-        dashPanelFail(DASH_SET_PANELS.general, apiError(res, t("settings.general.could-not-save-the-settings")), d.field || "");
+        if (res.status === 0) {
+            dashPanelUnknown(p);
+            return "unknown";
+        }
+        if (res.status === 401) return "failed";
+        dashPanelFail(p, apiError(res, t("settings.general.could-not-save-the-settings")), d.field || "");
         if (d.code === "locked") dashGenLoad();
+        return "failed";
     });
 }
 
@@ -3433,13 +3413,545 @@ function dashGenZoneSaved(zone) {
     dash.zoneAsked = zone;
     uiSetAppZone(zone);
     dashRedrawDates();
-    dashSettingsDraw();
-    dashGenDraw();
-    dashRedisDraw();
 }
 
 // ---------------------------------------------------------------------------
-// Redis connection: saved only after the server checked it; used after a restart
+// Display: Date Format and Time Format, shown in General, saved on their own (FW-9)
+// ---------------------------------------------------------------------------
+
+function dashDispLoad(isCurrent) {
+    return dashPanelLoad(DASH_SET_PANELS.display, isCurrent);
+}
+
+function dashDispDraftFrom(s) {
+    return { dateFormat: s.fields.dateFormat.value, timeFormat: s.fields.timeFormat.value };
+}
+
+function dashDispChanges() {
+    var f = dashDisp.baseSnap.fields;
+    var d = dashDisp.draft;
+    var out = {};
+    ["dateFormat", "timeFormat"].forEach(function (name) {
+        if (!f[name].locked && d[name] !== f[name].value) out[name] = d[name];
+    });
+    return out;
+}
+
+function dashDispWord(name, value) {
+    var list = name === "dateFormat" ? UI_DATE_FORMATS : UI_TIME_FORMATS;
+    var hit = list.filter(function (x) { return x[0] === value; })[0];
+    return hit ? t(hit[1]) : String(value);
+}
+
+function dashDispDrawForm() {
+    var body = document.getElementById("display-body");
+    if (!body || !dashDisp.baseSnap) return;
+    var f = dashDisp.baseSnap.fields;
+    var d = dashDisp.draft;
+    var date = f.dateFormat.locked ? f.dateFormat.value : d.dateFormat;
+    var time = f.timeFormat.locked ? f.timeFormat.value : d.timeFormat;
+    var dateControl = '<select class="ui-select" id="disp-date" aria-describedby="disp-date-hint"' + (f.dateFormat.locked ? " disabled" : "") + ">" +
+        UI_DATE_FORMATS.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (x[0] === date ? " selected" : "") + ">" + esc(t(x[1])) + "</option>"; }).join("") + "</select>";
+    // A few short choices: a segmented control (FS-14)
+    var timeControl = '<div class="ui-seg" role="group" id="disp-time" aria-labelledby="disp-time-label">' + UI_TIME_FORMATS.map(function (x) {
+        return '<button type="button" data-disp-time="' + esc(x[0]) + '" aria-pressed="' + (x[0] === time) + '"' + (f.timeFormat.locked ? " disabled" : "") + ">" + esc(t(x[1])) + "</button>";
+    }).join("") + "</div>";
+    body.innerHTML =
+        '<form class="ui-form" id="display-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields ui-set-rows" id="display-fields">' +
+        dashSetRow({ id: "disp-date", forId: "disp-date", label: t("shell.date-format"), locked: f.dateFormat.locked, control: dateControl,
+            hint: esc(t("shell.select-your-date-format-default-browser")) }) +
+        dashSetRow({ id: "disp-time", label: t("shell.time-format"), locked: f.timeFormat.locked, control: timeControl,
+            hint: esc(t("shell.select-your-time-format-default-24")) }) +
+        '<p class="ui-hint" id="disp-example" aria-live="polite"></p>' +
+        '<p class="ui-error hidden" id="disp-err" role="alert"></p>' +
+        "</fieldset></form>";
+    var sel = document.getElementById("disp-date");
+    if (sel && !sel.disabled) uiPicker(sel, { label: t("shell.date-format"), field: true });
+    dashDispSyncForm();
+}
+
+function dashDispSyncForm() {
+    var form = document.getElementById("display-form");
+    if (!form) return;
+    var f = dashDisp.baseSnap.fields;
+    var d = dashDisp.draft;
+    ["dateFormat", "timeFormat"].forEach(function (name) {
+        var id = name === "dateFormat" ? "disp-date" : "disp-time";
+        var field = f[name];
+        var html = field.locked ? dashSetLockPill(field, field.envInvalid ? t("settings.display.env-invalid", { value: dashDispWord(name, field.value) }) : dashDispWord(name, field.value))
+            : dashSetMarks(name, d[name] !== field["default"], dashDispWord(name, field["default"]));
+        var box = document.getElementById(id + "-marks");
+        if (box && box.getAttribute("data-drawn") !== html) {
+            box.setAttribute("data-drawn", html);
+            box.innerHTML = html;
+        }
+    });
+    form.querySelectorAll("[data-disp-time]").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b.getAttribute("data-disp-time") === (f.timeFormat.locked ? f.timeFormat.value : d.timeFormat)));
+    });
+    // Now, as the picked formats write it, before saving (FW-9)
+    var prefs = { date: f.dateFormat.locked ? f.dateFormat.value : d.dateFormat, time: f.timeFormat.locked ? f.timeFormat.value : d.timeFormat };
+    var example = t("shell.example", { time: formatTime(Date.now(), { seconds: false, prefs: prefs }) });
+    var ex = document.getElementById("disp-example");
+    if (ex.textContent !== example) ex.textContent = example;
+    dashPanelSyncCommon(DASH_SET_PANELS.display, [["disp-date-pick", "dateFormat"], ["disp-time", "timeFormat"]]);
+    var pick = document.getElementById("disp-date");
+    if (pick && pick.uiPicker) uiPickerSync(pick);
+}
+
+function dashDispInput() {
+    var d = dashDisp.draft;
+    if (!d) return;
+    var sel = document.getElementById("disp-date");
+    if (sel && !sel.disabled) d.dateFormat = sel.value;
+    dashDisp.dirty = Object.keys(dashDispChanges()).length > 0;
+    dashDispSyncForm();
+}
+
+function dashDispPickTime(value) {
+    if (!dashDisp.draft || dashDisp.baseSnap.fields.timeFormat.locked || dashDisp.saving || dashSettings.lock) return;
+    dashDisp.draft.timeFormat = value;
+    dashDisp.dirty = Object.keys(dashDispChanges()).length > 0;
+    dashDispSyncForm();
+    dashSaveBarSync();
+}
+
+function dashDispReset(name) {
+    var f = dashDisp.baseSnap.fields;
+    dashDisp.draft[name] = f[name]["default"];
+    if (name === "dateFormat") {
+        var sel = document.getElementById("disp-date");
+        if (sel) { sel.value = dashDisp.draft.dateFormat; if (sel.uiPicker) uiPickerSync(sel); }
+    }
+    dashDisp.dirty = Object.keys(dashDispChanges()).length > 0;
+    dashDispSyncForm();
+}
+
+function dashDispDraw() {
+    dashPanelDraw(DASH_SET_PANELS.display);
+}
+
+function dashDispAlerts(s, alerts) {
+    ["dateFormat", "timeFormat"].forEach(function (name) {
+        var field = s.fields[name];
+        if (field.envInvalid) {
+            alerts.push(dashSetAlert(" is-warn", t("settings.display.env-not-a-choice-title", { env: field.envName }),
+                tHtml("settings.display.env-not-a-choice", { env: dashCode(field.envName), value: dashDispWord(name, field["default"]) })));
+        }
+    });
+    if (s.storedInvalid) {
+        alerts.push(dashSetAlert(" is-warn", t("settings.display.stored-invalid-title"), esc(t("settings.display.stored-invalid"))));
+    }
+    var applied = dashSetAppliedAlerts(s, alerts);
+    var saved = s.version ? tHtml("settings.version", { version: uiNum(s.version), user: tRaw(uiUserText(s.savedBy || "?")), time: tRaw(uiTime(s.savedAt)) })
+        : esc(t("settings.general.nothing-saved-here-yet-the-values"));
+    alerts.push(dashSetAlert("", t("settings.display.saved-formats"), tHtml("settings.display.changes-apply", { saved: tRaw(saved), applied: tRaw(applied) })));
+}
+
+function dashDispConflictText(c) {
+    return esc(t("settings.display.saved-now", { date: dashDispWord("dateFormat", c.fields.dateFormat.value), time: dashDispWord("timeFormat", c.fields.timeFormat.value) }));
+}
+
+function dashDispSave() {
+    var st = dashDisp;
+    var p = DASH_SET_PANELS.display;
+    if (st.saving || !st.baseSnap) return Promise.resolve("none");
+    var changes = dashDispChanges();
+    if (!Object.keys(changes).length) return Promise.resolve("none");
+    var body = { baseVersion: st.baseSnap.version };
+    Object.keys(changes).forEach(function (k) { body[k] = changes[k]; });
+    st.saving = true;
+    st.error = "";
+    st.errorField = "";
+    dashDispSyncForm();
+    st.seq += 1;
+    uiMutated();
+    return api("PUT", "/admin/api/settings/display", body).then(function (res) {
+        st.saving = false;
+        st.seq += 1;
+        var d = res.data || {};
+        if (res.ok && d.fields) {
+            dashPanelSaved(p, d);
+            // This tab writes its dates the new way at once
+            uiSetDatePrefs(d.fields.dateFormat.value, d.fields.timeFormat.value);
+            dashRedrawDates();
+            return "saved";
+        }
+        if (res.status === 409 && d.code === "conflict" && d.current) {
+            dashPanelConflict(p, d.current);
+            return "conflict";
+        }
+        if (res.status === 0) {
+            dashPanelUnknown(p);
+            return "unknown";
+        }
+        if (res.status === 401) return "failed";
+        dashPanelFail(p, apiError(res, t("settings.display.could-not-save")), d.field || "");
+        if (d.code === "locked") dashDispLoad();
+        return "failed";
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Rate limit
+// ---------------------------------------------------------------------------
+
+function dashSetDraftFrom(s) {
+    var f = s.fields;
+    return {
+        maxReq: String(f.maxReq.value),
+        windowSeconds: String(f.windowMs.value / 1000),
+        exempt: f.exempt.value.join("\n"),
+    };
+}
+
+function dashSetExemptList(text) {
+    return text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l; });
+}
+
+function dashSetChanges() {
+    var base = dashSetDraftFrom(dashSet.baseSnap);
+    var d = dashSet.draft;
+    var f = dashSet.baseSnap.fields;
+    var out = {};
+    if (!f.maxReq.locked && d.maxReq.trim() !== base.maxReq) out.maxReq = d.maxReq.trim();
+    if (!f.windowMs.locked && d.windowSeconds.trim() !== base.windowSeconds) out.windowSeconds = d.windowSeconds.trim();
+    if (dashSetExemptList(d.exempt).join("\n") !== dashSetExemptList(base.exempt).join("\n")) out.exempt = dashSetExemptList(d.exempt);
+    return out;
+}
+
+function dashSettingsLoad(isCurrent) {
+    return dashPanelLoad(DASH_SET_PANELS.rate, isCurrent);
+}
+
+// True when FORWARDED_ALLOW_IPS lists only loopback addresses, as uvicorn reads it
+// (comma-separated, spaces around items ignored). The bundled compose file passes
+// uvicorn's default "127.0.0.1,::1", so such a value names no proxy at another address.
+function dashProxyLoopbackOnly(value) {
+    var items = String(value).split(",").map(function (item) { return item.trim(); }).filter(Boolean);
+    return items.length > 0 && items.every(function (item) { return item === "127.0.0.1" || item === "::1"; });
+}
+
+function dashSettingsDrawForm() {
+    var body = document.getElementById("settings-body");
+    if (!body || !dashSet.baseSnap) return;
+    var f = dashSet.baseSnap.fields;
+    var d = dashSet.draft;
+    var own = dashSet.snap.yourAddress;
+    var proxy = dashSet.snap.proxyNetwork || { envName: "FORWARDED_ALLOW_IPS", value: null };
+    var proxySet = proxy.value !== null && proxy.value !== undefined;
+    var proxyLoopback = proxySet && dashProxyLoopbackOnly(proxy.value);
+    var proxyField = !proxySet
+        ? '<p class="ui-hint">' + tHtml("settings.ratelimit.is-not-set-so-uvicorn-trusts", { env: dashCode(proxy.envName), header: dashCode(t("settings.ratelimit.x-forwarded-for")),
+            a: dashCode("127.0.0.1"), b: dashCode("::1") }) + "</p>"
+        : proxyLoopback
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.loopback-addresses-only-uvicorn-trusts", { env: dashCode(proxy.envName),
+            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
+        : proxy.value === ""
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.environment-variable-to-an-empty-value", { env: dashCode(proxy.envName),
+            header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
+        : proxy.value
+        ? '<p class="ui-locked-note">' + DASH_LOCK_ICON + "<span>" + tHtml("settings.ratelimit.uvicorn-takes-the-caller-s-address", { env: dashCode(proxy.envName),
+            value: dashCode(proxy.value), header: dashCode(t("settings.ratelimit.x-forwarded-for")) }) + "</span></p>"
+        : "";
+    var maxControl = '<input class="ui-input" id="set-max" type="number" inputmode="numeric" min="' + esc(f.maxReq.min) + '" max="' + esc(f.maxReq.max) +
+        '" step="1" required value="' + esc(f.maxReq.locked ? f.maxReq.value : d.maxReq) + '"' + (f.maxReq.locked ? " disabled" : "") + ' aria-describedby="set-max-hint" />';
+    var winControl = '<input class="ui-input" id="set-window" type="number" inputmode="numeric" min="' + esc(f.windowMs.minSeconds) + '" max="' +
+        esc(f.windowMs.maxSeconds) + '" step="1" required value="' + esc(f.windowMs.locked ? f.windowMs.value / 1000 : d.windowSeconds) + '"' +
+        (f.windowMs.locked ? " disabled" : "") + ' aria-describedby="set-window-hint" />';
+    var exemptHint = '<span class="ui-hint-line">' + esc(t("settings.ratelimit.one-per-line-up-to", { max: uiNum(f.exempt.max) })) + '</span><span class="ui-hint-line">' + (own
+        ? tHtml("settings.ratelimit.your-request-to-this-page-came", { example: dashCode("172.18.0.0/16"), own: dashCode(own) })
+        : tHtml("settings.ratelimit.ipv4-or-ipv6-addresses-or-networks", { example: dashCode("172.18.0.0/16") })) + "</span>";
+    var exemptControl = '<textarea class="ui-textarea" id="set-exempt" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" aria-describedby="set-exempt-hint" placeholder="' +
+        esc(t("settings.ratelimit.203-0-113-10-172-18")) + '">' + esc(d.exempt) + "</textarea>";
+    body.innerHTML =
+        '<form class="ui-form" id="settings-form" novalidate><fieldset class="ui-settings-fields ui-set-rows" id="settings-fields">' +
+        dashSetRow({ id: "set-max", forId: "set-max", label: t("settings.ratelimit.requests-per-window-from-one-address"), locked: f.maxReq.locked, control: maxControl,
+            hint: esc(t("settings.ratelimit.from-1-to", { source: dashSetSourceHint(f.maxReq), max: uiNum(f.maxReq.max), scope: t("settings.ratelimit.an-ipv6-64-network-counts-as") })) }) +
+        dashSetRow({ id: "set-window", forId: "set-window", label: t("settings.ratelimit.window-in-seconds"), locked: f.windowMs.locked, control: winControl,
+            hint: esc(t("settings.ratelimit.whole-seconds-from-1-to", { source: dashSetSourceHint(f.windowMs), max: uiNum(f.windowMs.maxSeconds) })) }) +
+        '<div class="ui-set-row" id="set-proxy-row"><div class="ui-set-text"><div class="ui-set-label"><span class="ui-label" id="set-proxy">' + esc(t("settings.ratelimit.reverse-proxy-addresses")) +
+        '</span></div></div><div class="ui-set-control">' + proxyField + "</div></div>" +
+        dashSetRow({ id: "set-exempt", forId: "set-exempt", label: t("settings.ratelimit.exempt-addresses-and-networks"), control: exemptControl, hint: exemptHint }) +
+        (proxySet && proxy.value && !proxyLoopback ? "" :
+            '<div class="ui-alert is-warn" id="set-exempt-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.ratelimit.an-exempt-address-is-not-limited")) + '</p>' +
+            "<small>" + tHtml("settings.ratelimit.if-a-reverse-proxy-sits-in", { env: dashCode(t("settings.ratelimit.forwarded-allow-ips")) }) + "</small></div><span></span></div>") +
+        '<p class="ui-error hidden" id="set-err" role="alert"></p>' +
+        "</fieldset></form>";
+    dashSettingsSyncForm();
+}
+
+// Parts of the form that follow the draft and the last answer, without redrawing the inputs
+function dashSettingsSyncForm() {
+    var form = document.getElementById("settings-form");
+    if (!form) return;
+    var f = dashSet.baseSnap.fields;
+    var d = dashSet.draft;
+    var put = function (id, html) {
+        var box = document.getElementById(id + "-marks");
+        if (box && box.getAttribute("data-drawn") !== html) {
+            box.setAttribute("data-drawn", html);
+            box.innerHTML = html;
+        }
+    };
+    put("set-max", f.maxReq.locked ? dashSetLockPill(f.maxReq, tn("settings.ratelimit.count-requests", f.maxReq.value))
+        : dashSetMarks("maxReq", d.maxReq.trim() !== String(f.maxReq["default"]), tn("settings.ratelimit.count-requests", f.maxReq["default"])));
+    put("set-window", f.windowMs.locked ? dashSetLockPill(f.windowMs, t("settings.ratelimit.ms", { n: uiNum(f.windowMs.value) }))
+        : dashSetMarks("windowSeconds", d.windowSeconds.trim() !== String(f.windowMs["default"] / 1000), uiNum(f.windowMs["default"] / 1000)));
+    dashPanelSyncCommon(DASH_SET_PANELS.rate, [["set-max", "maxReq"], ["set-window", "windowMs"], ["set-exempt", "exempt"]]);
+}
+
+function dashSettingsReset(name) {
+    var f = dashSet.baseSnap.fields;
+    var el = null;
+    if (name === "maxReq") {
+        dashSet.draft.maxReq = String(f.maxReq["default"]);
+        el = document.getElementById("set-max");
+        if (el) el.value = dashSet.draft.maxReq;
+    } else if (name === "windowSeconds") {
+        dashSet.draft.windowSeconds = String(f.windowMs["default"] / 1000);
+        el = document.getElementById("set-window");
+        if (el) el.value = dashSet.draft.windowSeconds;
+    }
+    dashSettingsInput();
+}
+
+function dashSettingsDraw() {
+    dashPanelDraw(DASH_SET_PANELS.rate);
+}
+
+function dashSettingsAlerts(s, alerts) {
+    var applied = dashSetAppliedAlerts(s, alerts);
+    var saved = dashSetSavedLine(s, esc(t("settings.ratelimit.nothing-saved-here-yet-the-values")));
+    alerts.push(dashSetAlert("", t("settings.ratelimit.saved-settings"), tHtml("settings.ratelimit.changes-apply-at-once-in-this", { saved: tRaw(saved), applied: tRaw(applied) })));
+}
+
+function dashSettingsConflictText(c) {
+    var f = c.fields;
+    return tHtml("settings.ratelimit.saved-now", { requests: tn("settings.ratelimit.count-requests", f.maxReq.value), seconds: uiNum(f.windowMs.value / 1000),
+        exempt: tRaw(f.exempt.value.length ? f.exempt.value.map(function (a) { return uiUserText(a); }).join(", ") : esc(t("settings.ratelimit.none"))) });
+}
+
+function dashSettingsInput() {
+    var d = dashSet.draft;
+    if (!d) return;
+    var max = document.getElementById("set-max");
+    var win = document.getElementById("set-window");
+    var exempt = document.getElementById("set-exempt");
+    if (max && !max.disabled) d.maxReq = max.value;
+    if (win && !win.disabled) d.windowSeconds = win.value;
+    if (exempt) d.exempt = exempt.value;
+    // The confirmation for the admin's own address is bound to the list it was given for
+    if (dashSet.askOwn && dashSet.askOwn.exempt !== dashSetExemptList(d.exempt).join("\n")) dashSet.askOwn = null;
+    dashSet.dirty = Object.keys(dashSetChanges()).length > 0;
+    dashSettingsSyncForm();
+}
+
+function dashSettingsCheck() {
+    var f = dashSet.baseSnap.fields;
+    var c = dashSetChanges();
+    var whole = /^\d+$/;
+    if ("maxReq" in c && (!whole.test(c.maxReq) || Number(c.maxReq) < f.maxReq.min || Number(c.maxReq) > f.maxReq.max)) {
+        return { id: "set-max", label: t("settings.ratelimit.requests-per-window-from-one-address"), text: t("settings.check.whole-number-from", { min: uiNum(f.maxReq.min), max: uiNum(f.maxReq.max) }) };
+    }
+    if ("windowSeconds" in c && (!whole.test(c.windowSeconds) || Number(c.windowSeconds) < f.windowMs.minSeconds || Number(c.windowSeconds) > f.windowMs.maxSeconds)) {
+        return { id: "set-window", label: t("settings.ratelimit.window-in-seconds"), text: t("settings.check.whole-number-from", { min: uiNum(f.windowMs.minSeconds), max: uiNum(f.windowMs.maxSeconds) }) };
+    }
+    if ("exempt" in c && c.exempt.length > f.exempt.max) {
+        return { id: "set-exempt", label: t("settings.ratelimit.exempt-addresses-and-networks"), text: t("settings.check.too-many-lines", { max: uiNum(f.exempt.max) }) };
+    }
+    return null;
+}
+
+function dashSettingsSave() {
+    var p = DASH_SET_PANELS.rate;
+    if (dashSet.saving || !dashSet.baseSnap) return Promise.resolve("none");
+    var changes = dashSetChanges();
+    if (!Object.keys(changes).length) return Promise.resolve("none");
+    var body = { baseVersion: dashSet.baseSnap.version };
+    if ("maxReq" in changes) body.maxReq = Number(changes.maxReq);
+    if ("windowSeconds" in changes) body.windowSeconds = Number(changes.windowSeconds);
+    if ("exempt" in changes) body.exempt = changes.exempt;
+    var sentExempt = dashSetExemptList(dashSet.draft.exempt).join("\n");
+    if (dashSet.askOwn && dashSet.askOwn.ok && dashSet.askOwn.exempt === sentExempt) body.confirmOwnAddress = true;
+    dashSet.saving = true;
+    dashSet.error = "";
+    dashSet.errorField = "";
+    dashSettingsSyncForm();
+    dashSet.seq += 1; // a load that started before this save must not draw over its result
+    uiMutated();
+    return api("PUT", "/admin/api/settings/rate-limit", body).then(function (res) {
+        dashSet.saving = false;
+        dashSet.seq += 1; // and so must a load that started while it ran
+        var d = res.data || {};
+        if (res.ok && d.fields) {
+            dashPanelSaved(p, d);
+            return "saved";
+        }
+        if (res.status === 409 && d.code === "conflict" && d.current) {
+            dashPanelConflict(p, d.current);
+            return "conflict";
+        }
+        if (res.status === 409 && d.code === "own_address") {
+            var ask = { exempt: sentExempt, ok: false };
+            dashSet.askOwn = ask;
+            return dashSetAsk({ title: t("settings.ratelimit.confirm-own-title", { own: d.address || "" }), message: d.detail || "",
+                confirmText: t("settings.ratelimit.confirm-own-button"), danger: true }).then(function (ok) {
+                if (!ok || dashSet.askOwn !== ask) { if (dashSet.askOwn === ask) dashSet.askOwn = null; return "cancelled"; }
+                ask.ok = true;
+                return dashSettingsSave();
+            });
+        }
+        if (res.status === 0) {
+            dashPanelUnknown(p);
+            return "unknown";
+        }
+        if (res.status === 401) return "failed";
+        dashSettingsFail(apiError(res, t("settings.ratelimit.could-not-save-the-settings")), d.field || "");
+        if (d.code === "locked") dashSettingsLoad();
+        return "failed";
+    });
+}
+
+function dashSettingsFail(message, field) {
+    dashPanelFail(DASH_SET_PANELS.rate, message, field);
+}
+
+// ---------------------------------------------------------------------------
+// The passkey address: one field, saved on top of the version it was read at
+// ---------------------------------------------------------------------------
+
+function dashPkSetLoad(isCurrent) {
+    return dashPanelLoad(DASH_SET_PANELS.passkeys, isCurrent);
+}
+
+// The host name of an address, as the passkeys' rpId is; "" when it is not one
+function dashPkHost(value) {
+    try { return new URL(value).hostname.toLowerCase(); } catch (e) { return ""; }
+}
+
+function dashPkSetChanges() {
+    var b = dashPkSet.baseSnap;
+    if (!b || b.locked) return {};
+    var value = dashPkSet.draft.origin.trim();
+    return value !== (b.origin || "") ? { origin: value } : {};
+}
+
+function dashPkSetDrawForm() {
+    var body = document.getElementById("settings-pk-body");
+    if (!body || !dashPkSet.baseSnap) return;
+    var b = dashPkSet.baseSnap;
+    var here = window.location.origin;
+    var control = '<input class="ui-input" id="set-pk-origin" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" ' +
+        'placeholder="' + esc(here) + '" value="' + esc(b.locked ? b.origin || "" : dashPkSet.draft.origin) + '" aria-describedby="set-pk-origin-hint"' +
+        (b.locked ? " disabled" : "") + ' data-inventory="settings.passkeys.origin" />';
+    var hint = !b.locked && !b.origin ? tHtml("settings.passkeys.not-set-yet-the-first-passkey", { here: dashCode(here) })
+        : !b.locked && b.origin && b.savedBy ? tHtml("settings.passkeys.saved-by", { here: dashCode(here), user: tRaw(uiUserText(b.savedBy)), time: tRaw(uiTime(b.savedAt)) })
+        : tHtml("settings.passkeys.the-address-admins-open-this-service", { here: dashCode(here) });
+    body.innerHTML = '<form class="ui-form" id="pk-set-form" novalidate><fieldset class="ui-settings-fields ui-set-rows" id="pk-set-fields">' +
+        dashSetRow({ id: "set-pk-origin", forId: "set-pk-origin", label: t("settings.passkeys.passkey-address"), locked: b.locked, control: control,
+            marks: b.locked ? dashSetLockPill({ envName: b.envName || "PASSKEY_ORIGIN" }, b.origin || "") : "", hint: hint }) +
+        '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.passkeys.passkeys-made-for-another-address-stop")) + '</p>' +
+        "<small>" + esc(t("settings.passkeys.a-new-host-name-or-no")) + "</small></div><span></span></div>" +
+        '<p class="ui-error hidden" id="set-pk-err" role="alert"></p>' +
+        "</fieldset></form>";
+    dashPkSetSync();
+}
+
+function dashPkSetSync() {
+    if (!document.getElementById("pk-set-form")) return;
+    dashPanelSyncCommon(DASH_SET_PANELS.passkeys, [["set-pk-origin", "origin"]]);
+}
+
+function dashPkSetInput() {
+    var el = document.getElementById("set-pk-origin");
+    if (!el || el.disabled || !dashPkSet.draft) return;
+    dashPkSet.draft.origin = el.value;
+    dashPkSet.dirty = Object.keys(dashPkSetChanges()).length > 0;
+    dashPkSetSync();
+}
+
+function dashPkSetDraw() {
+    dashPanelDraw(DASH_SET_PANELS.passkeys);
+}
+
+function dashPkSetCheck() {
+    var c = dashPkSetChanges();
+    if (!("origin" in c) || !c.origin) return null;
+    var ok = false;
+    try { ok = /^https?:$/.test(new URL(c.origin).protocol); } catch (e) { ok = false; }
+    return ok ? null : { id: "set-pk-origin", label: t("settings.passkeys.passkey-address"), text: t("settings.check.an-address") };
+}
+
+function dashPkSetSave() {
+    var st = dashPkSet;
+    var p = DASH_SET_PANELS.passkeys;
+    if (st.saving || !st.baseSnap || st.baseSnap.locked) return Promise.resolve("none");
+    var b = st.baseSnap;
+    var changes = dashPkSetChanges();
+    if (!("origin" in changes)) return Promise.resolve("none");
+    var value = changes.origin;
+    var current = b.origin || "";
+    // The existing questions: removing the address, or moving it to another host name
+    var ask = null;
+    if (!value) {
+        ask = { title: t("settings.passkeys.remove-the-passkey-address"), message: t("settings.passkeys.no-passkey-works-until-an-address"), confirmText: t("settings.passkeys.remove") };
+    } else if (current && b.rpId && dashPkHost(value) && dashPkHost(value) !== b.rpId) {
+        ask = { title: t("settings.passkeys.change-the-passkey-address"), message: t("settings.passkeys.passkeys-made-for", { address: b.rpId }), confirmText: t("settings.passkeys.change") };
+    }
+    if (ask) ask.danger = true;
+    return (ask ? uiConfirm(ask) : Promise.resolve(true)).then(function (ok) {
+        if (!ok) return "cancelled";
+        if (st.saving) return "none";
+        st.saving = true;
+        st.error = "";
+        st.errorField = "";
+        st.seq += 1; // a load that started before this save must not draw over it
+        dashPkSetSync();
+        uiMutated();
+        return api("PUT", "/admin/api/settings/passkeys", { baseVersion: b.version, origin: value }).then(function (res) {
+            st.saving = false;
+            st.seq += 1;
+            var d = res.data;
+            if (res.ok && d && typeof d.version === "number") {
+                dashPanelSaved(p, d);
+                dashPk.at = 0; // the Account page and Copy token read the list again
+                return "saved";
+            }
+            if (res.status === 0) {
+                dashPanelUnknown(p);
+                return "unknown";
+            }
+            if (res.status === 401) return "failed";
+            if (res.status === 409) {
+                // Saved by someone else, or set by the environment meanwhile: read it again
+                return api("GET", "/admin/api/settings/passkeys").then(function (cur) {
+                    var c = cur.data;
+                    if (cur.ok && c && typeof c.version === "number" && !c.locked) {
+                        dashPanelConflict(p, c);
+                        return "conflict";
+                    }
+                    dashPanelFail(p, apiError(res, t("settings.passkeys.could-not-save-the-passkey-address")), "origin");
+                    dashPkSetLoad();
+                    return "failed";
+                });
+            }
+            dashPanelFail(p, apiError(res, t("settings.passkeys.could-not-save-the-passkey-address")), "origin");
+            return "failed";
+        });
+    });
+}
+
+// The passkey address has no notes of its own above its field
+function dashPkSetAlerts() {}
+
+function dashPkSetConflictText(c) {
+    return c.origin ? tHtml("settings.passkeys.saved-now", { address: dashCode(c.origin) }) : esc(t("settings.passkeys.saved-now-none"));
+}
+
+// ---------------------------------------------------------------------------
+// Redis connection: saved only after the server checked it; used after a restart.
+// A secret: shown as Stored, the field appears only on Replace (FS-3)
 // ---------------------------------------------------------------------------
 
 var DASH_REDIS_SOURCE = {
@@ -3467,10 +3979,17 @@ function dashRedisClearAsks(st) {
     st.askRestart = null;
 }
 
+function dashRedisChanges() {
+    var st = dashRedis;
+    if (!st.baseSnap || st.baseSnap.url.locked || !st.replacing) return {};
+    var url = st.draft.url.trim();
+    return url ? { url: url } : {};
+}
+
 function dashRedisDraftChanged() {
     var st = dashRedis;
     if (st.askRestart && st.askRestart.url !== st.draft.url.trim()) st.askRestart = null;
-    st.dirty = !!st.baseSnap && !st.baseSnap.url.locked && st.draft.url.trim() !== "";
+    st.dirty = Object.keys(dashRedisChanges()).length > 0;
 }
 
 function dashRedisInput() {
@@ -3481,10 +4000,6 @@ function dashRedisInput() {
     dashRedisSyncForm();
 }
 
-function dashRedisConfirm(ok) {
-    if (dashRedis.askRestart) dashRedis.askRestart.ok = !!ok;
-}
-
 function dashRedisDrawForm() {
     var body = document.getElementById("redis-body");
     if (!body || !dashRedis.baseSnap) return;
@@ -3493,19 +4008,21 @@ function dashRedisDrawForm() {
     var now = '<p class="ui-hint">' + (u.saved
         ? tHtml("settings.redis.saved-here", { connected: dashCode(u.connected), saved: dashCode(u.saved), source: source })
         : tHtml("settings.redis.this-server-process-uses", { connected: dashCode(u.connected), source: source })) + "</p>";
-    var field = u.locked
-        ? dashSetLocked(u, u.connected)
-        : '<input class="ui-input" id="redis-url" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr" ' +
+    var control = u.locked
+        ? '<input class="ui-input" id="redis-url" type="text" disabled dir="ltr" value="' + esc(u.connected || "") + '" />'
+        : '<div class="ui-set-secret" id="redis-stored"><span>' + esc(t("settings.secret.stored")) + '</span>' +
+          '<button type="button" class="ui-btn ui-btn-sm" data-redis-replace>' + esc(t("settings.secret.replace")) + "</button></div>" +
+          '<div class="ui-set-replace hidden" id="redis-replace"><input class="ui-input" id="redis-url" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off" dir="ltr" ' +
           'placeholder="' + esc(t("settings.redis.redis-password-host-6379-0")) + '" aria-describedby="redis-url-hint" />' +
-          '<span class="ui-hint" id="redis-url-hint">' + tHtml("settings.redis.the-whole-url-with-its-password", { scheme: dashCode(t("settings.redis.rediss")) }) + "</span>";
+          '<button type="button" class="ui-btn ui-btn-sm" data-redis-keep>' + esc(t("settings.secret.keep")) + "</button></div>";
     body.innerHTML =
-        '<form class="ui-form" id="redis-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="redis-fields">' +
-        '<div class="ui-field"><span class="ui-label">' + esc(t("settings.redis.current-connection")) + '</span>' + now + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="redis-url">' + esc(t("settings.redis.new-connection-url")) + '</label>' + field + "</div>" +
-        '<div class="ui-settings-asks" id="redis-asks" aria-live="polite"></div>' +
+        '<form class="ui-form" id="redis-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields ui-set-rows" id="redis-fields">' +
+        '<div class="ui-set-row" id="redis-now-row"><div class="ui-set-text"><div class="ui-set-label"><span class="ui-label">' + esc(t("settings.redis.current-connection")) +
+        '</span></div></div><div class="ui-set-control">' + now + "</div></div>" +
+        dashSetRow({ id: "redis-url", forId: u.locked ? "redis-url" : "", label: t("settings.redis.new-connection-url"), locked: u.locked, control: control,
+            marks: u.locked ? dashSetLockPill(u, u.connected) : "",
+            hint: tHtml("settings.redis.the-whole-url-with-its-password", { scheme: dashCode(t("settings.redis.rediss")) }) }) +
         '<p class="ui-error hidden" id="redis-err" role="alert"></p>' +
-        (u.locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="redis-save">' + esc(t("settings.redis.save")) + '</button>' +
-            '<button type="button" class="ui-btn hidden" id="redis-discard" data-set-discard="redis">' + esc(t("settings.redis.discard-changes")) + '</button></div>') +
         "</fieldset></form>";
     dashRedisSyncForm();
 }
@@ -3513,10 +4030,28 @@ function dashRedisDrawForm() {
 function dashRedisSyncForm() {
     var form = document.getElementById("redis-form");
     if (!form) return;
-    var ask = dashRedis.askRestart;
-    dashSetAsksDraw("redis-asks", ask ? dashSetAskHtml("redis-restart-ok", t("settings.redis.saving-takes-effect-only-after-a"), esc(ask.detail || ""),
-        t("settings.redis.save-it-i-will-restart-every"), ask.ok) : "");
+    var stored = document.getElementById("redis-stored");
+    var replace = document.getElementById("redis-replace");
+    if (stored && replace) {
+        stored.classList.toggle("hidden", dashRedis.replacing);
+        replace.classList.toggle("hidden", !dashRedis.replacing);
+    }
     dashPanelSyncCommon(DASH_SET_PANELS.redis, [["redis-url", "url"]]);
+}
+
+// Replace shows the field and takes the focus; Keep hides it and drops what was typed
+function dashRedisReplace(on) {
+    dashRedis.replacing = on;
+    if (!on) {
+        dashRedis.draft = dashRedisDraftFrom();
+        var el = document.getElementById("redis-url");
+        if (el) el.value = "";
+    }
+    dashRedisDraftChanged();
+    dashRedisSyncForm();
+    dashSaveBarSync();
+    var target = on ? document.getElementById("redis-url") : document.querySelector("[data-redis-replace]");
+    if (target) target.focus();
 }
 
 function dashRedisDraw() {
@@ -3541,13 +4076,21 @@ function dashRedisConflictText(c) {
     return tHtml("settings.redis.saved-now", { url: c.url.saved ? dashCode(c.url.saved) : t("settings.redis.nothing") });
 }
 
+function dashRedisCheck() {
+    var c = dashRedisChanges();
+    if (!("url" in c)) return null;
+    return /^rediss?:\/\/\S+$/i.test(c.url) ? null : { id: "redis-url", label: t("settings.redis.new-connection-url"), text: t("settings.check.a-redis-url") };
+}
+
 function dashRedisSave() {
     var st = dashRedis;
-    if (st.saving || !st.baseSnap) return;
-    var url = st.draft.url.trim();
-    if (!url) return dashPanelFail(DASH_SET_PANELS.redis, t("settings.redis.enter-the-new-connection-url"), "url");
+    var p = DASH_SET_PANELS.redis;
+    if (st.saving || !st.baseSnap) return Promise.resolve("none");
+    var changes = dashRedisChanges();
+    if (!("url" in changes)) return Promise.resolve("none");
+    var url = changes.url;
     var body = { baseVersion: st.baseSnap.version, url: url };
-    if (st.askRestart && st.askRestart.ok) body.confirmRestart = true;
+    if (st.askRestart && st.askRestart.ok && st.askRestart.url === url) body.confirmRestart = true;
     st.saving = true;
     st.error = "";
     st.errorField = "";
@@ -3559,100 +4102,403 @@ function dashRedisSave() {
         st.seq += 1;
         var d = res.data || {};
         if (res.ok && d.url) {
+            st.replacing = false;
             var el = document.getElementById("redis-url");
             if (el) el.value = "";
-            dashPanelSaved(DASH_SET_PANELS.redis, d, t("settings.redis.redis-connection-saved-restart-the-service"));
-            return;
+            dashPanelSaved(p, d);
+            return "saved";
         }
         if (res.status === 409 && d.code === "conflict" && d.current) {
-            dashRedisClearAsks(st);
-            dashPanelConflict(DASH_SET_PANELS.redis, d.current);
-            dashRedisSyncForm();
-            return;
+            dashPanelConflict(p, d.current);
+            return "conflict";
         }
         if (res.status === 409 && d.code === "confirm_restart") {
-            st.askRestart = { detail: d.detail || "", ok: false, url: url };
-            dashRedisSyncForm();
-            return;
+            var ask = { detail: d.detail || "", ok: false, url: url };
+            st.askRestart = ask;
+            return dashSetAsk({ title: t("settings.redis.saving-takes-effect-only-after-a"), message: ask.detail,
+                confirmText: t("settings.confirm.save-and-restart-later") }).then(function (ok) {
+                if (!ok || st.askRestart !== ask) { if (st.askRestart === ask) st.askRestart = null; return "cancelled"; }
+                ask.ok = true;
+                return dashRedisSave();
+            });
         }
         if (d.code === "redis_check_failed") {
-            dashPanelFail(DASH_SET_PANELS.redis, t("settings.redis.nothing-was-saved", { reason: t(DASH_REDIS_CHECK[d.category] || DASH_REDIS_CHECK.other) }), "url");
-            return;
+            dashPanelFail(p, t("settings.redis.nothing-was-saved", { reason: t(DASH_REDIS_CHECK[d.category] || DASH_REDIS_CHECK.other) }), "url");
+            return "failed";
         }
-        dashPanelFail(DASH_SET_PANELS.redis, apiError(res, t("settings.redis.could-not-save-the-redis-connection")), d.field || "");
+        if (res.status === 0) {
+            // A secret is never sent again by itself
+            dashPanelUnknown(p);
+            return "unknown";
+        }
+        if (res.status === 401) return "failed";
+        dashPanelFail(p, apiError(res, t("settings.redis.could-not-save-the-redis-connection")), d.field || "");
         if (d.code === "locked") dashRedisLoad();
+        return "failed";
     });
 }
 
 // ---------------------------------------------------------------------------
-// The panels, the page and its events
+// The save units, in the order the save bar saves them
 // ---------------------------------------------------------------------------
 
 var DASH_SET_PANELS = {
-    rate: {
-        name: "rate", st: dashSet, failedTitle: "settings.could-not-load-the-settings", loadingText: "settings.loading-settings",
-        ids: { info: "settings-info", body: "settings-body", form: "settings-form", fields: "settings-fields", err: "set-err", save: "set-save", discard: "set-discard" },
-        get: function () { return api("GET", "/admin/api/settings/rate-limit"); },
-        valid: function (d) { return !!d.fields; },
-        draftFrom: dashSetDraftFrom, drawForm: dashSettingsDrawForm, draw: dashSettingsDraw, sync: dashSettingsSyncForm, input: dashSettingsInput,
-        save: dashSettingsSave, alerts: dashSettingsAlerts, conflictText: dashSettingsConflictText,
-        clearAsks: function (st) { st.askOwn = false; },
-    },
     general: {
-        name: "general", st: dashGen, failedTitle: "settings.could-not-load-the-general-settings", loadingText: "settings.loading-the-general-settings",
-        ids: { info: "general-info", body: "general-body", form: "general-form", fields: "general-fields", err: "gen-err", save: "gen-save", discard: "gen-discard" },
+        name: "general", section: "general", unit: "settings.general", st: dashGen,
+        failedTitle: "settings.could-not-load-the-general-settings", loadingText: "settings.loading-the-general-settings",
+        ids: { info: "general-info", body: "general-body", form: "general-form", fields: "general-fields", err: "gen-err" },
         get: function () { return api("GET", "/admin/api/settings/general"); },
         valid: function (d) { return !!(d.fields && d.fields.timeZone); },
         formKey: function (d) { return JSON.stringify([d.version, d.fields, d.rootPath, (d.timeZones || []).length]); },
         draftFrom: dashGenDraftFrom, drawForm: dashGenDrawForm, draw: dashGenDraw, sync: dashGenSyncForm, input: dashGenInput,
-        save: dashGenSave, alerts: dashGenAlerts, conflictText: dashGenConflictText, clearAsks: dashGenClearAsks, asksBound: true,
+        changes: dashGenChanges, check: dashGenCheck, reset: dashGenReset,
+        save: dashGenSave, alerts: dashGenAlerts, conflictText: dashGenConflictText, clearAsks: dashGenClearAsks,
+    },
+    display: {
+        name: "display", section: "general", unit: "settings.display", st: dashDisp,
+        failedTitle: "settings.display.could-not-load", loadingText: "settings.display.loading",
+        ids: { info: "display-info", body: "display-body", form: "display-form", fields: "display-fields", err: "disp-err" },
+        get: function () { return api("GET", "/admin/api/settings/display"); },
+        valid: function (d) { return !!(d.fields && d.fields.dateFormat && d.fields.timeFormat); },
+        formKey: function (d) { return JSON.stringify([d.version, d.fields]); },
+        draftFrom: dashDispDraftFrom, drawForm: dashDispDrawForm, draw: dashDispDraw, sync: dashDispSyncForm, input: dashDispInput,
+        changes: dashDispChanges, check: null, reset: dashDispReset,
+        save: dashDispSave, alerts: dashDispAlerts, conflictText: dashDispConflictText, clearAsks: function () {},
+    },
+    rate: {
+        name: "rate", section: "rate-limit", unit: "settings.rate-limit", st: dashSet,
+        failedTitle: "settings.could-not-load-the-settings", loadingText: "settings.loading-settings",
+        ids: { info: "settings-info", body: "settings-body", form: "settings-form", fields: "settings-fields", err: "set-err" },
+        get: function () { return api("GET", "/admin/api/settings/rate-limit"); },
+        valid: function (d) { return !!d.fields; },
+        formKey: function (d) { return JSON.stringify([d.version, d.fields, d.yourAddress, d.proxyNetwork]); },
+        draftFrom: dashSetDraftFrom, drawForm: dashSettingsDrawForm, draw: dashSettingsDraw, sync: dashSettingsSyncForm, input: dashSettingsInput,
+        changes: dashSetChanges, check: dashSettingsCheck, reset: dashSettingsReset,
+        save: dashSettingsSave, alerts: dashSettingsAlerts, conflictText: dashSettingsConflictText,
+        clearAsks: function (st) { st.askOwn = null; },
+    },
+    passkeys: {
+        name: "passkeys", section: "passkeys", unit: "settings.passkeys.passkey-address", st: dashPkSet,
+        failedTitle: "settings.passkeys.could-not-load-the-passkey-address", loadingText: "settings.passkeys.loading-the-passkey-address",
+        ids: { info: "settings-pk-info", body: "settings-pk-body", form: "pk-set-form", fields: "pk-set-fields", err: "set-pk-err" },
+        get: function () { return api("GET", "/admin/api/settings/passkeys"); },
+        valid: function (d) { return typeof d.version === "number"; },
+        formKey: function (d) { return JSON.stringify([d.version, d.locked, d.origin]); },
+        draftFrom: function (d) { return { origin: d.origin || "" }; }, drawForm: dashPkSetDrawForm, draw: dashPkSetDraw, sync: dashPkSetSync, input: dashPkSetInput,
+        changes: dashPkSetChanges, check: dashPkSetCheck, reset: null,
+        save: dashPkSetSave, alerts: dashPkSetAlerts, conflictText: dashPkSetConflictText, clearAsks: function () {},
     },
     redis: {
-        name: "redis", st: dashRedis, failedTitle: "settings.could-not-load-the-redis-connection", loadingText: "settings.loading-the-redis-connection",
-        ids: { info: "redis-info", body: "redis-body", form: "redis-form", fields: "redis-fields", err: "redis-err", save: "redis-save", discard: "redis-discard" },
+        name: "redis", section: "redis", unit: "settings.redis-connection", st: dashRedis,
+        failedTitle: "settings.could-not-load-the-redis-connection", loadingText: "settings.loading-the-redis-connection",
+        ids: { info: "redis-info", body: "redis-body", form: "redis-form", fields: "redis-fields", err: "redis-err" },
         get: function () { return api("GET", "/admin/api/settings/redis"); },
         valid: function (d) { return !!d.url; },
         formKey: function (d) { return JSON.stringify([d.version, d.url]); },
         draftFrom: dashRedisDraftFrom, drawForm: dashRedisDrawForm, draw: dashRedisDraw, sync: dashRedisSyncForm, input: dashRedisInput,
-        save: dashRedisSave, alerts: dashRedisAlerts, conflictText: dashRedisConflictText, clearAsks: dashRedisClearAsks, asksBound: true,
+        changes: dashRedisChanges, check: dashRedisCheck, reset: null,
+        save: dashRedisSave, alerts: dashRedisAlerts, conflictText: dashRedisConflictText, clearAsks: dashRedisClearAsks,
     },
 };
-var DASH_SET_FORMS = { "settings-form": "rate", "general-form": "general", "redis-form": "redis" };
-var DASH_SET_CONFIRMS = {
-    "gen-purge-ok": function (ok) { dashGenConfirm("purge", ok); },
-    "gen-cookie-ok": function (ok) { dashGenConfirm("cookie", ok); },
-    "redis-restart-ok": dashRedisConfirm,
-};
+var DASH_SET_ORDER = ["general", "display", "rate", "passkeys", "redis"];
+var DASH_SET_FORMS = { "general-form": "general", "display-form": "display", "settings-form": "rate", "pk-set-form": "passkeys", "redis-form": "redis" };
+
+// How many fields differ from what was loaded, in one unit or in all of them (SV-2)
+function dashSetUnitCount(p) {
+    if (!p.st.baseSnap || !p.st.draft) return 0;
+    return Object.keys(p.changes()).length;
+}
+function dashSettingsCount() {
+    return DASH_SET_ORDER.reduce(function (sum, name) { return sum + dashSetUnitCount(DASH_SET_PANELS[name]); }, 0);
+}
+
+function dashSettingsLoadAll(isCurrent) {
+    return Promise.all(DASH_SET_ORDER.map(function (name) { return dashPanelLoad(DASH_SET_PANELS[name], isCurrent); }));
+}
+
+// ---------------------------------------------------------------------------
+// The save bar (SV-1): the count of unsaved fields, Discard and Save changes
+// ---------------------------------------------------------------------------
+
+function dashSaveBarSync() {
+    var bar = document.getElementById("settings-savebar");
+    if (!bar) return;
+    var n = dashSettingsCount();
+    var shown = n > 0 || dashSettings.saving;
+    bar.classList.toggle("hidden", !shown);
+    var count = document.getElementById("settings-savebar-count");
+    var text = dashSettings.lock ? t("settings.savebar.locked") : tn("settings.savebar.count", n);
+    if (count.textContent !== text) count.textContent = text;
+    var save = document.getElementById("settings-save");
+    var discard = document.getElementById("settings-discard");
+    var off = dashSettings.saving || !!dashSettings.lock;
+    save.disabled = off;
+    discard.disabled = off;
+    bar.setAttribute("aria-busy", String(dashSettings.saving));
+    save.textContent = dashSettings.saving ? t("settings.saving") : t("settings.savebar.save");
+    // The section list marks each section that holds a change
+    SETTINGS_SECTIONS.forEach(function (s) {
+        var has = DASH_SET_ORDER.some(function (name) { var p = DASH_SET_PANELS[name]; return p.section === s.id && dashSetUnitCount(p) > 0; });
+        document.querySelectorAll('[data-settings-nav="' + s.id + '"]').forEach(function (a) { a.classList.toggle("has-changes", has); });
+    });
+    var pick = document.getElementById("settings-pick");
+    if (pick) {
+        Array.prototype.forEach.call(pick.options, function (o) {
+            var has = DASH_SET_ORDER.some(function (name) { var p = DASH_SET_PANELS[name]; return p.section === o.value && dashSetUnitCount(p) > 0; });
+            var label = has ? t("settings.nav.section-changed", { section: t(dashSettingsInfo(o.value).label) }) : t(dashSettingsInfo(o.value).label);
+            if (o.textContent !== label) o.textContent = label;
+        });
+    }
+}
+
+// Discard drops every unsaved field of every unit (SV-3)
+function dashSettingsDiscardAll() {
+    if (dashSettings.saving || dashSettings.lock) return;
+    DASH_SET_ORDER.forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        if (!p.st.baseSnap) return;
+        if (name === "redis") dashRedis.replacing = false;
+        dashPanelDiscard(p);
+    });
+    dashSettingsClearChecks();
+    dashSaveBarSync();
+}
+
+// The names of units as one list ("General, Rate limit and Redis connection")
+function dashSettingsNames(names) {
+    var words = names.map(function (name) { return t(DASH_SET_PANELS[name].unit); });
+    try { return new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(words); } catch (e) { return words.join(", "); }
+}
+
+// One toast for the whole save, naming what was saved and what was not (SV-3)
+function dashSettingsReport(results) {
+    var saved = [];
+    var failed = [];
+    var unknown = [];
+    var warning = "";
+    DASH_SET_ORDER.forEach(function (name) {
+        var r = results[name];
+        if (r === "saved") {
+            saved.push(name);
+            if (DASH_SET_PANELS[name].st.snap && DASH_SET_PANELS[name].st.snap.warning) warning = DASH_SET_PANELS[name].st.snap.warning;
+        } else if (r === "failed" || r === "conflict") failed.push(name);
+        else if (r === "unknown") unknown.push(name);
+    });
+    if (unknown.length) {
+        showToast(t("settings.savebar.result-unknown", { parts: dashSettingsNames(unknown) }), "error");
+    } else if (saved.length && failed.length) {
+        showToast(t("settings.savebar.saved-and-failed", { saved: dashSettingsNames(saved), failed: dashSettingsNames(failed) }), "error");
+    } else if (failed.length) {
+        showToast(t("settings.savebar.not-saved", { parts: dashSettingsNames(failed) }), "error");
+    } else if (warning) {
+        showToast(warning, "error");
+    } else if (saved.length) {
+        showToast(t("settings.savebar.saved", { parts: dashSettingsNames(saved) }), "success");
+    }
+}
+
+// Save changes: every unit that holds a change, in a fixed order. A unit that
+// fails keeps its draft; the others keep going. A question cancelled stops the run.
+function dashSettingsSaveAll() {
+    if (dashSettings.saving || dashSettings.lock || !dashSettingsCount()) return Promise.resolve(null);
+    if (dashSettingsCheckAll()) return Promise.resolve(null);
+    dashSettings.saving = true;
+    dashSaveBarSync();
+    dashDbDraw(false);
+    var results = {};
+    var stopped = false;
+    var run = Promise.resolve();
+    DASH_SET_ORDER.forEach(function (name) {
+        run = run.then(function () {
+            var p = DASH_SET_PANELS[name];
+            // A database change locks the page: nothing more is sent
+            if (stopped || dashSettings.lock || !dashSetUnitCount(p)) return null;
+            return p.save().then(function (r) {
+                results[name] = r;
+                if (r === "cancelled") stopped = true;
+            });
+        });
+    });
+    return run.then(function () {
+        dashSettings.saving = false;
+        dashSaveBarSync();
+        dashDbDraw(false);
+        dashSettingsReport(results);
+        return results;
+    }, function () {
+        dashSettings.saving = false;
+        dashSaveBarSync();
+        dashDbDraw(false);
+        return results;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Checks before a save (SV-1): the first field that fails opens its section, is
+// marked with a note under it, takes the focus, and a toast names it
+// ---------------------------------------------------------------------------
+
+function dashSettingsClearChecks() {
+    document.querySelectorAll("[data-check-failed]").forEach(function (el) {
+        el.removeAttribute("data-check-failed");
+        el.removeAttribute("aria-invalid");
+        var note = document.getElementById(el.getAttribute("data-check-note") || "");
+        if (note) { note.textContent = ""; note.classList.add("hidden"); }
+    });
+}
+
+function dashSettingsCheckAll() {
+    dashSettingsClearChecks();
+    var problems = [];
+    DASH_SET_ORDER.forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        if (!p.check || !dashSetUnitCount(p)) return;
+        var x = p.check();
+        if (x) problems.push({ p: p, x: x });
+    });
+    if (!problems.length) return null;
+    problems.forEach(function (item) {
+        var el = document.getElementById(item.x.id);
+        var note = document.getElementById(item.x.id + "-note");
+        if (el) {
+            el.setAttribute("aria-invalid", "true");
+            el.setAttribute("data-check-failed", "");
+            el.setAttribute("data-check-note", item.x.id + "-note");
+        }
+        if (note) { note.textContent = item.x.text; note.classList.remove("hidden"); }
+    });
+    var first = problems[0];
+    dashSettingsOpen(first.p.section, { push: dashSettings.section !== first.p.section, field: first.x.id });
+    showToast(problems.length === 1 ? t("settings.check.field-problem", { label: first.x.label, problem: first.x.text })
+        : tn("settings.check.fields-problem", problems.length, { label: first.x.label }), "error");
+    return first;
+}
+
+// ---------------------------------------------------------------------------
+// Sections: the list, the picker on narrow screens, the address (FS-10, NL-3)
+// ---------------------------------------------------------------------------
+
+function dashSettingsInfo(id) {
+    return SETTINGS_SECTIONS.filter(function (s) { return s.id === id; })[0] || null;
+}
+
+function dashSettingsNavHtml() {
+    var html = "";
+    var group = "";
+    SETTINGS_SECTIONS.forEach(function (s) {
+        if (s.group !== group) {
+            group = s.group;
+            html += '<p class="ui-settings-group">' + esc(t(s.group)) + "</p>";
+        }
+        html += '<a class="ui-settings-link" data-settings-nav="' + s.id + '" href="' + esc(basePath() + PAGES.settings.path + "/" + s.id) + '">' + esc(t(s.label)) + "</a>";
+    });
+    return html;
+}
+
+function dashSettingsPickHtml() {
+    var html = "";
+    var groups = [];
+    SETTINGS_SECTIONS.forEach(function (s) { if (groups.indexOf(s.group) === -1) groups.push(s.group); });
+    groups.forEach(function (g) {
+        html += '<optgroup label="' + esc(t(g)) + '">' + SETTINGS_SECTIONS.filter(function (s) { return s.group === g; }).map(function (s) {
+            return '<option value="' + s.id + '">' + esc(t(s.label)) + "</option>";
+        }).join("") + "</optgroup>";
+    });
+    return html;
+}
+
+// Show a section. opts.push adds a Back step; opts.replace corrects the address;
+// opts.field takes the focus to one field (a link from the search names it)
+function dashSettingsOpen(id, opts) {
+    var o = opts || {};
+    var info = dashSettingsInfo(id);
+    if (!info) {
+        info = SETTINGS_SECTIONS[0];
+        o.replace = true;
+        o.push = false;
+    }
+    var changed = dashSettings.section !== info.id;
+    dashSettings.section = info.id;
+    if (o.push || o.replace) uiSetPageSection("settings", info.id, !o.push);
+    document.querySelectorAll("[data-settings-section]").forEach(function (el) {
+        el.classList.toggle("hidden", el.getAttribute("data-settings-section") !== info.id);
+    });
+    document.querySelectorAll("[data-settings-nav]").forEach(function (a) {
+        if (a.getAttribute("data-settings-nav") === info.id) a.setAttribute("aria-current", "true");
+        else a.removeAttribute("aria-current");
+    });
+    var pick = document.getElementById("settings-pick");
+    if (pick && pick.value !== info.id) pick.value = info.id;
+    document.title = t("settings.document-title", { section: t(info.label), app: t(uiAppTitle) });
+    var main = uiMainScroller();
+    var field = o.field ? document.getElementById(o.field) : null;
+    if (field && field.offsetParent !== null) {
+        // Only the app's own scroll area moves, never the window (MO-1, FS-10)
+        if (main) main.scrollTop = Math.max(0, field.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 80);
+        field.focus({ preventScroll: true });
+    } else if (changed && main && (o.push || o.replace)) {
+        // A newly opened section starts at its top
+        var content = document.getElementById("settings-content");
+        if (content && content.getBoundingClientRect().top < main.getBoundingClientRect().top) {
+            main.scrollTop = Math.max(0, content.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 8);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The page's events
+// ---------------------------------------------------------------------------
 
 function dashSettingsBind() {
-    if (dashSet.bound) return;
-    dashSet.bound = true;
+    if (dashSettings.bound) return;
+    dashSettings.bound = true;
     var page = document.querySelector('[data-page="settings"]');
-    // Typing, a picked time zone (change) and a ticked box (both) update the draft
+    var nav = document.getElementById("settings-nav");
+    if (nav) nav.innerHTML = dashSettingsNavHtml();
+    var pick = document.getElementById("settings-pick");
+    if (pick) {
+        pick.innerHTML = dashSettingsPickHtml();
+        pick.addEventListener("change", function () { dashSettingsOpen(pick.value, { push: true }); });
+    }
+    // Typing, a picked value (change) and a flipped switch (both) update the draft
     var edited = function (event) {
         var target = event.target;
-        if (DASH_SET_CONFIRMS[target.id]) {
-            DASH_SET_CONFIRMS[target.id](target.checked);
-            return;
+        if (target.hasAttribute("data-check-failed")) {
+            target.removeAttribute("data-check-failed");
+            target.removeAttribute("aria-invalid");
+            var note = document.getElementById(target.getAttribute("data-check-note") || "");
+            if (note) { note.textContent = ""; note.classList.add("hidden"); }
         }
-        if (target.id === "set-own") return;
         var form = target.closest("form");
         var p = form && DASH_SET_PANELS[DASH_SET_FORMS[form.id]];
-        if (p) p.input();
+        if (p) {
+            p.input();
+            dashSaveBarSync();
+            dashDbDraw(false);
+        }
     };
     page.addEventListener("input", edited);
     page.addEventListener("change", edited);
+    // Enter in a field saves like the save bar
     page.addEventListener("submit", function (event) {
-        var p = DASH_SET_PANELS[DASH_SET_FORMS[event.target.id]];
-        if (!p) return;
+        if (!DASH_SET_PANELS[DASH_SET_FORMS[event.target.id]]) return;
         event.preventDefault();
-        p.save();
+        dashSettingsSaveAll();
     });
     page.addEventListener("click", function (event) {
         var target = event.target;
+        var link = target.closest("[data-settings-nav]");
+        if (link) {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+            event.preventDefault();
+            dashSettingsOpen(link.getAttribute("data-settings-nav"), { push: true });
+            return;
+        }
         var retry = target.closest("[data-settings-retry]");
         var discard = target.closest("[data-set-discard]");
         var keep = target.closest("[data-set-keep]");
+        var reset = target.closest("[data-set-reset]");
+        var time = target.closest("[data-disp-time]");
         var p;
         if (retry && (p = DASH_SET_PANELS[retry.getAttribute("data-settings-retry")])) {
             p.st.failed = "";
@@ -3662,222 +4508,96 @@ function dashSettingsBind() {
             dashPanelDiscard(p);
         } else if (keep && (p = DASH_SET_PANELS[keep.getAttribute("data-set-keep")])) {
             dashPanelKeep(p);
+        } else if (reset) {
+            var form = reset.closest("form");
+            p = form && DASH_SET_PANELS[DASH_SET_FORMS[form.id]];
+            if (p && p.reset && !dashSettings.lock && !p.st.saving) {
+                p.reset(reset.getAttribute("data-set-reset"));
+                // The Reset button is gone now: the focus goes back to the field's row
+                var row = form.querySelector(".ui-set-row:focus-within") || form;
+                (row.querySelector("input:not([disabled]), select:not([disabled]), button") || form).focus({ preventScroll: true });
+            }
+        } else if (time) {
+            dashDispPickTime(time.getAttribute("data-disp-time"));
+        } else if (target.closest("[data-redis-replace]")) {
+            if (!dashSettings.lock) dashRedisReplace(true);
+        } else if (target.closest("[data-redis-keep]")) {
+            dashRedisReplace(false);
+        } else {
+            return;
         }
+        dashSaveBarSync();
+        dashDbDraw(false);
     });
-    // A changed draft is an unsaved change, in each panel
-    Object.keys(DASH_SET_PANELS).forEach(function (name) {
-        var p = DASH_SET_PANELS[name];
-        uiUnsavedRegister(function () {
-            return p.st.dirty ? 1 : 0;
-        }, function () {
+    document.getElementById("settings-save").addEventListener("click", function () { dashSettingsSaveAll(); });
+    document.getElementById("settings-discard").addEventListener("click", dashSettingsDiscardAll);
+    // The page's unsaved changes: Settings keeps them across its sections (SV-1)
+    uiUnsavedRegister(function () {
+        return dashSettingsCount() + (dashDb.dirty ? 1 : 0);
+    }, function () {
+        DASH_SET_ORDER.forEach(function (name) {
+            var p = DASH_SET_PANELS[name];
             if (!p.st.baseSnap) return;
+            if (name === "redis") dashRedis.replacing = false;
             p.st.draft = p.draftFrom(p.st.baseSnap);
             p.st.dirty = false;
             p.st.conflict = null;
-            if (p.asksBound) p.clearAsks(p.st);
+            p.clearAsks(p.st);
             p.drawForm();
         });
+        dashDbDiscard();
+        dashSaveBarSync();
     });
 }
 
-// The passkey address on the Settings page: one field, saved on top of the version
-// it was read at (baseVersion). A refresh never touches a changed draft.
-var dashPkSet = { snap: null, base: null, draft: "", dirty: false, saving: false, failed: "", refreshFailed: "", error: "", stale: false, seq: 0, bound: false };
+// The section the address names, else the one left open, else the first (NL-4)
+DASH_PAGE_IMPL.settings = function (info) {
+    dashSettingsBind();
+    dashDbBind();
+    var asked = uiPageSection("settings");
+    var id = asked || dashSettings.section || SETTINGS_SECTIONS[0].id;
+    dashSettingsOpen(id, { replace: !asked || !dashSettingsInfo(asked), field: window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : "" });
+    DASH_SET_ORDER.forEach(function (name) { DASH_SET_PANELS[name].draw(); });
+    dashDbDraw(false);
+    dashSaveBarSync();
+    if (info && info.fromHistory && dashSettings.loadedOnce) return;
+    dashSettings.loadedOnce = true;
+    Promise.all([dashSettingsLoadAll(), dashDbLoad()]).then(function () { uiRefreshLoaded("settings"); });
+};
 
-function dashPkSetLoad(isCurrent) {
-    var seq = ++dashPkSet.seq;
-    return api("GET", "/admin/api/settings/passkeys").then(function (res) {
-        if (seq !== dashPkSet.seq || dashPkSet.saving || (isCurrent && !isCurrent())) return;
-        var d = res.data;
-        if (!res.ok || !d || typeof d.version !== "number") {
-            var why = apiError(res, t("settings.passkeys.the-server-did-not-answer"));
-            if (dashPkSet.snap) dashPkSet.refreshFailed = why;
-            else dashPkSet.failed = why;
-            dashPkSetDraw(false);
-            return;
-        }
-        var changed = !dashPkSet.snap || dashPkSet.snap.version !== d.version || dashPkSet.snap.locked !== d.locked;
-        dashPkSet.failed = "";
-        dashPkSet.refreshFailed = "";
-        dashPkSet.snap = d;
-        if (!dashPkSet.dirty) {
-            dashPkSet.base = d;
-            dashPkSet.draft = d.origin || "";
-            dashPkSet.stale = false;
-            if (changed) dashPkSet.error = "";
-        }
-        dashPkSetDraw(changed && !dashPkSet.dirty);
-    });
-}
-
-// The host name of an address, as the passkeys' rpId is; "" when it is not one
-function dashPkHost(value) {
-    try { return new URL(value).hostname.toLowerCase(); } catch (e) { return ""; }
-}
-
-function dashPkSetFormHtml() {
-    var b = dashPkSet.base;
-    var here = window.location.origin;
-    var field;
-    if (b.locked) {
-        field = dashSetLocked({ envName: b.envName || "PASSKEY_ORIGIN" }, b.origin || "");
-    } else {
-        field = '<input class="ui-input" id="set-pk-origin" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" dir="ltr" ' +
-            'placeholder="' + esc(here) + '" value="' + esc(dashPkSet.draft) + '" aria-describedby="set-pk-hint" data-inventory="settings.passkeys.origin" />';
-    }
-    var hint = !b.locked && !b.origin ? tHtml("settings.passkeys.not-set-yet-the-first-passkey", { here: dashCode(here) })
-        : !b.locked && b.origin && b.savedBy ? tHtml("settings.passkeys.saved-by", { here: dashCode(here), user: tRaw(uiUserText(b.savedBy)), time: tRaw(uiTime(b.savedAt)) })
-        : tHtml("settings.passkeys.the-address-admins-open-this-service", { here: dashCode(here) });
-    return '<form class="ui-form" id="pk-set-form" novalidate><fieldset class="ui-settings-fields" id="pk-set-fields">' +
-        '<div class="ui-field"><label class="ui-label" for="set-pk-origin">' + esc(t("settings.passkeys.passkey-address")) + '</label>' + field +
-        '<span class="ui-hint" id="set-pk-hint">' + hint + "</span></div>" +
-        '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("settings.passkeys.passkeys-made-for-another-address-stop")) + '</p>' +
-        "<small>" + esc(t("settings.passkeys.a-new-host-name-or-no")) + "</small></div><span></span></div>" +
-        '<p class="ui-error hidden" id="set-pk-err" role="alert"></p>' +
-        (b.locked ? "" : '<div class="ui-settings-actions"><button type="submit" class="ui-btn ui-btn-primary" id="set-pk-save">' + esc(t("settings.passkeys.save")) + '</button>' +
-            '<button type="button" class="ui-btn hidden" id="set-pk-discard">' + esc(t("settings.passkeys.discard-changes")) + '</button>' +
-            '<button type="button" class="ui-btn hidden" id="set-pk-reload">' + esc(t("settings.passkeys.reload")) + '</button></div>') +
-        "</fieldset></form>";
-}
-
-// Draw the section; the form itself only when it is new or redraw is set
-function dashPkSetDraw(redraw) {
-    var body = document.getElementById("settings-pk-body");
-    if (!body) return;
-    if (!dashPkSet.snap) {
-        body.innerHTML = dashPkSet.failed ? dashFailed(t("settings.passkeys.could-not-load-the-passkey-address"), dashPkSet.failed, "data-pk-set-retry") : dashLoading(t("settings.passkeys.loading-the-passkey-address"));
-        return;
-    }
-    if (redraw || !document.getElementById("pk-set-form")) body.innerHTML = dashPkSetFormHtml();
-    var err = document.getElementById("set-pk-err");
-    var text = dashPkSet.error || (dashPkSet.refreshFailed ? t("settings.passkeys.could-not-refresh-the-passkey-address", { reason: dashPkSet.refreshFailed }) : "");
-    err.textContent = text;
-    err.classList.toggle("hidden", !text);
-    var input = document.getElementById("set-pk-origin");
-    if (input) {
-        if (dashPkSet.error && !dashPkSet.stale) input.setAttribute("aria-invalid", "true");
-        else input.removeAttribute("aria-invalid");
-    }
-    document.getElementById("pk-set-fields").disabled = dashPkSet.saving;
-    var save = document.getElementById("set-pk-save");
-    if (save) save.textContent = dashPkSet.saving ? t("settings.passkeys.saving") : t("settings.passkeys.save");
-    var discard = document.getElementById("set-pk-discard");
-    if (discard) discard.classList.toggle("hidden", !dashPkSet.dirty);
-    var reload = document.getElementById("set-pk-reload");
-    if (reload) reload.classList.toggle("hidden", !dashPkSet.stale);
-}
-
-function dashPkSetReset() {
-    var to = dashPkSet.snap;
-    dashPkSet.base = to;
-    dashPkSet.draft = (to && to.origin) || "";
-    dashPkSet.dirty = false;
-    dashPkSet.stale = false;
-    dashPkSet.error = "";
-}
-
-function dashPkSetSave() {
-    if (dashPkSet.saving || !dashPkSet.base || dashPkSet.base.locked) return;
-    var b = dashPkSet.base;
-    var value = dashPkSet.draft.trim();
-    var current = b.origin || "";
-    if (value === current) {
-        dashPkSet.dirty = false;
-        dashPkSetDraw(false);
-        return;
-    }
-    var ask = null;
-    if (!value) {
-        ask = { title: t("settings.passkeys.remove-the-passkey-address"), message: t("settings.passkeys.no-passkey-works-until-an-address"), confirmText: t("settings.passkeys.remove") };
-    } else if (current && b.rpId && dashPkHost(value) && dashPkHost(value) !== b.rpId) {
-        ask = { title: t("settings.passkeys.change-the-passkey-address"), message: t("settings.passkeys.passkeys-made-for", { address: b.rpId }), confirmText: t("settings.passkeys.change") };
-    }
-    if (ask) ask.danger = true;
-    (ask ? uiConfirm(ask) : Promise.resolve(true)).then(function (ok) {
-        if (!ok || dashPkSet.saving) return;
-        dashPkSet.saving = true;
-        dashPkSet.error = "";
-        dashPkSet.seq += 1; // a load that started before this save must not draw over it
-        dashPkSetDraw(false);
-        uiMutated();
-        api("PUT", "/admin/api/settings/passkeys", { baseVersion: b.version, origin: value }).then(function (res) {
-            dashPkSet.saving = false;
-            dashPkSet.seq += 1;
-            var d = res.data;
-            if (res.ok && d && typeof d.version === "number") {
-                dashPkSet.snap = d;
-                dashPkSetReset();
-                dashPkSetDraw(true);
-                dashPk.at = 0; // the Account page and Copy token read the list again
-                uiMutated();
-                showToast(d.origin ? t("settings.passkeys.passkey-address-saved") : t("settings.passkeys.passkey-address-removed"), "success");
-                return;
-            }
-            if (res.status === 401) return;
-            dashPkSet.error = apiError(res, t("settings.passkeys.could-not-save-the-passkey-address"));
-            // Locked by the environment, or saved by someone else: the admin reloads
-            dashPkSet.stale = res.status === 409;
-            dashPkSetDraw(false);
-        });
-    });
-}
-
-function dashPkSetBind() {
-    if (dashPkSet.bound) return;
-    dashPkSet.bound = true;
-    var panel = document.getElementById("settings-pk-panel");
-    panel.addEventListener("input", function (event) {
-        if (event.target.id !== "set-pk-origin") return;
-        dashPkSet.draft = event.target.value;
-        dashPkSet.dirty = dashPkSet.draft.trim() !== ((dashPkSet.base && dashPkSet.base.origin) || "");
-        dashPkSetDraw(false);
-    });
-    panel.addEventListener("submit", function (event) {
-        if (event.target.id !== "pk-set-form") return;
-        event.preventDefault();
-        dashPkSetSave();
-    });
-    panel.addEventListener("click", function (event) {
-        var target = event.target;
-        if (target.closest("[data-pk-set-retry]")) {
-            dashPkSet.failed = "";
-            dashPkSetDraw(false);
-            dashPkSetLoad();
-        } else if (target.closest("#set-pk-discard")) {
-            dashPkSetReset();
-            dashPkSetDraw(true);
-        } else if (target.closest("#set-pk-reload")) {
-            dashPkSet.dirty = false;
-            dashPkSet.stale = false;
-            dashPkSet.error = "";
-            dashPkSet.snap = null;
-            dashPkSetDraw(true);
-            dashPkSetLoad();
-        }
-    });
-    uiUnsavedRegister(function () {
-        return dashPkSet.dirty ? 1 : 0;
-    }, function () {
-        if (!dashPkSet.snap) return;
-        dashPkSetReset();
-        dashPkSetDraw(true);
-    });
-}
+registerPageRefresh("settings", 30000, function (isCurrent) {
+    // While the database changes, the flow reads by itself; nothing else is read
+    if (dashSettings.lock) return Promise.resolve();
+    return Promise.all([dashSettingsLoadAll(isCurrent), dashDbLoad(isCurrent)]);
+});
 
 // ---------------------------------------------------------------------------
 // Database connection: shown here; a PostgreSQL connection saved by setup can be
-// changed (host, user, password, TLS) for the same installation. The server checks
-// the new connection, switches while requests wait a moment, and keeps the old one
-// on any failure. Saving needs an authenticator code or a passkey.
+// changed (host, user, password, TLS) for the same installation. Its own flow,
+// outside the save bar (SV-1 exception: a job that may switch to a copy carrying
+// other settings): it starts only with nothing unsaved and no save running, locks
+// every Settings field before it sends, follows its job, and never sends the change
+// or the second factor again. When the answer is lost it reads the settings to find
+// the job; when nothing is found the result stays unknown, locked until a reload.
 // ---------------------------------------------------------------------------
 
 var dashDb = { snap: null, failed: "", refreshFailed: "", check: null, checkedFor: "", error: "", confirm: false, askConfirm: "",
-    busy: "", dirty: false, seq: 0, bound: false };
+    busy: "", dirty: false, seq: 0, bound: false, replacing: { password: false, ca: false }, caRemove: false, jobId: "", gen: 0 };
+
+// What the failed check refused, as one sentence per case
+var DASH_DB_REFUSED = {
+    failed: "settings.database.nothing-saved-connection-failed",
+    user: "settings.database.nothing-saved-user-unusable",
+    foreign: "settings.database.nothing-saved-other-data",
+    incomplete: "settings.database.nothing-saved-tables-missing",
+    pending: "settings.database.nothing-saved-unfinished-copy",
+    another: "settings.database.nothing-saved-another-installation",
+};
 
 function dashDbLoad(isCurrent) {
     var seq = ++dashDb.seq;
     return api("GET", "/admin/api/settings/database").then(function (res) {
-        if (seq !== dashDb.seq || dashDb.busy || (isCurrent && !isCurrent())) return;
+        if (seq !== dashDb.seq || dashDb.busy || dashSettings.lock || (isCurrent && !isCurrent())) return;
         var d = res.data;
         if (!res.ok || !d || !d.connection) {
             var why = apiError(res, t("settings.database.the-server-did-not-answer"));
@@ -3886,11 +4606,20 @@ function dashDbLoad(isCurrent) {
             dashDbDraw(false);
             return;
         }
+        // A job that runs or is about to start (another tab, or this one before a reload)
+        if (d.job && (d.job.state === "running" || d.job.state === "pending")) {
+            dashDb.snap = d;
+            dashSettingsLockFor("running");
+            if (d.job.state === "running" && d.job.id) dashDbFollow(d.job.id);
+            else dashDbRecover();
+            return;
+        }
         var changed = !dashDb.snap || JSON.stringify(dashDb.snap.connection) !== JSON.stringify(d.connection) || dashDb.snap.editable !== d.editable;
         dashDb.failed = "";
         dashDb.refreshFailed = "";
         dashDb.snap = d;
-        dashDbDraw(changed && !dashDb.dirty);
+        var form = document.getElementById("db-form");
+        dashDbDraw(changed && !dashDb.dirty && !(form && uiAreaHeld(form)));
     });
 }
 
@@ -3917,30 +4646,71 @@ function dashDbFormHtml() {
     return '<form class="ui-form" id="db-form" novalidate autocomplete="off"><fieldset class="ui-settings-fields" id="db-fields">' +
         '<div class="ui-field"><span class="ui-label">' + esc(t("settings.database.current-connection")) + '</span>' + now +
         '<p class="ui-hint">' + esc(t("settings.database.change-it-for-a-new-password")) + "</p></div>" +
-        uiDbFieldsHtml("dbs-", { host: c.host, port: c.port, database: c.database, user: c.user, sslmode: c.sslmode, caSaved: c.caPem }, true) +
+        uiDbFieldsHtml("dbs-", { host: c.host, port: c.port, database: c.database, user: c.user, sslmode: c.sslmode, caSaved: c.caPem }, true, true) +
         '<div id="dbs-result" aria-live="polite"></div>' +
         '<label class="ui-check-label hidden" id="dbs-confirm-row"><input type="checkbox" class="ui-check" id="dbs-confirm" /> <span id="dbs-confirm-text"></span></label>' +
         '<p class="ui-error hidden" id="dbs-err" role="alert"></p>' +
         '<div class="ui-settings-actions"><button type="button" class="ui-btn" id="dbs-check" data-inventory="settings.database.check">' + esc(t("settings.database.check-connection")) + '</button>' +
-        '<button type="submit" class="ui-btn ui-btn-primary" id="dbs-save" data-inventory="settings.database.save">' + esc(t("settings.database.save")) + '</button>' +
+        '<button type="submit" class="ui-btn ui-btn-primary" id="dbs-save" data-inventory="settings.database.save" aria-describedby="dbs-blocked">' + esc(t("settings.database.change-connection")) + '</button>' +
         '<button type="button" class="ui-btn hidden" id="dbs-discard">' + esc(t("settings.database.discard-changes")) + '</button></div>' +
+        '<p class="ui-hint hidden" id="dbs-blocked"></p>' +
         "</fieldset></form>";
+}
+
+// Why the change cannot start now ("" when it can): it never overlaps a save (P23)
+function dashDbBlockReason() {
+    if (dashSettings.saving) return t("settings.database.wait-for-the-save");
+    if (dashSettingsCount() > 0) return t("settings.database.save-other-changes-first");
+    return "";
+}
+
+// The notice while the database changes, after a lost answer, or when the result is unknown
+function dashDbLockHtml() {
+    var lock = dashSettings.lock;
+    if (!lock) return "";
+    if (lock === "unknown") {
+        return dashSetAlert(" is-warn", t("settings.database.result-unknown-title"), esc(t("settings.database.result-unknown")),
+            '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-db-reload>' + esc(t("settings.database.reload-the-page")) + "</button></div>");
+    }
+    if (lock === "read-failed") {
+        return dashSetAlert(" is-fail", t("settings.database.status-unread-title"), esc(t("settings.database.status-unread", { reason: dashDb.error || "" })),
+            '<div class="ui-settings-actions"><button type="button" class="ui-btn ui-btn-sm" data-db-read-retry>' + esc(t("settings.database.try-again")) + "</button></div>");
+    }
+    return '<div class="ui-loading" role="status"><span class="ui-spin" aria-hidden="true"></span><p>' + esc(t("settings.database.change-in-progress")) + "</p></div>";
 }
 
 function dashDbDraw(redraw) {
     var body = document.getElementById("db-body");
     if (!body) return;
+    var lockBox = document.getElementById("db-lock");
+    if (lockBox) {
+        var lockHtml = dashDbLockHtml();
+        if (lockBox.getAttribute("data-drawn") !== lockHtml) {
+            lockBox.setAttribute("data-drawn", lockHtml);
+            lockBox.innerHTML = lockHtml;
+        }
+    }
     if (!dashDb.snap) {
         body.innerHTML = dashDb.failed ? dashFailed(t("settings.database.could-not-load-the-database-connection"), dashDb.failed, "data-db-retry") : dashLoading(t("settings.database.loading-the-database-connection"));
         return;
     }
-    if (redraw || !body.firstChild || body.querySelector(".ui-loading, .ui-failed")) body.innerHTML = dashDbFormHtml();
+    if (redraw || !body.firstChild || body.querySelector(".ui-loading, .ui-failed")) {
+        dashDb.replacing = { password: false, ca: false };
+        dashDb.caRemove = false;
+        body.innerHTML = dashDbFormHtml();
+    }
     var form = document.getElementById("db-form");
     if (!form) return;
-    document.getElementById("db-fields").disabled = !!dashDb.busy;
+    var blocked = dashDbBlockReason();
+    document.getElementById("db-fields").disabled = !!dashDb.busy || !!dashSettings.lock;
     document.getElementById("dbs-check").textContent = dashDb.busy === "check" ? t("settings.database.checking") : t("settings.database.check-connection");
-    document.getElementById("dbs-save").textContent = dashDb.busy === "save" ? t("settings.database.saving") : t("settings.database.save");
-    document.getElementById("dbs-discard").classList.toggle("hidden", !dashDb.dirty || !!dashDb.busy);
+    var save = document.getElementById("dbs-save");
+    save.textContent = dashSettings.lock ? t("settings.database.saving") : t("settings.database.change-connection");
+    save.disabled = !!blocked;
+    var why = document.getElementById("dbs-blocked");
+    why.textContent = blocked;
+    why.classList.toggle("hidden", !blocked);
+    document.getElementById("dbs-discard").classList.toggle("hidden", !dashDb.dirty || !!dashDb.busy || !!dashSettings.lock);
     document.getElementById("dbs-result").innerHTML = uiDbNoteHtml(uiDbCheckNote(dashDb.check, "settings"));
     var row = document.getElementById("dbs-confirm-row");
     row.classList.toggle("hidden", !dashDb.askConfirm);
@@ -3948,8 +4718,10 @@ function dashDbDraw(redraw) {
     document.getElementById("dbs-confirm").checked = dashDb.confirm;
     var err = document.getElementById("dbs-err");
     var text = dashDb.error || (dashDb.refreshFailed ? t("settings.database.could-not-refresh-the-database-connection", { reason: dashDb.refreshFailed }) : "");
+    if (dashSettings.lock === "read-failed") text = "";
     err.textContent = text;
     err.classList.toggle("hidden", !text);
+    uiDbSecretsSync("dbs-", dashDb.replacing, dashDb.caRemove);
 }
 
 // What the confirmation box says for a check result ("" when none is needed)
@@ -3965,9 +4737,30 @@ function dashDbFail(text, field) {
     if (field) uiDbFieldError("dbs-", field);
 }
 
+// The fields as the API takes them; a secret goes only when the admin replaced it (FS-3)
+function dashDbRead() {
+    var body = uiDbFieldsRead("dbs-");
+    if (!dashDb.replacing.password) delete body.password;
+    var saved = dashDb.snap && dashDb.snap.connection && dashDb.snap.connection.caPem;
+    if (body.sslmode === "verify-full") {
+        if (dashDb.caRemove) {
+            delete body.caPem;
+            body.keepCa = false;
+        } else if (saved && !dashDb.replacing.ca) {
+            delete body.caPem;
+            body.keepCa = true;
+        }
+    }
+    return body;
+}
+
+function dashDbKey(fields) {
+    return JSON.stringify(fields) + "|" + (fields.password ? "1" : "0");
+}
+
 function dashDbCheck() {
-    var fields = uiDbFieldsRead("dbs-");
-    var key = JSON.stringify(fields) + "|" + !!document.getElementById("dbs-password").value;
+    var fields = dashDbRead();
+    var key = dashDbKey(fields);
     dashDb.busy = "check";
     dashDb.error = "";
     dashDbDraw(false);
@@ -3989,20 +4782,29 @@ function dashDbCheck() {
 }
 
 function dashDbSave() {
-    if (dashDb.busy || !dashDb.snap || !dashDb.snap.editable) return;
-    var fields = uiDbFieldsRead("dbs-");
-    var key = JSON.stringify(fields) + "|" + !!document.getElementById("dbs-password").value;
+    if (dashDb.busy || dashSettings.lock || !dashDb.snap || !dashDb.snap.editable) return;
+    if (dashDbBlockReason()) {
+        dashDbDraw(false);
+        return;
+    }
+    var fields = dashDbRead();
+    var key = dashDbKey(fields);
     var checked = dashDb.check && dashDb.checkedFor === key ? Promise.resolve(dashDb.check) : dashDbCheck();
     checked.then(function (r) {
         if (!r) return;
         var note = uiDbCheckNote(r, "settings");
         if (!r.ok || (note && note.tone === " is-fail")) {
-            dashDbFail(t("settings.database.nothing-was-saved", { reason: note ? note.title.toLowerCase() : t("settings.database.the-check-failed-2") }));
+            dashDbFail(t((note && DASH_DB_REFUSED[note.kind]) || "settings.database.nothing-saved-check-failed"));
             return;
         }
         if (dashDb.askConfirm && !dashDb.confirm) {
             dashDbFail(t("settings.database.tick-the-box-to-confirm-then"));
             document.getElementById("dbs-confirm").focus();
+            return;
+        }
+        // A save may have started while the check ran
+        if (dashDbBlockReason()) {
+            dashDbDraw(false);
             return;
         }
         var body = { postgres: fields };
@@ -4016,56 +4818,209 @@ function dashDbSave() {
                 var b = {};
                 Object.keys(body).forEach(function (k) { b[k] = body[k]; });
                 Object.keys(proof).forEach(function (k) { b[k] = proof[k]; });
-                return api("PUT", "/admin/api/settings/database", b);
+                return dashDbSend(b);
             },
-            done: function (res) { dashDbRun(res.data.job); },
         });
     });
 }
 
-// The operation runs on the server; follow it until it ends
-function dashDbRun(job) {
-    dashDb.busy = "save";
-    dashDb.error = "";
+// Every field of every section is locked, and what was asked to confirm is cleared
+function dashSettingsLockFor(state) {
+    dashSettings.lock = state;
+    DASH_SET_ORDER.forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        p.clearAsks(p.st);
+        if (document.getElementById(p.ids.form)) p.sync();
+    });
+    dashSaveBarSync();
     dashDbDraw(false);
+}
+
+function dashSettingsUnlock() {
+    dashSettings.lock = "";
+    DASH_SET_ORDER.forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        if (document.getElementById(p.ids.form)) p.sync();
+    });
+    dashSaveBarSync();
+    dashDbDraw(false);
+}
+
+// Send the change once. The page is locked before the request leaves, and the page,
+// not the dialog, owns what comes back: a late answer is still followed (P8)
+function dashDbSend(body) {
+    var gen = ++dashDb.gen;
+    dashDb.error = "";
+    dashSettingsLockFor("sending");
     uiMutated();
+    return api("PUT", "/admin/api/settings/database", body).then(function (res) {
+        if (gen !== dashDb.gen) return res;
+        var d = res.data || {};
+        if (res.ok && d.job && d.job.id) {
+            dashSettings.lock = "running";
+            dashDbFollow(d.job.id);
+        } else if (res.status === 409 && d.code === "busy" && d.job) {
+            // Another change is on its way: follow it, never send this one again
+            dashSettings.lock = "running";
+            if (d.job.state === "running" && d.job.id) dashDbFollow(d.job.id);
+            else dashDbRecover();
+        } else if (res.status === 0) {
+            // The answer was lost: the change may have started
+            dashDbRecover();
+        } else if (res.status === 503 && d.code && d.code !== "database_switching") {
+            dashDbToRecovery();
+        } else {
+            // Refused before it started (a wrong code, a field): nothing changed
+            dashSettingsUnlock();
+        }
+        return res;
+    });
+}
+
+function dashDbToRecovery() {
+    uiUnsavedRelease();
+    window.location.href = basePath() + "/recovery";
+}
+
+// The operation runs on the server; follow it until it ends
+function dashDbFollow(id) {
+    var gen = dashDb.gen;
+    dashDb.jobId = id;
+    if (dashSettings.lock !== "running") dashSettingsLockFor("running");
+    else dashDbDraw(false);
     var poll = function () {
-        api("GET", "/admin/api/settings/database/jobs/" + encodeURIComponent(job.id)).then(function (res) {
-            var j = res.ok && res.data && res.data.job;
+        if (gen !== dashDb.gen) return;
+        api("GET", "/admin/api/settings/database/jobs/" + encodeURIComponent(id)).then(function (res) {
+            if (gen !== dashDb.gen) return;
+            var d = res.data || {};
+            var j = res.ok && d.job;
+            if (j && j.state === "running") { setTimeout(poll, 500); return; }
+            if (j) { dashDbEnded(j); return; }
+            if (res.status === 401) return;
             // Saved, but the service could not start on the new connection: recovery mode
-            if (res.status === 503 && res.data && res.data.code && res.data.code !== "database_switching") {
-                window.location.href = basePath() + "/recovery";
-                return;
-            }
-            if (!j || j.state === "running") {
-                if (res.status === 401) { dashDb.busy = ""; return; }
-                setTimeout(poll, 500);
-                return;
-            }
-            dashDb.busy = "";
-            if (j.state === "done") {
-                dashDb.dirty = false;
-                dashDb.check = null;
-                dashDb.askConfirm = "";
-                dashDb.confirm = false;
-                dashDb.snap = null;
-                dashDbDraw(true);
-                dashDbLoad();
-                showToast(j.result && j.result.warning ? j.result.warning : t("settings.database.database-connection-saved"), j.result && j.result.warning ? "warning" : "success");
-                return;
-            }
-            if (j.code === "confirm_copy") {
-                dashDb.askConfirm = t("settings.database.use-it-anyway-changes-made-after");
-                dashDb.confirm = false;
-            }
-            dashDbFail(t("settings.database.nothing-was-changed", { reason: uiDbCodeText(j.code, j.error) }));
+            if (res.status === 503 && d.code && d.code !== "database_switching") { dashDbToRecovery(); return; }
+            if (res.status === 503 || res.status === 0) { setTimeout(poll, 1000); return; }
+            // No such job here (another process, or it was forgotten): read where things stand
+            dashDbRecover();
         });
     };
     poll();
 }
 
+// The settings read tells whether a change runs or is about to start. It never sends
+// the change or the second factor again (P24, P26, P29, P30)
+function dashDbRecover() {
+    var gen = dashDb.gen;
+    if (dashSettings.lock !== "recovering") dashSettingsLockFor("recovering");
+    api("GET", "/admin/api/settings/database").then(function (res) {
+        if (gen !== dashDb.gen) return;
+        var d = res.data || {};
+        if (res.ok && d.connection) {
+            dashDb.snap = d;
+            if (d.job && d.job.state === "running" && d.job.id) {
+                dashSettings.lock = "running";
+                dashDbFollow(d.job.id);
+            } else if (d.job && d.job.state === "pending") {
+                setTimeout(dashDbRecover, 1000);
+            } else {
+                dashDbUnknown();
+            }
+            return;
+        }
+        if (res.status === 401) return;
+        if (res.status === 503 && d.code && d.code !== "database_switching") { dashDbToRecovery(); return; }
+        if (res.status === 503 || res.status === 0) { setTimeout(dashDbRecover, 1000); return; }
+        // Another error: stay locked, and offer to read again (only the read)
+        dashDb.error = apiError(res, t("settings.database.the-server-did-not-answer"));
+        dashSettingsLockFor("read-failed");
+    });
+}
+
+// Nothing runs and nothing says how it ended: the connection read is shown, nothing is
+// retried or assumed, and the page stays locked until it is reloaded (owner decision P29)
+function dashDbUnknown() {
+    dashDb.jobId = "";
+    dashSettingsLockFor("unknown");
+    dashDbDraw(true);
+    dashDbContextChanged();
+}
+
+function dashDbEnded(j) {
+    dashDb.jobId = "";
+    if (j.state === "done") {
+        dashDbDiscard();
+        dashDb.snap = null;
+        dashSettingsUnlock();
+        dashDbDraw(true);
+        showToast(j.result && j.result.warning ? j.result.warning : t("settings.database.database-connection-saved"), j.result && j.result.warning ? "warning" : "success");
+        // Every section from the database now in use; then dates, zone and lists follow it
+        dashSettingsReloadAll();
+        dashDbLoad();
+        dashDbContextChanged();
+        return;
+    }
+    dashSettingsUnlock();
+    if (j.code === "confirm_copy") {
+        dashDb.askConfirm = t("settings.database.use-it-anyway-changes-made-after");
+        dashDb.confirm = false;
+    }
+    dashDbFail(t("settings.database.nothing-was-changed", { reason: uiDbCodeText(j.code, j.error) }));
+}
+
+// After a switch: what each section shows is read again from scratch
+function dashSettingsReloadAll() {
+    DASH_SET_ORDER.forEach(function (name) {
+        var p = DASH_SET_PANELS[name];
+        var st = p.st;
+        st.seq += 1;
+        st.snap = st.baseSnap = st.draft = null;
+        st.dirty = false;
+        st.conflict = null;
+        st.error = "";
+        st.errorField = "";
+        st.unknown = false;
+        p.clearAsks(st);
+        var body = document.getElementById(p.ids.body);
+        if (body) body.innerHTML = "";
+        var info = document.getElementById(p.ids.info);
+        if (info) { info.innerHTML = ""; info.removeAttribute("data-drawn"); }
+    });
+    dashRedis.replacing = false;
+    DASH_SET_ORDER.forEach(function (name) { DASH_SET_PANELS[name].draw(); });
+    return dashSettingsLoadAll();
+}
+
+// The database in use may have changed: the zone and the date formats are read again
+// and applied, every shown date is drawn again, then the pages drop what they kept
+// from the old database (the ui:db-changed event, P27, P31)
+function dashDbContextChanged() {
+    return api("GET", "/admin/api/me").then(function (res) {
+        var d = res.ok && res.data;
+        if (d && d.user) {
+            dash.zoneAsked = d.timeZone || "";
+            uiSetAppZone(dash.zoneAsked);
+            uiSetDatePrefs(d.dateFormat, d.timeFormat);
+        }
+        dashRedrawDates();
+        if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") window.dispatchEvent(new CustomEvent("ui:db-changed"));
+    });
+}
+
+function dashDbDiscard() {
+    dashDb.dirty = false;
+    dashDb.check = null;
+    dashDb.askConfirm = "";
+    dashDb.confirm = false;
+    dashDb.error = "";
+    dashDb.replacing = { password: false, ca: false };
+    dashDb.caRemove = false;
+    if (document.getElementById("db-body")) dashDbDraw(true);
+}
+
 // The second check before a sensitive change: an authenticator code or a passkey.
-// o: title, text, pkText, submitText, send(proof) -> api promise, done(res)
+// o: title, text, pkText, submitText, send(proof) -> api promise. The page owns the
+// request once sent: a late answer after the dialog closed is followed there, and
+// the dialog never sends the proof again.
 function dashStepUpDialog(o) {
     var d = null;
     var closed = false;
@@ -4073,9 +5028,10 @@ function dashStepUpDialog(o) {
         closed = true;
         if (d) d.backdrop.remove();
     };
+    var guardedClose = function () { uiCloseGuarded(d, close); };
     var formId = "stepup-form";
     d = uiDialog({
-        title: o.title, size: "sm", close: close,
+        title: o.title, size: "sm", close: guardedClose,
         body: '<div class="ui-form"><p id="stepup-text">' + esc(o.text) + "</p>" +
             '<div class="ui-field hidden" id="stepup-pk"><button type="button" class="ui-btn ui-btn-block" id="stepup-pk-btn">' + esc(t("settings.database.use-a-passkey")) + '</button>' +
             '<p class="ui-hint">' + esc(t("settings.database.or-enter-your-6-digit-code")) + '</p></div>' +
@@ -4085,13 +5041,15 @@ function dashStepUpDialog(o) {
             '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '">' + esc(o.submitText) + "</button>",
         form: { id: formId, onSubmit: function () { submit(); } },
     });
-    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    uiGuardDialog(d);
+    d.foot.querySelector("[data-cancel]").addEventListener("click", guardedClose);
     d.backdrop.addEventListener("ui-drop", function () { closed = true; });
     var code = d.body.querySelector("#stepup-code");
     var err = d.foot.querySelector("#stepup-err");
     var btn = d.foot.querySelector("[type=submit]");
     var pkBtn = d.body.querySelector("#stepup-pk-btn");
     var busy = false;
+    var sent = false;
     var setBusy = function (on) {
         busy = on;
         btn.disabled = on;
@@ -4111,21 +5069,27 @@ function dashStepUpDialog(o) {
         });
     }
     var send = function (proof, withCode) {
+        sent = true;
         o.send(proof).then(function (res) {
-            if (!live()) return;
+            var refused = !res.ok && res.status !== 0 && res.status !== 401 && !dashSettings.lock;
+            if (!live()) {
+                // The dialog was closed meanwhile: the page reports how it ended
+                if (refused) showToast(apiError(res, t("settings.database.verification-failed")), "error");
+                return;
+            }
             setBusy(false);
-            if (!res.ok) {
-                if (res.status === 401) return;
+            if (refused) {
+                sent = false;
                 fail(apiError(res, t("settings.database.verification-failed")));
                 if (withCode) code.select();
                 return;
             }
+            // Started, or followed by the page while its answer is unknown
             close();
-            o.done(res);
         });
     };
     pkBtn.addEventListener("click", function () {
-        if (busy) return;
+        if (busy || sent) return;
         err.classList.add("hidden");
         setBusy(true);
         dashPkStepUp().then(function (r) {
@@ -4139,13 +5103,40 @@ function dashStepUpDialog(o) {
         });
     });
     function submit() {
-        if (busy) return;
+        if (busy || sent) return;
         var value = code.value.trim();
         if (!value) { fail(t("settings.database.enter-the-code-from-your-authenticator")); code.focus(); return; }
         err.classList.add("hidden");
         setBusy(true);
         send({ code: value }, true);
     }
+}
+
+function dashDbReplace(which) {
+    if (dashSettings.lock || dashDb.busy) return;
+    if (which === "ca-remove") {
+        dashDb.caRemove = !dashDb.caRemove;
+        if (dashDb.caRemove) dashDb.replacing.ca = false;
+    } else {
+        dashDb.replacing[which] = true;
+        if (which === "ca") dashDb.caRemove = false;
+    }
+    dashDb.dirty = true;
+    dashDbEdited();
+    var el = document.getElementById(which === "password" ? "dbs-password" : which === "ca" ? "dbs-ca" : "dbs-ca-remove");
+    if (el && which !== "ca-remove") el.focus();
+}
+
+// A change of the form drops a check that no longer matches it
+function dashDbEdited() {
+    dashDb.error = "";
+    if (dashDb.check) {
+        dashDb.check = null;
+        dashDb.askConfirm = "";
+        dashDb.confirm = false;
+    }
+    dashDbDraw(false);
+    dashSaveBarSync();
 }
 
 function dashDbBind() {
@@ -4160,14 +5151,14 @@ function dashDbBind() {
         }
         if (!target.closest("#db-form")) return;
         if (target.id === "dbs-sslmode") uiDbFieldsSync("dbs-");
-        dashDb.dirty = true;
-        dashDb.error = "";
-        if (dashDb.check) {
-            dashDb.check = null;
-            dashDb.askConfirm = "";
-            dashDb.confirm = false;
+        // Another server needs the password again: the field opens (FS-5)
+        var c = dashDb.snap && dashDb.snap.connection;
+        if (event.type === "change" && c && (target.id === "dbs-host" || target.id === "dbs-port") && !dashDb.replacing.password) {
+            var f = uiDbFieldsRead("dbs-");
+            if (f.host !== (c.host || "") || f.port !== (c.port || 5432)) dashDbReplace("password");
         }
-        dashDbDraw(false);
+        dashDb.dirty = true;
+        dashDbEdited();
     };
     panel.addEventListener("input", edited);
     panel.addEventListener("change", edited);
@@ -4178,47 +5169,26 @@ function dashDbBind() {
     });
     panel.addEventListener("click", function (event) {
         var target = event.target;
+        var secret = target.closest("[data-db-secret]");
         if (target.closest("[data-db-retry]")) {
             dashDb.failed = "";
             dashDbDraw(false);
             dashDbLoad();
-        } else if (target.closest("#dbs-check")) {
-            if (!dashDb.busy) dashDbCheck();
-        } else if (target.closest("#dbs-discard")) {
-            dashDb.dirty = false;
-            dashDb.check = null;
-            dashDb.askConfirm = "";
-            dashDb.confirm = false;
+        } else if (target.closest("[data-db-read-retry]")) {
             dashDb.error = "";
-            dashDbDraw(true);
+            dashDbRecover();
+        } else if (target.closest("[data-db-reload]")) {
+            window.location.reload();
+        } else if (secret) {
+            dashDbReplace(secret.getAttribute("data-db-secret"));
+        } else if (target.closest("#dbs-check")) {
+            if (!dashDb.busy && !dashSettings.lock) dashDbCheck();
+        } else if (target.closest("#dbs-discard")) {
+            dashDbDiscard();
+            dashSaveBarSync();
         }
     });
-    uiUnsavedRegister(function () {
-        return dashDb.dirty ? 1 : 0;
-    }, function () {
-        if (!dashDb.snap) return;
-        dashDb.dirty = false;
-        dashDb.check = null;
-        dashDb.askConfirm = "";
-        dashDbDraw(true);
-    });
 }
-
-DASH_PAGE_IMPL.settings = function () {
-    dashSettingsBind();
-    dashGenDraw();
-    dashSettingsDraw();
-    dashDbBind();
-    dashDbDraw(false);
-    dashRedisDraw();
-    dashPkSetBind();
-    dashPkSetDraw(false);
-    Promise.all([dashSettingsLoadAll(), dashDbLoad(), dashPkSetLoad()]).then(function () { uiRefreshLoaded("settings"); });
-};
-
-registerPageRefresh("settings", 30000, function (isCurrent) {
-    return Promise.all([dashSettingsLoadAll(isCurrent), dashDbLoad(isCurrent), dashPkSetLoad(isCurrent)]);
-});
 
 // ===========================================================================
 // Passkeys: the signed-in admin's list (Account page, Copy token and Copy key),
@@ -4411,9 +5381,11 @@ function dashPkAddDialog(data) {
         notice = '<div class="ui-alert is-warn"><span class="ui-alert-bar" aria-hidden="true"></span><div><p>' + esc(t("account.passkeys.this-page-is-open-at-another")) + '</p><small>' +
             tHtml("account.passkeys.so-the-browser-will-likely-refuse", { origin: dashCode(a.origin) }) + "</small></div><span></span></div>";
     }
+    // A typed name or code is asked about before it is dropped (DS-9)
+    var guardedClose = function () { uiCloseGuarded(d, close); };
     var formId = "pk-add-form";
     d = uiDialog({
-        title: t("account.passkeys.add-a-passkey"), size: "sm", close: close,
+        title: t("account.passkeys.add-a-passkey"), size: "sm", close: guardedClose,
         body: '<div class="ui-form">' +
             '<p class="ui-hint" id="pk-step" aria-live="polite"></p>' + notice +
             '<div class="ui-field"><label class="ui-label" for="pk-name">' + esc(t("account.passkeys.name")) + '</label>' +
@@ -4430,7 +5402,7 @@ function dashPkAddDialog(data) {
             '<button type="submit" class="ui-btn ui-btn-primary" form="' + formId + '" id="pk-go">' + esc(t("account.passkeys.continue")) + '</button>',
         form: { id: formId, onSubmit: function () { next(); } },
     });
-    d.foot.querySelector("[data-cancel]").addEventListener("click", close);
+    d.foot.querySelector("[data-cancel]").addEventListener("click", guardedClose);
     d.backdrop.addEventListener("ui-drop", function () { closed = true; });
     var nameEl = d.body.querySelector("#pk-name");
     var codeEl = d.body.querySelector("#pk-code");
@@ -4440,6 +5412,7 @@ function dashPkAddDialog(data) {
     var err = d.foot.querySelector("#pk-err");
     var st = { step: 1, busy: false, publicKey: null, ceremony: "", credential: null };
     nameEl.value = uiPasskeyDefaultName(window.navigator);
+    uiGuardDialog(d);
 
     var fail = function (text, field) {
         if (!text) return;
@@ -4554,7 +5527,14 @@ function dashPkAddDialog(data) {
         uiMutated();
         api("POST", "/admin/api/passkeys", { name: uiPasskeyName(nameEl.value), credential: st.credential, ceremony: st.ceremony }).then(function (res) {
             if (!live()) {
-                if (res.ok) dashPkReload(true);
+                // The dialog was closed while the passkey was being saved: the page owns the
+                // request and says how it ended; nothing is sent again (P8)
+                if (res.ok) {
+                    dashPkReload(true);
+                    showToast(t("account.passkeys.passkey-added-you-can-now-sign"), "success");
+                } else if (res.status !== 401) {
+                    showToast(apiError(res, t("account.passkeys.the-passkey-was-not-saved-start")), "error");
+                }
                 return;
             }
             setBusy(false);
