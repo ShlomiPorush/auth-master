@@ -788,6 +788,7 @@ class Runtime:
             if state.kind == db_inspect.INSTALLATION and _moved(state.installation):
                 await db.close()
                 self.known_installation_id = state.installation.id
+                self.known_migration_id, self.known_moved_from = state.installation.migration_id, str(path)
                 await self._enter_recovery(app, "database_moved")
                 return
             if state.kind == db_inspect.INSTALLATION and state.installation.status == installation.ACTIVE:
@@ -875,6 +876,9 @@ class Runtime:
         move whose commit point passed is completed (the row is then active)."""
         row = await installation.read(db)
         if db.is_sqlite and _moved(row):
+            # The fenced file names the move: kept, so every later configuration records it
+            # (move_record), also when no file was written for PostgreSQL yet.
+            self.known_migration_id, self.known_moved_from = row.migration_id, cfg.sqlite_path
             return "database_moved"
         if cfg.backend == db_config.POSTGRES and cfg.migration_id and row is not None \
                 and row.migration_id == cfg.migration_id:

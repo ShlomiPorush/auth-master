@@ -1082,3 +1082,42 @@ def test_a_file_readable_only_in_part_keeps_the_move_record(workdir, monkeypatch
                 assert svc.config()["migrationId"] == migration_id
 
     run(go())
+
+
+@needs_pg
+def test_after_a_crash_past_the_fence_an_adopted_database_keeps_the_record(workdir, monkeypatch):
+    """Killed after the fence and before data/database.json named PostgreSQL: start-up finds
+    the fenced file; adopting an older PostgreSQL database on the recovery page still
+    records the move, so the recovery page goes on refusing SQLite."""
+    async def go():
+        from urllib.parse import quote
+
+        from app.db import create_database
+        from app.schema import ensure_database_schema
+
+        async with pg_database() as pg:
+            older = await pg.add_database()
+            db = await create_database(f"postgres://{pg.user}:{quote(pg.password)}@{pg.host}:{pg.port}/{older}")
+            try:
+                await ensure_database_schema(db)
+                await db.execute("DROP TABLE installation")
+            finally:
+                await db.close()
+            async with service(monkeypatch) as svc:
+                _admin, totp, c = await _signed_in_sqlite(svc)
+                job = await _move(c, pg, totp)
+                assert job["state"] == "done", job
+            cfg = json.loads((workdir / "data" / "database.json").read_text())
+            sqlite_cfg = {"format": 1, "backend": "sqlite", "sqlite": {"path": cfg["movedFromSqlite"]},
+                          "installationId": cfg["installationId"], "updatedAt": cfg["updatedAt"]}
+            (workdir / "data" / "database.json").write_text(json.dumps(sqlite_cfg))
+            async with service(monkeypatch) as svc:
+                assert svc.runtime.mode == "recovery" and svc.runtime.failure_code == "database_moved"
+                r = svc.recovery_client()
+                res = await r.post("/admin/api/recovery/save",
+                                   json={"backend": "postgres", "postgres": pg.body(database=older), "confirm": True})
+                job = await wait_job(r, f"/admin/api/recovery/jobs/{res.json()['job']['id']}")
+                assert job["state"] == "done" and job["result"]["action"] == "database.adopted", job
+                assert svc.config()["migrationId"] == cfg["migrationId"]
+
+    run(go())
