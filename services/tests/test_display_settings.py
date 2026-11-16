@@ -625,6 +625,42 @@ def test_an_unconfirmed_copy_from_the_environment_keeps_what_was_read(monkeypatc
     _run(scenario())
 
 
+def test_a_recheck_that_waits_on_a_lock_ends_in_unknown_and_keeps_the_read_settings(monkeypatch):
+    # R9: the read that settles an unclear write, and the re-read after an unconfirmed copy
+    # from the environment, wait at most RECHECK_TIMEOUT_SEC (here a table lock never ends)
+    ds = _ds()
+    monkeypatch.setattr(ds, "RECHECK_TIMEOUT_SEC", 0.05)
+    use_env(monkeypatch, DATE_FORMAT="YYYY-MM-DD")
+    stored = ds.dump_value(2, {"dateFormat": "DD/MM/YYYY", "timeFormat": "12h"}, "admin", ds.now_iso())
+
+    class Locked:
+        is_pg, is_sqlite = True, False
+
+        def __init__(self, first=None):
+            self.first = first
+
+        async def fetchval(self, *_a):
+            if self.first is not None:
+                value, self.first = self.first, None
+                return value
+            await asyncio.sleep(3600)
+
+        async def fetchval_write(self, *_a):
+            import asyncpg
+
+            raise asyncpg.exceptions.QueryCanceledError("canceling statement due to user request")
+
+    async def scenario():
+        with pytest.raises(ds.WriteUnknown):
+            await asyncio.wait_for(ds.save(Locked(), ds.EMPTY, "{}"), 2)
+        # The start read the stored formats first, then every later read waits on the lock
+        db = Locked(first=stored)
+        got = await asyncio.wait_for(ds.sync_from_environment(db, db), 2)
+        assert got.version == 2 and got.values["timeFormat"] == "12h"
+
+    _run(scenario())
+
+
 def test_a_write_the_database_did_not_confirm_is_reported_as_unknown(admin, monkeypatch):
     ds = _ds()
     admin.login()

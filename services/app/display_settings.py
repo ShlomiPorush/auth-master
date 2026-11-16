@@ -23,6 +23,7 @@ RELOAD_INTERVAL_SEC seconds, and applies its own saves at once.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -264,10 +265,16 @@ async def save(write_db: Database, base: Stored, value: str) -> bool:
 _UNREADABLE = object()
 
 
+# How long a read that settles an unclear write may wait (a lock or a busy pool must not hold
+# the request or the start)
+RECHECK_TIMEOUT_SEC = 5.0
+
+
 async def _held_value(db: Database) -> Any:
-    """The stored value of the key right now (None when absent), or _UNREADABLE."""
+    """The stored value of the key right now (None when absent), or _UNREADABLE (also when
+    the read takes longer than RECHECK_TIMEOUT_SEC)."""
     try:
-        return await db.fetchval("SELECT value FROM app_state WHERE key = $1", KEY)
+        return await asyncio.wait_for(db.fetchval("SELECT value FROM app_state WHERE key = $1", KEY), RECHECK_TIMEOUT_SEC)
     except Exception:
         return _UNREADABLE
 
@@ -343,7 +350,7 @@ async def sync_from_environment(db: Database, write_db: Database) -> Stored:
     except WriteUnknown:
         # The copy may or may not have been stored: read again, keep what was read on failure (R8)
         try:
-            return await read_current(db)
+            return await asyncio.wait_for(read_current(db), RECHECK_TIMEOUT_SEC)
         except Exception:
             return stored
     if not saved:
