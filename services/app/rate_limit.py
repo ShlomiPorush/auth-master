@@ -80,10 +80,12 @@ def current() -> Limits:
     return _limits
 
 
-def apply(limits: Limits) -> bool:
-    """Use `limits` if they come from a newer settings version than the current ones."""
+def apply(limits: Limits, force: bool = False) -> bool:
+    """Use `limits` if they come from a newer settings version than the current ones, or
+    always with `force` (after the service switched to another database, whose versions
+    are its own)."""
     global _limits
-    if limits.version <= _limits.version:
+    if not force and limits.version <= _limits.version:
         return False
     # A window that ended under the limits in force stays ended, whatever the new
     # window length; windows in progress are measured against the new length.

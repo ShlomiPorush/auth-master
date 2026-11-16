@@ -1,6 +1,6 @@
 /*
- * Sign in (login, login-mfa) and first setup (setup, setup-mfa). Each page names
- * itself in <body data-auth-page="...">. Same endpoints and CSRF flow as before;
+ * Sign in (login, login-mfa), first setup (setup, setup-mfa) and the recovery page
+ * (recovery). Each page names itself in <body data-auth-page="...">. Same endpoints and CSRF flow as before;
  * every link and redirect is built from basePath(). Uses js/common.js and js/ui.js.
  */
 
@@ -222,8 +222,154 @@ function authLoginMfa() {
 
 // --- setup --------------------------------------------------------------
 
+// Poll a database operation until it ends; resolves the job (or null when the server cannot be reached)
+function authWaitJob(path, headers) {
+    return new Promise(function (resolve) {
+        var misses = 0;
+        var poll = function () {
+            adminJson(path, { headers: headers || {} }).then(function (res) {
+                var job = res.ok && res.data && res.data.job;
+                if (job && job.state !== "running") { resolve(job); return; }
+                if (!job && ++misses > 20) { resolve(null); return; }
+                setTimeout(poll, 500);
+            });
+        };
+        poll();
+    });
+}
+
+// A choice between SQLite and PostgreSQL (ui-seg buttons with data-db-kind)
+function authKindSwitch(form, onChange) {
+    form.querySelectorAll("[data-db-kind]").forEach(function (b) {
+        b.addEventListener("click", function () {
+            form.querySelectorAll("[data-db-kind]").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+            onChange(b.getAttribute("data-db-kind"));
+        });
+    });
+}
+
+function authSetError(id, text) {
+    var el = document.getElementById(id);
+    el.textContent = text || "";
+    el.classList.toggle("hidden", !text);
+}
+
+// The first step of setup while no database is configured: choose and check it
+function authSetupDatabase(showRegister) {
+    var form = document.getElementById("db-form");
+    var pg = document.getElementById("db-pg-fields");
+    var result = document.getElementById("db-result");
+    var adoptRow = document.getElementById("db-adopt-row");
+    var adopt = document.getElementById("db-adopt");
+    var kind = "sqlite";
+    var busy = false;
+    document.getElementById("setup-sub").textContent = "Choose where the service keeps its data";
+    pg.innerHTML = '<div class="ui-form">' + uiDbFieldsHtml("db-", { port: 5432 }, false) + "</div>";
+    form.classList.remove("hidden");
+    var reset = function () {
+        result.innerHTML = "";
+        adoptRow.classList.add("hidden");
+        adopt.checked = false;
+        authSetError("db-err", "");
+    };
+    authKindSwitch(form, function (k) {
+        kind = k;
+        pg.classList.toggle("hidden", k !== "postgres");
+        document.getElementById("db-sqlite-note").classList.toggle("hidden", k !== "sqlite");
+        reset();
+    });
+    form.addEventListener("input", function (event) {
+        if (event.target.id === "db-adopt") return;
+        if (event.target.id === "db-sslmode") uiDbFieldsSync("db-");
+        result.innerHTML = "";
+    });
+    form.addEventListener("change", function (event) { if (event.target.id === "db-sslmode") uiDbFieldsSync("db-"); });
+    var body = function () {
+        var b = { backend: kind };
+        if (kind === "postgres") b.postgres = uiDbFieldsRead("db-");
+        return b;
+    };
+    var showCheck = function (r) {
+        result.innerHTML = uiDbNoteHtml(uiDbCheckNote(r, "setup"));
+        adoptRow.classList.toggle("hidden", !(r && r.ok && r.state === "older"));
+    };
+    var setBusy = function (on, button, text) {
+        busy = on;
+        authBusy(button, on, text);
+        document.getElementById(button.id === "db-check" ? "db-continue" : "db-check").disabled = on;
+    };
+    document.getElementById("db-check").addEventListener("click", function () {
+        if (busy) return;
+        authSetError("db-err", "");
+        var button = this;
+        setBusy(true, button, "Checking...");
+        authPost(adminApi("/admin/api/setup/database/check", { method: "POST", body: body() })).then(function (res) {
+            setBusy(false, button);
+            if (!res.ok) {
+                authSetError("db-err", authErrorText(res, "The check failed."));
+                if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
+                return;
+            }
+            showCheck(res.data);
+        });
+    });
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        if (busy) return;
+        authSetError("db-err", "");
+        var button = document.getElementById("db-continue");
+        var b = body();
+        if (adopt.checked) b.adopt = true;
+        setBusy(true, button, "Setting up the database...");
+        authPost(adminApi("/admin/api/setup/database", { method: "POST", body: b })).then(function (res) {
+            if (!res.ok || !res.data.job) {
+                setBusy(false, button);
+                authSetError("db-err", authErrorText(res, "Could not start the setup."));
+                if (res.data && res.data.field) uiDbFieldError("db-", res.data.field);
+                return;
+            }
+            return authWaitJob("/admin/api/setup/database/jobs/" + encodeURIComponent(res.data.job.id)).then(function (job) {
+                setBusy(false, button);
+                if (!job) { authSetError("db-err", "The server stopped answering. Reload the page."); return; }
+                if (job.state !== "done") {
+                    if (job.code === "attach_failed") {
+                        // Saved, but the service could not start on it: recovery mode
+                        window.location.href = basePath() + "/recovery";
+                        return;
+                    }
+                    if (job.code === "confirm_adopt") {
+                        adoptRow.classList.remove("hidden");
+                        authSetError("db-err", "This database holds this service's data from an older version or a backup. Tick the box to adopt it, then continue.");
+                        return;
+                    }
+                    authSetError("db-err", uiDbCodeText(job.code, job.error));
+                    return;
+                }
+                if (job.result && job.result.next === "login") {
+                    window.location.href = basePath() + "/login";
+                    return;
+                }
+                form.classList.add("hidden");
+                showRegister();
+            });
+        });
+    });
+}
+
 function authSetup() {
     var form = document.getElementById("f");
+    var showRegister = function () {
+        document.getElementById("setup-sub").textContent = "Create the first administrator account";
+        form.classList.remove("hidden");
+        form.querySelector('[name="username"]').focus();
+    };
+    adminJson("/admin/api/setup/status").then(function (res) {
+        document.getElementById("setup-loading").classList.add("hidden");
+        var d = res.ok && res.data;
+        if (d && d.needsDatabase) authSetupDatabase(showRegister);
+        else if (d && d.needsSetup === false) window.location.href = basePath() + "/login";
+        else showRegister();
+    });
     form.addEventListener("submit", function (event) {
         event.preventDefault();
         authHideError();
@@ -361,6 +507,146 @@ function authSetupMfa() {
     });
 }
 
+// --- recovery ------------------------------------------------------------
+
+// The database cannot be used: the master key, kept in this page's memory only,
+// opens the saved connection for editing. Every call sends it again.
+function authRecovery() {
+    var key = "";
+    var kind = "postgres";
+    var busy = false;
+    var keyForm = document.getElementById("rec-key-form");
+    var form = document.getElementById("rec-form");
+    var result = document.getElementById("rec-result");
+    var call = function (method, path, body) {
+        var opts = { method: method, headers: { Authorization: "Bearer " + key } };
+        if (body !== undefined) opts.body = body;
+        return adminJson(path, opts);
+    };
+    var running = function () {
+        document.getElementById("rec-signin").setAttribute("href", basePath() + "/login");
+        keyForm.classList.add("hidden");
+        form.classList.add("hidden");
+        document.getElementById("rec-running").classList.remove("hidden");
+    };
+    var fail = function (res, fallback) {
+        if (res.status === 429) return "Too many wrong keys from this address. Try again in " + Math.ceil(((res.data && res.data.retryAfter) || 60) / 60) + " minutes.";
+        if (res.error) return res.error === "timeout" ? "The server did not answer in time." : AUTH_NETWORK_TEXT;
+        return (res.data && res.data.detail) || fallback;
+    };
+    var showForm = function (d) {
+        keyForm.classList.add("hidden");
+        form.classList.remove("hidden");
+        document.getElementById("rec-why").textContent = " " + (d.message || "");
+        var c = d.configured;
+        var saved = "";
+        if (c && c.backend === "postgres") saved = "Saved connection: " + c.user + "@" + c.host + ":" + c.port + "/" + c.database + " (TLS " + c.sslmode + ").";
+        else if (c && c.backend === "sqlite") saved = "Saved database: the SQLite file " + c.path + ".";
+        document.getElementById("rec-saved").textContent = saved;
+        var pgValues = c && c.backend === "postgres" ? c : { port: 5432 };
+        var keep = !!(c && c.backend === "postgres" && d.code !== "config_unreadable");
+        document.getElementById("rec-pg-fields").innerHTML = '<div class="ui-form">' + uiDbFieldsHtml("rec-", pgValues, keep) + "</div>";
+        if (c && c.backend === "sqlite") form.querySelector('[data-db-kind="sqlite"]').click();
+    };
+    var open = function () {
+        call("GET", "/admin/api/recovery/status").then(function (res) {
+            var button = keyForm.querySelector("[type=submit]");
+            authBusy(button, false);
+            if (!res.ok) {
+                authShowError(fail(res, "The master key is not correct."));
+                return;
+            }
+            if (res.data.mode !== "recovery") { running(); return; }
+            showForm(res.data);
+        });
+    };
+    adminJson("/admin/api/recovery/status").then(function (res) {
+        document.getElementById("rec-loading").classList.add("hidden");
+        var d = res.ok && res.data;
+        if (d && d.mode !== "recovery") running();
+        else if (d && !d.masterKeyConfigured) document.getElementById("rec-no-key").classList.remove("hidden");
+        else {
+            keyForm.classList.remove("hidden");
+            document.getElementById("rec-key").focus();
+        }
+    });
+    keyForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+        authHideError();
+        key = document.getElementById("rec-key").value.trim();
+        if (!key) { authShowError("Enter the master key."); return; }
+        authBusy(keyForm.querySelector("[type=submit]"), true, "Checking...");
+        open();
+    });
+    authKindSwitch(form, function (k) {
+        kind = k;
+        document.getElementById("rec-pg-fields").classList.toggle("hidden", k !== "postgres");
+        document.getElementById("rec-sqlite-note").classList.toggle("hidden", k !== "sqlite");
+        result.innerHTML = "";
+        authSetError("rec-err", "");
+    });
+    form.addEventListener("input", function (event) {
+        if (event.target.id === "rec-sslmode") uiDbFieldsSync("rec-");
+        if (event.target.id !== "rec-confirm") result.innerHTML = "";
+    });
+    form.addEventListener("change", function (event) { if (event.target.id === "rec-sslmode") uiDbFieldsSync("rec-"); });
+    var body = function () {
+        var b = { backend: kind };
+        if (kind === "postgres") b.postgres = uiDbFieldsRead("rec-");
+        return b;
+    };
+    var setBusy = function (on, button, text) {
+        busy = on;
+        authBusy(button, on, text);
+        document.getElementById(button.id === "rec-check" ? "rec-save" : "rec-check").disabled = on;
+    };
+    document.getElementById("rec-check").addEventListener("click", function () {
+        if (busy) return;
+        authSetError("rec-err", "");
+        var button = this;
+        setBusy(true, button, "Checking...");
+        call("POST", "/admin/api/recovery/check", body()).then(function (res) {
+            setBusy(false, button);
+            if (!res.ok) {
+                authSetError("rec-err", fail(res, "The check failed."));
+                if (res.data && res.data.field) uiDbFieldError("rec-", res.data.field);
+                return;
+            }
+            result.innerHTML = uiDbNoteHtml(uiDbCheckNote(res.data, "recovery"));
+        });
+    });
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        if (busy) return;
+        authSetError("rec-err", "");
+        var confirm = document.getElementById("rec-confirm");
+        if (!confirm.checked) {
+            authSetError("rec-err", "Tick the box to confirm that this is the database to use.");
+            confirm.focus();
+            return;
+        }
+        var b = body();
+        b.confirm = true;
+        var button = document.getElementById("rec-save");
+        setBusy(true, button, "Connecting...");
+        call("POST", "/admin/api/recovery/save", b).then(function (res) {
+            if (!res.ok || !res.data.job) {
+                setBusy(false, button);
+                authSetError("rec-err", fail(res, "Could not start."));
+                if (res.data && res.data.field) uiDbFieldError("rec-", res.data.field);
+                return;
+            }
+            return authWaitJob("/admin/api/recovery/jobs/" + encodeURIComponent(res.data.job.id), { Authorization: "Bearer " + key }).then(function (job) {
+                setBusy(false, button);
+                if (!job) { authSetError("rec-err", "The server stopped answering. Reload the page."); return; }
+                if (job.state !== "done") { authSetError("rec-err", uiDbCodeText(job.code, job.error)); return; }
+                key = "";
+                running();
+            });
+        });
+    });
+}
+
 function authStart() {
     uiInstallGlobalListeners();
     authPasswordHelpers();
@@ -369,6 +655,7 @@ function authStart() {
     else if (page === "login-mfa") authLoginMfa();
     else if (page === "setup") authSetup();
     else if (page === "setup-mfa") authSetupMfa();
+    else if (page === "recovery") authRecovery();
 }
 
 if (typeof document !== "undefined" && document.readyState !== undefined) {

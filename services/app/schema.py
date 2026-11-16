@@ -36,13 +36,39 @@ async def _sqlite_add_column_if_not_exists(db: "Database", table: str, column: s
         await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} NOT NULL DEFAULT {default}")
 
 
+# Every table this service creates, except `installation` (app.installation), which marks a
+# database as this service's and is checked before anything else is created.  A database
+# that holds only these tables, without `installation`, is an installation of an older
+# version or a backup of one (app.db_inspect).  test_database_setup.py checks this list
+# against the tables ensure_database_schema creates.
+SERVICE_TABLES = (
+    "admin_users",
+    "tokens",
+    "zones",
+    "api_keys",
+    "activity_logs",
+    "access_logs",
+    "access_log_rollup",
+    "access_log_rollup_state",
+    "rate_limit_settings",
+    "app_settings",
+    "redis_settings",
+    "app_state",
+    "passkeys",
+    "passkey_settings",
+)
+INSTALLATION_TABLE = "installation"
+
+
 async def ensure_database_schema(db: "Database") -> None:
+    from app.installation import ensure_table
     from app.zones import ensure_zone_name_index
 
     if db.is_pg:
         await _ensure_pg(db)
     else:
         await _ensure_sqlite(db)
+    await ensure_table(db)
     await ensure_zone_name_index(db)
 
 

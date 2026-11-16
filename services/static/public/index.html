@@ -353,7 +353,7 @@
           <div class="ui-page-head">
             <div>
               <h1 class="ui-h1" id="h-settings">Settings</h1>
-              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, the Redis connection, and the address passkeys work at.</p>
+              <p>The time zone, how long the logs are kept, the session cookie, the rate limit on <code>/validate</code> and <code>/validate/grants</code>, the database and Redis connections, and the address passkeys work at.</p>
             </div>
           </div>
           <div class="ui-panel" id="general-panel">
@@ -365,6 +365,10 @@
             <div class="ui-panel-head">Rate limit</div>
             <div class="ui-settings-info" id="settings-info" aria-live="polite"></div>
             <div class="ui-panel-body" id="settings-body"></div>
+          </div>
+          <div class="ui-panel" id="db-panel" data-inventory="settings.database">
+            <div class="ui-panel-head">Database</div>
+            <div class="ui-panel-body" id="db-body"></div>
           </div>
           <div class="ui-panel" id="redis-panel">
             <div class="ui-panel-head">Redis connection</div>

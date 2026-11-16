@@ -25,8 +25,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # DATABASE_URL defaults to sqlite:///data/auth.db (no Postgres needed)
-      # To use PostgreSQL instead, set it in .env, for example:
+      # The database is chosen in first-time setup (the SQLite file or a PostgreSQL
+      # server) and saved in ./data/database.json; keep ./data. DATABASE_URL in .env
+      # overrides that choice, for example:
       # DATABASE_URL=postgres://auth:<password>@postgres:5432/authdb
       #
       # The bundled Redis, used until a Redis connection is saved on the Settings

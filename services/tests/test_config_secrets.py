@@ -69,7 +69,8 @@ def startup_error() -> str:
 def test_valid_configuration_loads(env):
     s = load_settings()
     assert s.admin_api_key == env["ADMIN_API_KEY"]
-    assert s.database_url.startswith("sqlite")
+    # Unset: the database comes from data/database.json or setup (app.db_config).
+    assert s.env_value("database_url") is None
 
 
 @pytest.mark.parametrize("name", REQUIRED_SECRETS)
