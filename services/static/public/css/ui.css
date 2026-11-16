@@ -807,9 +807,9 @@ body.ui-app { overflow: hidden; }
     html.ui-nav-collapsed .ui-status-row { min-height: 12px; }
     html.ui-nav-collapsed .ui-nav, html.ui-nav-collapsed .ui-side-foot { justify-items: center; width: 100%; }
     html.ui-nav-collapsed .ui-nav-item, html.ui-nav-collapsed .ui-tool { justify-content: center; width: 48px; height: 42px; min-height: 42px; padding: 0; }
-    html.ui-nav-collapsed .ui-nav-count { position: absolute; top: 7px; inset-inline-end: 8px; min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0;
+    html.ui-nav-collapsed .ui-side .ui-nav-count { position: absolute; top: 7px; inset-inline-end: 8px; min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0;
         border-radius: var(--ui-radius-round); background: var(--ui-warn); }
-    html.ui-nav-collapsed .ui-nav-count.is-fail { background: var(--ui-fail); }
+    html.ui-nav-collapsed .ui-side .ui-nav-count.is-fail { background: var(--ui-fail); }
     html.ui-nav-collapsed .ui-fly { position: absolute; top: 50%; inset-inline-start: calc(100% + 8px); z-index: 40; display: block; padding: var(--ui-sp-3) var(--ui-sp-5);
         border-radius: var(--ui-radius-sm); border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-ink); box-shadow: var(--ui-shadow-float);
         font-size: var(--ui-fs-ctl); font-weight: 600; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden;
@@ -821,8 +821,9 @@ body.ui-app { overflow: hidden; }
     html.ui-nav-collapsed :is(.ui-nav-item, .ui-tool):hover .ui-fly { opacity: 1; visibility: visible; transform: translate(0, -50%); }
 }
 @media (max-width: 1100px) and (min-width: 761px) {
-    .ui-nav-count { border-radius: var(--ui-radius-round); }
-    .ui-nav-count.is-fail { background: var(--ui-fail); }
+    /* The dot keeps its colour on the current item too, as on the folded rail */
+    .ui-side .ui-nav-item .ui-nav-count { border-radius: var(--ui-radius-round); background: var(--ui-warn); }
+    .ui-side .ui-nav-item .ui-nav-count.is-fail { background: var(--ui-fail); }
 }
 /* A short screen: the rail's navigation scrolls inside, its names stay in the tooltips */
 @media (max-width: 1100px) and (min-width: 761px) and (max-height: 720px) {
@@ -925,7 +926,7 @@ body.ui-app { overflow: hidden; }
 .ui-gs-item b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-fs); font-weight: 600; }
 .ui-gs-item small { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-muted); font-size: var(--ui-fs-meta); }
 .ui-gs-item small:empty { display: none; }
-.ui-gs-item mark { padding: 0 var(--ui-sp-1); border-radius: var(--ui-radius-mark); background: color-mix(in srgb, var(--ui-warn) 22%, transparent); color: inherit; }
+.ui-gs-item mark { padding: 0; border-radius: var(--ui-radius-mark); background: color-mix(in srgb, var(--ui-warn) 22%, transparent); color: inherit; }
 .ui-gs-empty { margin: 0; padding: var(--ui-sp-10) var(--ui-sp-6); color: var(--ui-muted); text-align: center; overflow-wrap: anywhere; }
 .ui-gs-wait { margin: var(--ui-sp-3) var(--ui-sp-5) 0; color: var(--ui-muted); font-size: var(--ui-fs-meta); }
 .ui-gs-keys { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--ui-sp-7); padding: var(--ui-sp-4) var(--ui-sp-6); border-top: 1px solid var(--ui-line);
