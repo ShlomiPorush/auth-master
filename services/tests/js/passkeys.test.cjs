@@ -36,7 +36,7 @@ function domError(name) {
 
 // --- js/ui.js ---------------------------------------------------------------
 
-const ui = loadScripts(["js/common.js", "js/ui.js"]);
+const ui = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
 
 test("passkeys are offered only in a secure context with WebAuthn and its JSON helpers", () => {
     assert.equal(ui.uiPasskeyBlocked(browser(), false), "");
@@ -110,7 +110,7 @@ function loginPage(answers, get) {
     const win = browser();
     win.PublicKeyCredential.signalUnknownCredential = (o) => { signals.push(o); return Promise.resolve(); };
     win.navigator = { credentials: { get: (o) => { calls.push(["get", o]); return get(o); } } };
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/auth-pages.js"], {
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/auth-pages.js"], {
         document: doc, location: { href: "", search: "?next=%2Fadmin%2Fzones", origin: "https://auth.example.test" },
         isSecureContext: win.isSecureContext, PublicKeyCredential: win.PublicKeyCredential, navigator: win.navigator,
     });
@@ -192,7 +192,7 @@ test("sign-in: a closed browser window shows nothing and sends nothing", async (
 
 function dashboard(handler, win) {
     const w = win || browser();
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], {
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], {
         document: PAGE, isSecureContext: w.isSecureContext, PublicKeyCredential: w.PublicKeyCredential, navigator: w.navigator,
         location: { origin: "https://auth.example.test", pathname: "/admin/settings", search: "" },
     });

@@ -16,7 +16,7 @@ const PAGE = {
 };
 
 function load() {
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.toasts = [];
     ctx.showToast = (message, type) => { ctx.toasts.push([message, type]); };
     return ctx;

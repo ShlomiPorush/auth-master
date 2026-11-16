@@ -5,7 +5,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadScripts } = require("./_load.cjs");
 
-const ui = loadScripts(["js/common.js", "js/ui.js"]);
+const ui = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
 const ids = (rows) => Array.from(rows, (r) => r.id);
 
 test("rows sort by time, then id, both newest first", () => {

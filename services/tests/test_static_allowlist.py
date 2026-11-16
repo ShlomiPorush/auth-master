@@ -45,6 +45,7 @@ os.environ["REDIS_URL"] = f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379/0"
 
 EXPECTED_CSS = {"ui.css", "swagger-ui.css"}
 EXPECTED_JS = {
+    "text.js",
     "common.js",
     "theme.js",
     "head.js",

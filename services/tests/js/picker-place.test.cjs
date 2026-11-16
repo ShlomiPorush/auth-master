@@ -20,7 +20,7 @@ function page({ mtop, tabbar, boxes }) {
         parent = el;
     }
     const host = { parentElement: parent };
-    const ctx = loadScripts(["js/common.js", "js/ui.js"], {
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js"], {
         innerWidth: 390,
         innerHeight: 844,
         Node: class Node {},

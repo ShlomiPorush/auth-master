@@ -31,6 +31,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static" / "public"
 # The only stylesheets and scripts served from /css and /js.
 STATIC_CSS = frozenset({"ui.css", "swagger-ui.css"})
 STATIC_JS = frozenset({
+    "text.js",
     "common.js",
     "theme.js",
     "head.js",

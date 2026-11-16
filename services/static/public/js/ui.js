@@ -41,12 +41,13 @@ function uiUserText(value, cls) {
     return '<bdi dir="auto"' + (cls ? ' class="' + esc(cls) + '"' : "") + ">" + esc(value) + "</bdi>";
 }
 
-// Counts with thousands separators and the right singular or plural (FW-3)
+// Counts with thousands separators and the right singular or plural (FW-3).
+// uiCountLabel(n, key) is tn(key, n): a count value of the catalog (js/text.js).
 function uiNum(n) {
     return Number(n || 0).toLocaleString();
 }
-function uiCountLabel(n, one, many) {
-    return uiNum(n) + " " + (Number(n) === 1 ? one : many);
+function uiCountLabel(n, key) {
+    return tn(key, n);
 }
 
 function uiIsPhone() {
@@ -64,8 +65,8 @@ function uiTouchOnly() {
 
 var uiAppZone = "UTC";
 var uiDatePrefs = { date: "browser", time: "24" };
-var UI_DATE_FORMATS = [["browser", "Browser order"], ["dmy", "DD/MM/YYYY"], ["mdy", "MM/DD/YYYY"], ["ymd", "YYYY-MM-DD"]];
-var UI_TIME_FORMATS = [["24", "24-hour"], ["12", "12-hour"]];
+var UI_DATE_FORMATS = [["browser", "dates.browser-order"], ["dmy", "dates.dd-mm-yyyy"], ["mdy", "dates.mm-dd-yyyy"], ["ymd", "dates.yyyy-mm-dd"]];
+var UI_TIME_FORMATS = [["24", "dates.24-hour"], ["12", "dates.12-hour"]];
 var uiZoneFormatters = {};
 
 function uiZoneValid(tz) {
@@ -170,7 +171,7 @@ function writeClock(p, seconds, prefs) {
     var tail = ":" + uiPad(p.minute) + (seconds ? ":" + uiPad(p.second) : "");
     if ((prefs || uiDatePrefs).time === "12") {
         var h = p.hour % 12 === 0 ? 12 : p.hour % 12;
-        return h + tail + (p.hour < 12 ? " AM" : " PM");
+        return h + tail + (p.hour < 12 ? t("dates.am") : t("dates.pm"));
     }
     return uiPad(p.hour) + tail;
 }
@@ -221,10 +222,10 @@ function formatAgo(value, now) {
     var ms = uiParseInstant(value);
     if (isNaN(ms)) return "-";
     var diff = Math.max(0, (now === undefined ? Date.now() : now) - ms) / 1000;
-    if (diff < 60) return "just now";
-    if (diff < 3600) return Math.round(diff / 60) + " min ago";
-    if (diff < 172800) return Math.round(diff / 3600) + " h ago";
-    return Math.round(diff / 86400) + " d ago";
+    if (diff < 60) return t("dates.just-now");
+    if (diff < 3600) return t("dates.min-ago", { n: Math.round(diff / 60) });
+    if (diff < 172800) return t("dates.h-ago", { n: Math.round(diff / 3600) });
+    return t("dates.d-ago", { n: Math.round(diff / 86400) });
 }
 
 // A date cell: <time> with the instant, the full timestamp on hover (in zone, else the app zone)
@@ -256,9 +257,9 @@ function uiFromZonedInput(text, tz) {
     var offsets = before === after ? [before] : [before, after];
     var found = [];
     offsets.forEach(function (off) {
-        var t = wall - off * 60000;
-        var p = uiZoneParts(t, zone);
-        if (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) === wall) found.push(t);
+        var instant = wall - off * 60000;
+        var p = uiZoneParts(instant, zone);
+        if (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) === wall) found.push(instant);
     });
     if (found.length) return new Date(Math.min.apply(null, found)).toISOString();
     // Not on the clock: the offset in force before the change places it the gap later
@@ -381,7 +382,7 @@ function showToast(message, type) {
     toast.setAttribute("role", kind === "error" ? "alert" : "status");
     toast.innerHTML = '<span class="ui-toast-icon" aria-hidden="true">' + icons[kind] + "</span>" +
         "<p>" + esc(message) + "</p>" +
-        '<button type="button" class="ui-icon-btn" data-toast-x title="Close" aria-label="Close">' + UI_CLOSE_ICON + "</button>";
+        '<button type="button" class="ui-icon-btn" data-toast-x title="' + esc(t("common.close")) + '" aria-label="' + esc(t("common.close")) + '">' + UI_CLOSE_ICON + "</button>";
     toast.querySelector("[data-toast-x]").addEventListener("click", function () { toast.remove(); });
     document.body.appendChild(toast);
     if (focusWasInIt) toast.querySelector("button").focus({ preventScroll: true });
@@ -458,7 +459,7 @@ function uiCopyText(text) {
 // A value that copies on a click, shown in mono; the full value is copied
 function uiCopyable(text, cls) {
     if (!text || text === "-") return '<span class="ui-muted">' + esc(text || "-") + "</span>";
-    return '<button type="button" class="ui-copy' + (cls ? " " + esc(cls) : "") + '" data-copy="' + esc(text) + '" title="Click to copy">' +
+    return '<button type="button" class="ui-copy' + (cls ? " " + esc(cls) : "") + '" data-copy="' + esc(text) + '" title="' + esc(t("common.click-to-copy")) + '">' +
         "<bdi>" + esc(text) + "</bdi>" + UI_COPY_ICON + "</button>";
 }
 
@@ -467,10 +468,10 @@ function uiCopyClick(button) {
     uiCopyText(text).then(function (ok) {
         if (!ok) {
             var secure = typeof window !== "undefined" && window.isSecureContext;
-            showToast(secure ? "Failed to copy" : "Copying needs HTTPS. Select the text and copy it yourself.", "error");
+            showToast(secure ? t("common.failed-to-copy") : t("common.copying-needs-https-select-the-text"), "error");
             return;
         }
-        showToast("Copied: " + text, "success");
+        showToast(t("common.copied", { text: text }), "success");
         var svg = button.querySelector("svg");
         if (!svg) return;
         var before = svg.innerHTML;
@@ -509,7 +510,7 @@ function uiDialog(o) {
     var form = opts.form ? opts.form : null;
     var bodyTag = form ? "form" : "div";
     var x = typeof opts.close === "function"
-        ? '<button type="button" class="ui-icon-btn" data-dialog-x title="Close" aria-label="Close">' + UI_CLOSE_ICON + "</button>" : "";
+        ? '<button type="button" class="ui-icon-btn" data-dialog-x title="' + esc(t("common.close")) + '" aria-label="' + esc(t("common.close")) + '">' + UI_CLOSE_ICON + "</button>" : "";
     backdrop.innerHTML =
         '<div class="ui-dialog ' + (sizes[opts.size] || "") + (opts.dialogClass ? " " + opts.dialogClass : "") + '" role="' + role +
         '" aria-labelledby="' + titleId + '"' + (opts.describedBy ? ' aria-describedby="' + esc(opts.describedBy) + '"' : "") + ">" +
@@ -564,8 +565,8 @@ function uiDialogDirty(d) {
 function uiCloseGuarded(d, close) {
     if (!uiDialogDirty(d)) { close(); return Promise.resolve(true); }
     return uiConfirm({
-        title: "Discard your changes?", message: "What you changed in this window is not saved.",
-        confirmText: "Discard", cancelText: "Keep editing", danger: true, focusCancel: true,
+        title: t("common.discard-your-changes"), message: t("common.what-you-changed-in-this-window"),
+        confirmText: t("common.discard"), cancelText: t("common.keep-editing"), danger: true, focusCancel: true,
     }).then(function (ok) { if (ok) close(); return ok; });
 }
 
@@ -578,12 +579,12 @@ function uiConfirm(o) {
     if (uiConfirmClose) uiConfirmClose(false);
     return new Promise(function (resolve) {
         var d = uiDialog({
-            title: opts.title || "Confirm", size: "sm", role: "alertdialog", backdropClass: "ui-confirm",
+            title: opts.title || t("common.confirm"), size: "sm", role: "alertdialog", backdropClass: "ui-confirm",
             noHistory: !!opts.noHistory, describedBy: "ui-confirm-text",
             body: '<p class="ui-confirm-text" id="ui-confirm-text">' + esc(opts.message || "") + "</p>",
-            foot: '<button type="button" class="ui-btn" data-cancel>' + esc(opts.cancelText || "Cancel") + "</button>" +
+            foot: '<button type="button" class="ui-btn" data-cancel>' + esc(opts.cancelText || t("common.cancel")) + "</button>" +
                 '<button type="button" class="ui-btn ' + (opts.danger ? "ui-btn-danger-solid" : "ui-btn-primary") + '" data-confirm>' +
-                esc(opts.confirmText || "Confirm") + "</button>",
+                esc(opts.confirmText || t("common.confirm")) + "</button>",
         });
         var settled = false;
         function done(result) {
@@ -864,7 +865,7 @@ var uiPopConfirmed = false;
 var uiLeaveAsking = false;
 var uiUnsavedSources = [];
 var uiScrolls = {};
-var uiAppTitle = "Auth Service";
+var uiAppTitle = "common.auth-service";
 
 // Who holds unsaved changes: count() returns how many; reset() puts them back
 // to how they were loaded, when the user chose to leave them
@@ -893,9 +894,9 @@ function uiConfirmLeave() {
     var n = uiUnsavedCount();
     uiLeaveAsking = true;
     return uiConfirm({
-        title: "Leave without saving?",
-        message: "You have " + uiCountLabel(n, "unsaved change", "unsaved changes") + ". Leaving drops " + (n === 1 ? "it" : "them") + ".",
-        confirmText: "Leave", cancelText: "Stay", danger: true, focusCancel: true, noHistory: true,
+        title: t("common.leave-without-saving"),
+        message: tn("common.leave-unsaved", n),
+        confirmText: t("common.leave"), cancelText: t("common.stay"), danger: true, focusCancel: true, noHistory: true,
     }).then(function (ok) {
         uiLeaveAsking = false;
         if (ok) uiUnsavedDiscard();
@@ -931,7 +932,7 @@ function uiSetPageQuery(params) {
 }
 
 function uiSetTitle(id) {
-    document.title = (uiPages[id] ? uiPages[id].title + " · " : "") + uiAppTitle;
+    document.title = uiPages[id] ? t("common.page-title", { page: t(uiPages[id].title), app: t(uiAppTitle) }) : t(uiAppTitle);
 }
 
 function uiMainScroller() {
@@ -953,9 +954,9 @@ function uiRestoreScroll(idx) {
     var stopped = false;
     var stop = function () {
         stopped = true;
-        ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (t) { window.removeEventListener(t, stop, true); });
+        ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) { window.removeEventListener(type, stop, true); });
     };
-    ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (t) { window.addEventListener(t, stop, true); });
+    ["wheel", "touchstart", "pointerdown", "keydown"].forEach(function (type) { window.addEventListener(type, stop, true); });
     var step = function () {
         if (stopped) return;
         var max = m.scrollHeight - m.clientHeight;
@@ -1251,7 +1252,7 @@ function uiPickerOpen(picker) {
     panel.id = (select.id || "ui-picker") + "-panel";
     var listId = panel.id + "-list";
     panel.innerHTML = (withSearch ? '<input type="search" class="ui-input ui-picker-search" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="' +
-        listId + '" aria-label="Search ' + esc(picker.label.toLowerCase()) + '" placeholder="Search">' : "") +
+        listId + '" aria-label="' + esc(t("picker.search", { name: picker.label.toLowerCase() })) + '" placeholder="' + esc(t("picker.search-2")) + '">' : "") +
         '<div class="ui-picker-list" role="listbox" id="' + listId + '" aria-label="' + esc(picker.label) + '">' +
         opts.map(function (opt, i) {
             var on = i === select.selectedIndex;
@@ -1261,7 +1262,7 @@ function uiPickerOpen(picker) {
                 (dot !== null ? '<i class="ui-option-dot' + (dot ? " ui-dot-" + esc(dot) : "") + '" aria-hidden="true"></i>' : "") +
                 "<span>" + esc(opt.textContent) + "</span>" + (hint ? '<small class="ui-num">' + esc(hint) + "</small>" : "") + "</button>";
         }).join("") + "</div>" +
-        (withSearch ? '<p class="ui-picker-none hidden" role="status">No matches</p>' : "");
+        (withSearch ? '<p class="ui-picker-none hidden" role="status">' + esc(t("picker.no-matches")) + '</p>' : "");
     picker.host.appendChild(panel);
     picker.panel = panel;
     picker.button.setAttribute("aria-expanded", "true");
@@ -1411,7 +1412,7 @@ function uiMenu(anchor, items, label) {
     var menu = document.createElement("div");
     menu.className = "ui-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", label || "Actions");
+    menu.setAttribute("aria-label", label || t("common.actions"));
     menu.id = "ui-menu-" + (++uiDialogCount);
     var supported = typeof menu.showPopover === "function";
     if (supported) menu.setAttribute("popover", "auto");
@@ -1561,10 +1562,10 @@ function uiSortAria(state, key) {
 }
 
 function uiSortWords(kind, dir) {
-    if (kind === "text") return dir === "asc" ? "A to Z" : "Z to A";
-    if (kind === "date") return dir === "asc" ? "Oldest first" : "Newest first";
-    if (kind === "number") return dir === "asc" ? "Low to high" : "High to low";
-    return dir === "asc" ? "Ascending" : "Descending";
+    if (kind === "text") return dir === "asc" ? t("sort.a-to-z") : t("sort.z-to-a");
+    if (kind === "date") return dir === "asc" ? t("sort.oldest-first") : t("sort.newest-first");
+    if (kind === "number") return dir === "asc" ? t("sort.low-to-high") : t("sort.high-to-low");
+    return dir === "asc" ? t("sort.ascending") : t("sort.descending");
 }
 
 // The Sort button's panel: Sort by and Order, applied at once (TB-28)
@@ -1574,17 +1575,17 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
     var panel = document.createElement("div");
     panel.className = "ui-menu ui-sort-panel";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "Sort " + name);
+    panel.setAttribute("aria-label", t("sort.sort", { name: name }));
     panel.id = "ui-sort-" + (++uiDialogCount);
     var supported = typeof panel.showPopover === "function";
     if (supported) panel.setAttribute("popover", "auto");
     var draw = function () {
         var col = cols.filter(function (c) { return c.key === state.key; })[0];
-        panel.innerHTML = '<fieldset><legend>Sort by</legend>' +
+        panel.innerHTML = '<fieldset><legend>' + esc(t("sort.sort-by")) + '</legend>' +
             cols.map(function (c) {
-                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-by" value="' + esc(c.key) + '"' + (state.key === c.key ? " checked" : "") + "> " + esc(c.label) + "</label>";
+                return '<label><input type="radio" class="ui-check" name="' + panel.id + '-by" value="' + esc(c.key) + '"' + (state.key === c.key ? " checked" : "") + "> " + esc(t(c.label)) + "</label>";
             }).join("") + "</fieldset>" +
-            '<fieldset' + (col ? "" : " disabled") + "><legend>Order</legend>" +
+            '<fieldset' + (col ? "" : " disabled") + "><legend>" + esc(t("sort.order")) + "</legend>" +
             ["asc", "desc"].map(function (d) {
                 return '<label><input type="radio" class="ui-check" name="' + panel.id + '-dir" value="' + d + '"' + (state.dir === d ? " checked" : "") + "> " +
                     esc(uiSortWords(col ? col.kind : "", d)) + "</label>";
@@ -1626,8 +1627,8 @@ function uiSortMenu(anchor, name, cols, state, onChange) {
 // (parseRequestOptionsFromJSON, parseCreationOptionsFromJSON, toJSON()).
 // ===========================================================================
 
-var UI_PASSKEY_INSECURE = "Passkeys need HTTPS (or localhost).";
-var UI_PASSKEY_OLD_BROWSER = "This browser cannot use passkeys here.";
+var UI_PASSKEY_INSECURE = "passkey.passkeys-need-https-or-localhost";
+var UI_PASSKEY_OLD_BROWSER = "passkey.this-browser-cannot-use-passkeys-here";
 var UI_PASSKEY_NAME_MAX = 64;
 
 // Why this page cannot use passkeys: "" when it can, "insecure" outside a secure
@@ -1648,13 +1649,13 @@ function uiPasskeyBlocked(win, create) {
 function uiPasskeyErrorText(err, create) {
     var name = err && err.name;
     if (name === "NotAllowedError" || name === "AbortError") return "";
-    if (name === "InvalidStateError" && create) return "This device already has a passkey here. You can already use it to sign in.";
-    if (name === "SecurityError") return "The browser refused a passkey for this address. Open the service at its passkey address and try again.";
+    if (name === "InvalidStateError" && create) return t("passkey.this-device-already-has-a-passkey");
+    if (name === "SecurityError") return t("passkey.the-browser-refused-a-passkey-for");
     if (name === "NotSupportedError") {
-        return create ? "This device cannot create this kind of passkey. Try another device or password manager."
-            : "This device cannot use this kind of passkey. Try another device.";
+        return create ? t("passkey.this-device-cannot-create-this-kind")
+            : t("passkey.this-device-cannot-use-this-kind");
     }
-    return create ? "The passkey could not be created. Try again." : "The passkey could not be used. Try again.";
+    return create ? t("passkey.the-passkey-could-not-be-created") : t("passkey.the-passkey-could-not-be-used");
 }
 
 // A passkey name as the server keeps it: runs of spaces become one, ends trimmed
@@ -1665,8 +1666,8 @@ function uiPasskeyName(text) {
 // What is wrong with a name, or ""
 function uiPasskeyNameProblem(text) {
     var name = uiPasskeyName(text);
-    if (!name) return "Give the passkey a name.";
-    if (Array.from(name).length > UI_PASSKEY_NAME_MAX) return "The name can have at most " + UI_PASSKEY_NAME_MAX + " characters.";
+    if (!name) return t("passkey.give-the-passkey-a-name");
+    if (Array.from(name).length > UI_PASSKEY_NAME_MAX) return t("passkey.the-name-can-have-at-most", { max: UI_PASSKEY_NAME_MAX });
     return "";
 }
 
@@ -1674,17 +1675,17 @@ function uiPasskeyNameProblem(text) {
 function uiPasskeyDefaultName(nav) {
     var platform = String((nav && nav.userAgentData && nav.userAgentData.platform) || "");
     var ua = String((nav && nav.userAgent) || "");
-    var hint = platform === "macOS" ? "Mac" : platform;
+    var hint = platform === "macOS" ? t("passkey.mac") : platform;
     if (!hint) {
-        if (/iPhone/.test(ua)) hint = "iPhone";
-        else if (/iPad/.test(ua)) hint = "iPad";
-        else if (/Android/.test(ua)) hint = "Android";
-        else if (/CrOS/.test(ua)) hint = "ChromeOS";
-        else if (/Macintosh|Mac OS X/.test(ua)) hint = "Mac";
-        else if (/Windows/.test(ua)) hint = "Windows";
-        else if (/Linux/.test(ua)) hint = "Linux";
+        if (/iPhone/.test(ua)) hint = t("passkey.iphone");
+        else if (/iPad/.test(ua)) hint = t("passkey.ipad");
+        else if (/Android/.test(ua)) hint = t("passkey.android");
+        else if (/CrOS/.test(ua)) hint = t("passkey.chromeos");
+        else if (/Macintosh|Mac OS X/.test(ua)) hint = t("passkey.mac");
+        else if (/Windows/.test(ua)) hint = t("passkey.windows");
+        else if (/Linux/.test(ua)) hint = t("passkey.linux");
     }
-    return hint ? uiPasskeyName("Passkey on " + hint) : "Passkey";
+    return hint ? uiPasskeyName(t("passkey.passkey-on", { device: hint })) : t("passkey.passkey");
 }
 
 // ===========================================================================
@@ -1693,31 +1694,31 @@ function uiPasskeyDefaultName(nav) {
 // ===========================================================================
 
 var UI_DB_SSLMODES = [
-    ["prefer", "prefer: TLS if offered (default)"],
-    ["disable", "disable: no TLS"],
-    ["require", "require: always TLS"],
-    ["verify-full", "verify-full: TLS and certificate check"],
+    ["prefer", "db.prefer-tls-if-offered-default"],
+    ["disable", "db.disable-no-tls"],
+    ["require", "db.require-always-tls"],
+    ["verify-full", "db.verify-full-tls-and-certificate-check"],
 ];
 var UI_DB_SSL_HINT = {
-    prefer: "Encrypted when the server supports TLS, plain otherwise. The server's identity is not checked. Fits a database on the same private network.",
-    disable: "Not encrypted. Use it only on a private network you trust, such as the Docker network of this service.",
-    require: "Always encrypted, but the server's identity is not checked.",
-    "verify-full": "Always encrypted, and the server must prove its name with a certificate your system trusts, or the CA certificate below.",
+    prefer: "db.encrypted-when-the-server-supports-tls",
+    disable: "db.not-encrypted-use-it-only-on",
+    require: "db.always-encrypted-but-the-server-s",
+    "verify-full": "db.always-encrypted-and-the-server-must",
 };
 // Short texts for the server's fixed codes, when it sends no text of its own
 var UI_DB_CODES = {
-    unreachable: "The database server cannot be reached. Check the host and port, and that the server runs.",
-    timeout: "The database server did not answer in time.",
-    tls_failed: "The TLS connection failed. If the server does not use TLS, choose prefer or disable.",
-    auth_failed: "The server refused the user name or password.",
-    database_missing: "This database does not exist on the server.",
-    permission_denied: "The database user lacks a permission the service needs.",
-    read_only: "This server is a standby, or the user's sessions are read-only. Connect to the primary server with a user that can write.",
-    other: "The connection failed.",
+    unreachable: "db.the-database-server-cannot-be-reached",
+    timeout: "db.the-database-server-did-not-answer",
+    tls_failed: "db.the-tls-connection-failed-if-the",
+    auth_failed: "db.the-server-refused-the-user-name",
+    database_missing: "db.this-database-does-not-exist-on",
+    permission_denied: "db.the-database-user-lacks-a-permission",
+    read_only: "db.this-server-is-a-standby-or",
+    other: "db.the-connection-failed",
 };
 
 function uiDbCodeText(code, detail) {
-    return detail || UI_DB_CODES[code] || UI_DB_CODES.other;
+    return detail || t(UI_DB_CODES[code] || UI_DB_CODES.other);
 }
 
 // p: id prefix; v: { host, port, database, user, sslmode, caSaved }; keepPassword: a saved password exists
@@ -1725,34 +1726,34 @@ function uiDbFieldsHtml(p, v, keepPassword) {
     v = v || {};
     var mode = v.sslmode || "prefer";
     var opts = UI_DB_SSLMODES.map(function (m) {
-        return '<option value="' + m[0] + '"' + (m[0] === mode ? " selected" : "") + ">" + esc(m[1]) + "</option>";
+        return '<option value="' + m[0] + '"' + (m[0] === mode ? " selected" : "") + ">" + esc(t(m[1])) + "</option>";
     }).join("");
     var input = function (id, label, value, extra) {
-        return '<div class="ui-field"><label class="ui-label" for="' + p + id + '">' + label + "</label>" +
+        return '<div class="ui-field"><label class="ui-label" for="' + p + id + '">' + esc(label) + "</label>" +
             '<input class="ui-input" id="' + p + id + '" value="' + esc(value == null ? "" : String(value)) + '" autocomplete="off" spellcheck="false" autocapitalize="off" dir="ltr"' +
             (extra || "") + " /></div>";
     };
-    return '<div class="ui-form-row">' + input("host", "Host", v.host, ' placeholder="postgres"') +
-        input("port", "Port", v.port || 5432, ' inputmode="numeric" maxlength="5"') + "</div>" +
-        '<div class="ui-form-row">' + input("database", "Database", v.database, ' placeholder="authdb"') +
-        input("user", "User", v.user, ' placeholder="auth"') + "</div>" +
-        '<div class="ui-field"><label class="ui-label" for="' + p + 'password">Password</label>' +
+    return '<div class="ui-form-row">' + input("host", t("db.host"), v.host, ' placeholder="' + esc(t("db.postgres")) + '"') +
+        input("port", t("db.port"), v.port || 5432, ' inputmode="numeric" maxlength="5"') + "</div>" +
+        '<div class="ui-form-row">' + input("database", t("db.database"), v.database, ' placeholder="' + esc(t("db.authdb")) + '"') +
+        input("user", t("db.user"), v.user, ' placeholder="' + esc(t("db.auth")) + '"') + "</div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'password">' + esc(t("db.password")) + '</label>' +
         '<input class="ui-input" type="password" id="' + p + 'password" autocomplete="new-password" dir="ltr"' +
-        (keepPassword ? ' placeholder="Empty keeps the saved password"' : "") + " /></div>" +
-        '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">TLS</label>' +
+        (keepPassword ? ' placeholder="' + esc(t("db.empty-keeps-the-saved-password")) + '"' : "") + " /></div>" +
+        '<div class="ui-field"><label class="ui-label" for="' + p + 'sslmode">' + esc(t("db.tls")) + '</label>' +
         '<select class="ui-select" id="' + p + 'sslmode" aria-describedby="' + p + 'ssl-hint">' + opts + "</select>" +
-        '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] || "") + "</span></div>" +
-        '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">CA certificate (PEM, optional)</label>' +
-        '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>' +
-        '<span class="ui-hint">Only when the server\'s certificate comes from your own certificate authority.' +
-        (v.caSaved ? " Leave empty to keep the saved certificate." : "") + "</span></div>";
+        '<span class="ui-hint" id="' + p + 'ssl-hint">' + esc(UI_DB_SSL_HINT[mode] ? t(UI_DB_SSL_HINT[mode]) : "") + "</span></div>" +
+        '<div class="ui-field' + (mode === "verify-full" ? "" : " hidden") + '" id="' + p + 'ca-field"><label class="ui-label" for="' + p + 'ca">' + esc(t("db.ca-certificate-pem-optional")) + '</label>' +
+        '<textarea class="ui-textarea" id="' + p + 'ca" spellcheck="false" dir="ltr" placeholder="' + esc(t("db.begin-certificate")) + '"></textarea>' +
+        '<span class="ui-hint">' + esc(t("db.only-when-the-server-s-certificate")) +
+        (v.caSaved ? esc(t("db.leave-empty-to-keep-the-saved")) : "") + "</span></div>";
 }
 
 // The TLS hint and the CA field follow the chosen mode
 function uiDbFieldsSync(p) {
     var sel = document.getElementById(p + "sslmode");
     if (!sel) return;
-    document.getElementById(p + "ssl-hint").textContent = UI_DB_SSL_HINT[sel.value] || "";
+    document.getElementById(p + "ssl-hint").textContent = UI_DB_SSL_HINT[sel.value] ? t(UI_DB_SSL_HINT[sel.value]) : "";
     document.getElementById(p + "ca-field").classList.toggle("hidden", sel.value !== "verify-full");
 }
 
@@ -1794,39 +1795,38 @@ function uiDbFieldError(p, field) {
 // What a check found, as a note: tone "" | " is-warn" | " is-fail", title, text
 function uiDbCheckNote(r, where) {
     if (!r) return null;
-    if (!r.ok) return { tone: " is-fail", title: "The connection failed", text: uiDbCodeText(r.code, r.detail) };
+    if (!r.ok) return { tone: " is-fail", title: t("db.the-connection-failed-2"), text: uiDbCodeText(r.code, r.detail) };
     if (r.problems && r.problems.length) {
-        return { tone: " is-fail", title: "The database user cannot be used", text: r.problems.join(" ") };
+        return { tone: " is-fail", title: t("db.the-database-user-cannot-be-used"), text: r.problems.join(" ") };
     }
-    if (r.state === "new") return { tone: "", title: "A new database file", text: "The service creates data/auth.db in its data directory." };
-    if (r.state === "empty") return { tone: "", title: "The database is empty", text: "The service creates its tables in it." };
+    if (r.state === "new") return { tone: "", title: t("db.a-new-database-file"), text: t("db.the-service-creates-data-auth-db") };
+    if (r.state === "empty") return { tone: "", title: t("db.the-database-is-empty"), text: t("db.the-service-creates-its-tables-in") };
     if (r.state === "foreign") {
-        return { tone: " is-fail", title: "This database holds other data", text: "It has tables that are not this service's" +
-            (r.others && r.others.length ? " (" + r.others.join(", ") + ")" : "") + ". Use an empty database." };
+        return { tone: " is-fail", title: t("db.this-database-holds-other-data"), text: t("db.it-has-tables-that-are-not") +
+            (r.others && r.others.length ? " (" + r.others.join(", ") + ")" : "") + t("db.use-an-empty-database") };
     }
     if (r.state === "incomplete") {
-        return { tone: " is-fail", title: "Tables are missing", text: "This database holds this service's installation, but without " +
-            (r.others || []).join(", ") + ". Restore the whole database." };
+        return { tone: " is-fail", title: t("db.tables-are-missing"), text: t("db.this-database-holds-this-service-s", { tables: (r.others || []).join(", ") }) };
     }
     if (r.state === "older") {
-        return { tone: " is-warn", title: "This service's data from an older version or a backup",
-            text: "The service can adopt it: it adds the tables of this version and keeps the data." +
-                (where === "setup" ? "" : " Changes made after it was taken are not in it.") };
+        return { tone: " is-warn", title: t("db.this-service-s-data-from-an"),
+            text: t("db.the-service-can-adopt-it-it") +
+                (where === "setup" ? "" : t("db.changes-made-after-it-was-taken")) };
     }
-    if (r.pending) return { tone: " is-fail", title: "An unfinished copy", text: "This database holds a copy that a move did not finish. It is not used." };
+    if (r.pending) return { tone: " is-fail", title: t("db.an-unfinished-copy"), text: t("db.this-database-holds-a-copy-that") };
     if (where === "settings") {
-        if (r.identity === "same") return { tone: "", title: "The same database", text: "The new connection reaches the database the service uses now." };
+        if (r.identity === "same") return { tone: "", title: t("db.the-same-database"), text: t("db.the-new-connection-reaches-the-database") };
         if (r.identity === "different_copy") {
-            return { tone: " is-warn", title: "A different copy of this database", text: "For example a restored backup. Changes made after the copy was taken will be lost." };
+            return { tone: " is-warn", title: t("db.a-different-copy-of-this-database"), text: t("db.for-example-a-restored-backup-changes") };
         }
-        return { tone: " is-fail", title: "Another installation", text: "This database holds another installation of this service." };
+        return { tone: " is-fail", title: t("db.another-installation"), text: t("db.this-database-holds-another-installation-of") };
     }
     if (where === "setup") {
-        return { tone: "", title: "An existing installation of this service", text: r.hasAdmin
-            ? "The service uses it as it is. You sign in with its admin account; no new admin is created."
-            : "The service uses it as it is, and setup continues with the first admin account." };
+        return { tone: "", title: t("db.an-existing-installation-of-this-service"), text: r.hasAdmin
+            ? t("db.the-service-uses-it-as-it")
+            : t("db.the-service-uses-it-as-it-2") };
     }
-    return { tone: "", title: "An installation of this service", text: "The service can use this database." };
+    return { tone: "", title: t("db.an-installation-of-this-service"), text: t("db.the-service-can-use-this-database") };
 }
 
 function uiDbNoteHtml(n) {

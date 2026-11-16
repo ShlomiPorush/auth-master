@@ -3,9 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Sign In · Auth Service</title>
-    <meta name="description" content="Sign in to the Auth Service administration panel" />
+    <title data-t="login.sign-in-auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:login.sign-in-to-the-auth-service" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
@@ -15,29 +16,29 @@
         <div class="ui-login-head">
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
-            <h1 class="ui-h1">Sign In</h1>
-            <p>Auth Service Administration</p>
+            <h1 class="ui-h1" data-t="login.sign-in"></h1>
+            <p data-t="login.auth-service-administration"></p>
           </div>
         </div>
         <form id="f" class="ui-form" novalidate>
           <div class="ui-field">
-            <label class="ui-label" for="username">Username</label>
-            <input class="ui-input" id="username" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="admin" data-inventory="login.username" />
+            <label class="ui-label" for="username" data-t="login.username"></label>
+            <input class="ui-input" id="username" name="username" required autofocus autocomplete="username" autocapitalize="none" spellcheck="false" data-inventory="login.username" data-t-attr="placeholder:login.admin" />
           </div>
           <div class="ui-field">
-            <label class="ui-label" for="password">Password</label>
+            <label class="ui-label" for="password" data-t="login.password"></label>
             <div class="ui-pass">
               <input class="ui-input" type="password" id="password" name="password" required autocomplete="current-password" aria-describedby="password-caps" data-inventory="login.password" />
-              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" aria-label="Show password" title="Show password"></button>
+              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" data-t-attr="aria-label:auth.show-password;title:auth.show-password"></button>
             </div>
-            <p class="ui-caps hidden" id="password-caps" data-caps="password">Caps Lock is on</p>
+            <p class="ui-caps hidden" id="password-caps" data-caps="password" data-t="login.caps-lock-is-on"></p>
           </div>
           <p class="ui-error hidden" id="err" role="alert"></p>
-          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Continue</button>
+          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block" data-t="login.continue"></button>
         </form>
         <div class="ui-form hidden" id="pk-login">
-          <p class="ui-hint">Have a passkey? Sign in with your fingerprint, face or screen lock instead.</p>
-          <button type="button" class="ui-btn ui-btn-block" id="pk-signin" data-inventory="login.passkey">Sign in with a passkey</button>
+          <p class="ui-hint" data-t="login.have-a-passkey-sign-in-with"></p>
+          <button type="button" class="ui-btn ui-btn-block" id="pk-signin" data-inventory="login.passkey" data-t="login.sign-in-with-a-passkey"></button>
         </div>
         <p class="ui-hint hidden" id="pk-note" role="note"></p>
       </div>

@@ -15,6 +15,7 @@ the app and refuse placeholders; Redis is faked. Requires pytest and httpx.
 """
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -468,7 +469,13 @@ BASELINE = json.loads((Path(__file__).parent / "ui_inventory_baseline.json").rea
 
 
 def inventory_problems(sources: dict[str, str]) -> list[str]:
-    corpus = "\n".join(text for name, text in sources.items() if name.endswith((".html", ".js")))
+    """Code snippets must appear in the pages' code; words live in the catalog
+    (js/text.js), so a snippet of words must be the value of a catalog key that
+    the code still uses at a call site (t, tn, tHtml, data-t...), not merely sit
+    in the catalog."""
+    corpus = "\n".join(text for name, text in sources.items() if name.endswith((".html", ".js")) and name != TEXT_JS)
+    catalog = catalog_entries(sources[TEXT_JS])[0]
+    used = catalog_uses(sources, set(catalog))[0]
     problems = []
     keys = set()
     for item in BASELINE["items"]:
@@ -482,8 +489,20 @@ def inventory_problems(sources: dict[str, str]) -> list[str]:
             problems.append(f"{key}: needs either 'expect' or 'dropped' with a reason")
             continue
         for snippet in item.get("expect", []):
-            if snippet not in corpus:
+            if snippet in corpus:
+                continue
+            words = html.unescape(snippet).replace('\\"', '"')
+            # The old code form of a word: label: "Name", "Active", >Create<
+            quoted = re.fullmatch(r'(?:\w+:\s*)?"(.*)"|>(.*)<', words)
+            if quoted:
+                words = quoted.group(1) if quoted.group(1) is not None else quoted.group(2)
+            values = {k: v for k, v in catalog.items() for form in catalog_forms(v) if words in form}
+            exact = [k for k, v in values.items() if words in catalog_forms(v) or any(words.strip() == f.strip() for f in catalog_forms(v))]
+            wired = [k for k in (exact or list(values)) if k in used]
+            if not values:
                 problems.append(f"{key}: the new UI has no {snippet!r} ({item.get('old', '')})")
+            elif not wired:
+                problems.append(f"{key}: {snippet!r} is in the catalog ({', '.join(sorted(exact or values))}) but no code uses it ({item.get('old', '')})")
     return problems
 
 
@@ -492,12 +511,478 @@ def test_inventory_is_kept():
 
 
 def test_inventory_guard_catches():
+    # The sentence stays in the catalog, but its call site is gone
     copy = dict(SOURCES)
-    copy["js/dashboard.js"] = copy["js/dashboard.js"].replace("Delete this token permanently?", "Remove it?")
+    assert 't("tokens.delete-this-token-permanently")' in copy["js/dashboard.js"]
+    copy["js/dashboard.js"] = copy["js/dashboard.js"].replace('t("tokens.delete-this-token-permanently")', '""')
+    assert any("tokens.row.delete.confirm" in p for p in inventory_problems(copy))
+    # A page's words lose their element
+    copy = dict(SOURCES)
+    copy["index.html"] = copy["index.html"].replace('data-t="tokens.new-token"', "")
+    copy["js/dashboard.js"] = copy["js/dashboard.js"].replace('t("tokens.new-token")', '""')
+    assert any("tokens.new" in p for p in inventory_problems(copy))
+    # The words are gone from the catalog too
+    copy = dict(SOURCES)
+    copy[TEXT_JS] = copy[TEXT_JS].replace("Delete this token permanently?", "Remove it?")
     assert any("tokens.row.delete.confirm" in p for p in inventory_problems(copy))
     copy = dict(SOURCES)
     copy["index.html"] = copy["index.html"].replace('data-inventory="tokens.search"', "")
     assert any("tokens.search" in p for p in inventory_problems(copy))
+
+
+# ---------------------------------------------------------------------------
+# Words: every word the portal shows lives in the catalog (js/text.js)
+# ---------------------------------------------------------------------------
+
+TEXT_JS = "js/text.js"
+HTML_TEXT_ATTRS = ("aria-label", "title", "placeholder", "alt")
+
+
+def js_strings(src: str) -> list[tuple[int, str]]:
+    """(position, raw text) of every string literal, and of every static part of
+    a template literal, outside comments and regex literals."""
+    code, masked = js_lex(src)
+    out: list[tuple[int, str]] = []
+    i, n = 0, len(src)
+    while i < n:
+        c = code[i]
+        if c in "'\"" and masked[i] == c:
+            j = i + 1
+            while j < n and src[j] != c and src[j] != "\n":
+                j += 2 if src[j] == "\\" else 1
+            out.append((i, src[i + 1:j]))
+            i = j + 1
+            continue
+        if c == "`" and masked[i] == c:
+            j = i + 1
+            start = j
+            while j < n and src[j] != "`":
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src.startswith("${", j):
+                    out.append((start, src[start:j]))
+                    depth = 0
+                    while j < n:
+                        if src[j] == "{":
+                            depth += 1
+                        elif src[j] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        j += 1
+                    start = j + 1
+                j += 1
+            out.append((start, src[start:j]))
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def js_unescape(raw: str) -> str:
+    return re.sub(r"\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|.)", lambda m: chr(int(m.group(1)[1:], 16)) if m.group(1)[0] in "ux" and len(m.group(1)) > 1
+                  else {"n": "\n", "t": "\t"}.get(m.group(1), m.group(1)), raw)
+
+
+_WORD = r"[A-Za-z][A-Za-z']*"
+# Two words in a row: "Save failed", "API keys", "Verify & save"; not class lists,
+# selectors, paths or attribute names (ui-btn ui-btn-sm, a[href], data-x y=)
+_TWO_WORDS = re.compile(rf"(?<![\w.#\[\-:/$@=%]){_WORD}[,.:;!?)]?(?:\s+&)?\s+\(?{_WORD}(?![\w\-(=/\[])")
+# One capitalised word, as visible text: "Delete", "Name:", "Expired"
+_CAPITALISED = re.compile(r"^\s*[A-Z][a-z]+[.!?:…\"']*\s*$")
+# A word joined to other text by a space: " rows", "Exp: ", "the "
+_EDGE_WORD = re.compile(r"^\s+[A-Za-z]+|[A-Za-z]{2,}[:,.]?\s+$")
+
+
+def looks_like_prose(text: str) -> bool:
+    if _TWO_WORDS.search(text) or _CAPITALISED.match(text):
+        return True
+    return bool(_EDGE_WORD.search(text)) and not re.search(r"\w-\w", text)
+
+
+def markup_parts(value: str) -> tuple[list[str], list[str]] | None:
+    """For a string that holds a piece of HTML: (visible text between tags,
+    words inside attributes). None when the string is not markup. A piece may
+    start inside a tag or an attribute value that another string opened."""
+    if not re.search(r"<[A-Za-z/]|=\"|^\"|\">", value):
+        return None
+    texts = []
+    # Text: after each '>' up to the next '<'; before the first tag when no tag is open
+    for m in re.finditer(r">([^<>]*)", value):
+        texts.append(m.group(1))
+    lt, gt = value.find("<"), value.find(">")
+    if lt > 0 and (gt == -1 or lt < gt) and '"' not in value[:lt] and "=" not in value[:lt]:
+        texts.append(value[:lt])
+    words = [m.group(2) for m in re.finditer(r"\b(aria-label|title|placeholder|alt)=\"([^\"]*)", value)]
+    # The end of an attribute value another string opened: words only when they read as prose
+    first_quote = value.find('"')
+    if first_quote > 0 and (lt == -1 or first_quote < lt) and (gt == -1 or first_quote < gt):
+        tail = value[:first_quote]
+        if not tail.rstrip().endswith("=") and looks_like_prose(tail):
+            words.append(tail)
+    return texts, words
+
+
+# (file, exact string) -> why it is not words the portal shows. Keep it short:
+# the heuristic above should tell code from words.
+JS_TEXT_ALLOWED: dict[tuple[str, str], str] = {
+    ("js/ui.js", "(hover: none) and (pointer: coarse)"): "a media query",
+    ("js/ui.js", "input, select, textarea"): "a CSS selector list",
+    ("js/ui.js", "button, a[href], input, select, textarea, [tabindex]"): "a CSS selector list",
+    ("js/ui.js", "[autofocus], input:not([type=hidden]):not([type=checkbox]), select, textarea"): "a CSS selector list",
+    ("js/ui.js", "button, a[href], input, [tabindex]"): "a CSS selector list",
+    ("js/dashboard.js", "button, a, input, select, label"): "a CSS selector list",
+    ("js/ui.js", "uiDialog: size must be sm, md or wide"): "an Error thrown at a programming mistake, never shown",
+    ("js/ui.js", "uiDialog: a dialog needs a close function for its X"): "an Error thrown at a programming mistake, never shown",
+    ("js/auth-pages.js", "Bearer "): "the HTTP Authorization scheme",
+}
+# Code words that look like a capitalised word or a joined word
+JS_CODE_WORDS = {
+    "Escape", "Enter", "Tab", "Home", "End",  # KeyboardEvent.key names
+    " checked", " selected", " disabled", " hidden", " readonly", " required",  # boolean attributes added to a tag
+}
+
+
+def js_text_problems(sources: dict[str, str]) -> list[str]:
+    problems = []
+    seen_allowed = set()
+    for name, src in sources.items():
+        if not name.endswith(".js") or name == TEXT_JS:
+            continue
+        for pos, raw in js_strings(src):
+            value = js_unescape(raw)
+            if not re.search(r"[A-Za-z]", value):
+                continue
+            if (name, value) in JS_TEXT_ALLOWED:
+                seen_allowed.add((name, value))
+                continue
+            if value in JS_CODE_WORDS:
+                continue
+            parts = markup_parts(value)
+            if parts is None:
+                bad = looks_like_prose(value)
+            else:
+                texts, attrs = parts
+                bad = any(re.search(r"[A-Za-z]{2}", t) for t in texts) or any(re.search(r"[A-Za-z]", a) for a in attrs)
+            if bad:
+                line = src.count("\n", 0, pos) + 1
+                problems.append(f"{name}:{line}: words outside the catalog: {value[:80]!r}")
+    for key in JS_TEXT_ALLOWED:
+        if key not in seen_allowed:
+            problems.append(f"stale JS_TEXT_ALLOWED entry: {key}")
+    return problems
+
+
+class _PageText(HTMLParser):
+    """Text nodes and user-facing attributes of a page that are not in the catalog."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, dict]] = []
+        self.problems: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if self.stack and self.stack[-1][1].get("data-t") is not None:
+            self.problems.append(f"<{tag}> inside an element with data-t={self.stack[-1][1]['data-t']!r}: data-t sets the whole content")
+        for name in HTML_TEXT_ATTRS:
+            if a.get(name):
+                self.problems.append(f"<{tag} {name}={a[name]!r}>: the attribute is not from the catalog (use data-t-attr)")
+        if tag == "meta" and (a.get("name") or "").lower() == "description" and a.get("content"):
+            self.problems.append(f"<meta name=description content={a['content']!r}>: use data-t-attr=\"content:key\"")
+        if tag == "title" and not a.get("data-t"):
+            self.problems.append("<title> without data-t")
+        if a.get("data-t-slot") is not None and not (self.stack and self.stack[-1][1].get("data-t-tpl")):
+            self.problems.append(f"<{tag} data-t-slot> outside a data-t-tpl element")
+        if tag not in ("meta", "link", "img", "input", "br", "hr", "path", "circle", "source"):
+            self.stack.append((tag, a))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if self.stack and self.stack[-1][0] == tag:
+            self.stack.pop()
+
+    def handle_endtag(self, tag):
+        while self.stack:
+            if self.stack.pop()[0] == tag:
+                break
+
+    def handle_data(self, data):
+        if not data.strip() or (self.stack and self.stack[-1][0] in ("style", "script")):
+            return
+        where = self.stack[-1][0] if self.stack else "#root"
+        self.problems.append(f"<{where}>: text {data.strip()[:60]!r} is not from the catalog (use data-t)")
+
+
+def html_text_problems(sources: dict[str, str]) -> list[str]:
+    problems = []
+    for name, src in sources.items():
+        if not name.endswith(".html"):
+            continue
+        parser = _PageText()
+        parser.feed(src)
+        problems += [f"{name}: {p}" for p in parser.problems]
+        if f'src="/js/{TEXT_JS.split("/")[1]}"' not in src:
+            problems.append(f"{name}: does not load {TEXT_JS}")
+        else:
+            first = re.search(r"<script\b[^>]*\bsrc=\"([^\"]+)\"", src)
+            if not first or not first.group(1).endswith("/" + TEXT_JS):
+                problems.append(f"{name}: {TEXT_JS} is not the first script")
+    return problems
+
+
+def catalog_forms(value) -> list[str]:
+    return [value] if isinstance(value, str) else [value.get("one", ""), value.get("other", "")]
+
+
+def catalog_entries(text_js: str) -> tuple[dict, list[str]]:
+    """UI_TEXT of js/text.js as a dict, and the problems of its shape."""
+    m = re.search(r"\bvar\s+UI_TEXT\s*=\s*(\{.*?\n\});", text_js, re.S)
+    if not m:
+        return {}, ["js/text.js has no var UI_TEXT = {...};"]
+    problems = []
+
+    def pairs(items):
+        out = {}
+        for k, v in items:
+            if k in out:
+                problems.append(f"UI_TEXT repeats the key {k!r}")
+            out[k] = v
+        return out
+
+    try:
+        catalog = json.loads(re.sub(r",(\s*[}\]])", r"\1", m.group(1)), object_pairs_hook=pairs)
+    except ValueError as e:
+        return {}, [f"UI_TEXT is not plain data: {e}"]
+    for k, v in catalog.items():
+        if not re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+", k):
+            problems.append(f"UI_TEXT key {k!r} is not a dotted lowercase key")
+        if isinstance(v, dict):
+            if set(v) != {"one", "other"} or not all(isinstance(x, str) for x in v.values()):
+                problems.append(f"UI_TEXT {k!r}: a count value is {{one, other}}")
+        elif not isinstance(v, str):
+            problems.append(f"UI_TEXT {k!r}: a value is a string or {{one, other}}")
+    return catalog, problems
+
+
+# Keys the code builds from a value: prefix -> why, and the code that builds it
+DYNAMIC_KEYS: dict[str, str] = {
+    "tokens.flag.": "the permission checkboxes of the token dialog name each of TOKEN_FLAGS (read, write, delete)",
+    "tokens.level.": "the grant tags of the token list name each flag of a grant level",
+}
+
+
+def catalog_uses(sources: dict[str, str], keys: set[str]) -> tuple[set[str], list[str]]:
+    """Keys used by code and pages, and calls of keys that do not exist."""
+    used: set[str] = set()
+    problems = []
+    for name, src in sources.items():
+        if name == TEXT_JS:
+            continue
+        if name.endswith(".js"):
+            code = js_lex(src)[0]
+            for m in re.finditer(r"\b(t|tn|tHtml)\(\s*([\"'])([^\"'\n]*)\2\s*([+),])", code):
+                key = m.group(3)
+                if m.group(4) == "+":
+                    if key not in DYNAMIC_KEYS:
+                        problems.append(f"{name}: {m.group(1)}({key!r} + ...) builds a key with a prefix not in DYNAMIC_KEYS")
+                    used.add(key)
+                    continue
+                used.add(key)
+                if key not in keys:
+                    problems.append(f"{name}: {m.group(1)}({key!r}) names a key that UI_TEXT does not have")
+            # Label tables hold keys; their readers pass them to t()
+            for _pos, raw in js_strings(src):
+                if raw in keys:
+                    used.add(raw)
+        elif name.endswith(".html"):
+            for m in re.finditer(r"\bdata-t(?:-tpl)?=\"([^\"]*)\"", src):
+                used.add(m.group(1))
+                if m.group(1) not in keys:
+                    problems.append(f"{name}: data-t {m.group(1)!r} is not in UI_TEXT")
+            for m in re.finditer(r"\bdata-t-attr=\"([^\"]*)\"", src):
+                for pair in m.group(1).split(";"):
+                    attr, _sep, key = pair.partition(":")
+                    key = key.strip()
+                    used.add(key)
+                    if key not in keys or attr.strip() not in HTML_TEXT_ATTRS + ("content",):
+                        problems.append(f"{name}: data-t-attr {pair!r} names no key or a wrong attribute")
+    return used, problems
+
+
+def catalog_problems(sources: dict[str, str]) -> list[str]:
+    catalog, problems = catalog_entries(sources[TEXT_JS])
+    keys = set(catalog)
+    used, use_problems = catalog_uses(sources, keys)
+    problems += use_problems
+    for prefix, reason in DYNAMIC_KEYS.items():
+        if prefix not in used:
+            problems.append(f"DYNAMIC_KEYS lists {prefix!r}, which no code builds")
+        if not reason:
+            problems.append(f"DYNAMIC_KEYS {prefix!r} has no reason")
+        used |= {k for k in keys if k.startswith(prefix)}
+    for key in sorted(keys - used):
+        problems.append(f"UI_TEXT {key!r} is used nowhere")
+    return problems
+
+
+# Where words reach the user. Each must take a t()/tn()/tHtml() result, a
+# variable or a value helper, never a literal with letters.
+_LITERAL = r"([\"'`])(?=[^\"'`\n]*[A-Za-z])"
+SINK_PATTERNS = {
+    "text property": rf"\.(?:textContent|innerText)\s*=\s*{_LITERAL}",
+    "document.title": rf"\bdocument\.title\s*=\s*{_LITERAL}",
+    "attribute": rf"\.setAttribute\(\s*[\"'](?:aria-label|title|placeholder|alt)[\"']\s*,\s*{_LITERAL}",
+    "builder text": rf"\b(?:showToast|authShowError|dashLoading|dashFailed|dashEmpty|dashTag|dashMenuButton|uiPasskeyName)\(\s*{_LITERAL}",
+    "builder text (second argument)": rf"\b(?:authSetError|authFieldError|apiError|dashPanelFail|dashSetAlert|dashLimitAlert)\([^,()]*,\s*{_LITERAL}",
+    "builder text (third argument)": rf"\b(?:authBusy|dashSortButtonSync)\([^,()]*,[^,()]*,\s*{_LITERAL}",
+    "sort menu name": rf"\buiSortMenu\([^,()]*,\s*{_LITERAL}",
+}
+# Object properties that builders show (uiConfirm, uiDialog, uiMenu, uiPicker...)
+SINK_PROPERTIES = ("title", "message", "confirmText", "cancelText", "label", "reason", "hint", "text", "sub", "loadingText", "failedTitle",
+                   "emptyText", "failedText", "pkText", "submitText")
+
+
+def sink_problems(sources: dict[str, str]) -> list[str]:
+    keys = set(catalog_entries(sources[TEXT_JS])[0])
+    problems = []
+    for name, src in sources.items():
+        if not name.endswith(".js") or name == TEXT_JS:
+            continue
+        code = js_lex(src)[0]
+        for kind, pattern in SINK_PATTERNS.items():
+            for m in re.finditer(pattern, code):
+                line = code.count("\n", 0, m.start()) + 1
+                problems.append(f"{name}:{line}: {kind} gets a literal: {code[m.start():m.start() + 70]!r}")
+        for m in re.finditer(rf"[{{,]\s*({'|'.join(SINK_PROPERTIES)})\s*:\s*([\"'`])((?:\\.|(?!\2).)*)\2", code):
+            value = js_unescape(m.group(3))
+            # a label table holds a catalog key, and its reader passes it to t()
+            if re.search(r"[A-Za-z]", value) and value not in keys:
+                line = code.count("\n", 0, m.start()) + 1
+                problems.append(f"{name}:{line}: {m.group(1)}: {value[:60]!r} is a literal, not a catalog key or t() result")
+    return problems
+
+
+def test_pages_take_their_words_from_the_catalog():
+    assert html_text_problems(SOURCES) == []
+
+
+def test_scripts_take_their_words_from_the_catalog():
+    assert js_text_problems(SOURCES) == []
+
+
+def test_every_place_that_shows_words_takes_catalog_text():
+    assert sink_problems(SOURCES) == []
+
+
+def test_catalog_keys_exist_are_used_and_unique():
+    assert catalog_problems(SOURCES) == []
+
+
+def test_js_strings_reads_literals_and_template_parts():
+    found = [js_unescape(raw) for _p, raw in js_strings("var a = 'x\\'y'; // 'no'\nvar b = `p ${q + 1} s`; var r = /'re'/;")]
+    assert found == ["x'y", "p ", " s"]
+
+
+HTML_TEXT_BYPASSES = [
+    ("index.html", "<p>Hello there</p>"),
+    ("login.html", '<button type="button" aria-label="Close"></button>'),
+    ("login.html", '<input placeholder="Your name" />'),
+    ("index.html", '<img src="/images/favicon.svg" alt="Logo" />'),
+    ("index.html", '<span title="More">x</span>'),
+    ("setup.html", '<b data-t="setup.continue">Continue</b>'),
+    ("setup.html", '<p data-t="setup.continue"><span></span></p>'),
+    ("login-mfa.html", '<meta name="description" content="Sign in" />'),
+]
+
+
+@pytest.mark.parametrize("name,extra", HTML_TEXT_BYPASSES)
+def test_page_word_guard_catches(name, extra):
+    assert html_text_problems(_with(name, extra)), f"not caught: {extra}"
+
+
+def test_page_word_guard_catches_a_title_and_a_late_catalog():
+    copy = dict(SOURCES)
+    copy["login.html"] = re.sub(r"<title[^>]*></title>", "<title>Sign In</title>", copy["login.html"])
+    assert any("<title>" in p for p in html_text_problems(copy))
+    copy = dict(SOURCES)
+    copy["login.html"] = copy["login.html"].replace('<script src="/js/text.js"></script>', "").replace(
+        '<script src="/js/auth-pages.js"></script>', '<script src="/js/auth-pages.js"></script><script src="/js/text.js"></script>')
+    assert any("not the first script" in p for p in html_text_problems(copy))
+
+
+JS_TEXT_BYPASSES = [
+    'function w1() { showToast("Token saved", "success"); }',
+    'function w2(el) { el.innerHTML = "<p>No tokens yet</p>"; }',
+    "function w3(el) { el.innerHTML = '<button title=\"Close\">x</button>'; }",
+    'function w4() { return "Delete"; }',
+    'function w5(n) { return n + " rows"; }',
+    "function w6(n) { return `Showing ${n} of many`; }",
+    'function w7(el) { return \'<span class="ui-unit">Created</span>\'; }',
+    'function w8(name) { return \'" aria-label="Search \' + name; }',
+]
+
+
+@pytest.mark.parametrize("extra", JS_TEXT_BYPASSES)
+def test_script_word_guard_catches(extra):
+    assert js_text_problems(_with("js/dashboard.js", extra)), f"not caught: {extra}"
+
+
+def test_script_word_guard_lets_code_through_and_reports_stale_entries():
+    code = ('function c1(el) { el.classList.add("ui-btn"); el.className = "ui-btn ui-btn-sm"; el.setAttribute("data-x", "1"); el.querySelector("[data-x]");'
+            ' return \'<div class="ui-td ui-td-main" role="cell">\' + esc(t("tokens.name")) + "</div>"; }')
+    assert js_text_problems(_with("js/dashboard.js", code)) == []
+    copy = dict(SOURCES)
+    copy["js/auth-pages.js"] = copy["js/auth-pages.js"].replace('"Bearer "', '"Token "')
+    assert any("stale JS_TEXT_ALLOWED" in p for p in js_text_problems(copy))
+
+
+SINK_BYPASSES = [
+    'function s1(el) { el.textContent = "Saved"; }',
+    'function s2(el) { el.setAttribute("aria-label", "close"); }',
+    'function s3() { showToast("saved", "success"); }',
+    'function s4() { uiConfirm({ title: "Sure?", message: t("tokens.delete-this-token-permanently") }); }',
+    'function s5() { return [{ label: "copy", action: "x" }]; }',
+    'function s6() { document.title = "Tokens"; }',
+    'function s7(b) { authBusy(b, true, "saving"); }',
+    'function s8(el) { el.innerText = `x`; }',
+    'function s9(b) { uiSortMenu(b, "tokens", [], {}, null); }',
+    'function s10() { dashSortButtonSync("x", {}, "zones", []); }',
+]
+
+
+@pytest.mark.parametrize("extra", SINK_BYPASSES)
+def test_sink_guard_catches(extra):
+    assert sink_problems(_with("js/dashboard.js", extra)), f"not caught: {extra}"
+
+
+def test_sink_guard_lets_keys_values_and_t_through():
+    code = ('function s9(el, name) { el.textContent = t("tokens.name"); el.textContent = name; el.textContent = "";'
+            ' el.setAttribute("aria-label", t("tokens.name")); showToast(t("tokens.token-updated"), "success");'
+            ' return [{ label: "tokens.name", action: "x" }]; }')
+    assert sink_problems(_with("js/dashboard.js", code)) == []
+
+
+CATALOG_BYPASSES = [
+    ("js/dashboard.js", 'function k1() { return t("tokens.no-such-key"); }', "names a key"),
+    ("js/dashboard.js", 'function k2(x) { return t("tokens.made-up." + x); }', "DYNAMIC_KEYS"),
+    ("index.html", '<p data-t="shell.no-such-key"></p>', "not in UI_TEXT"),
+    ("index.html", '<p data-t-attr="title:shell.no-such-key"></p>', "names no key"),
+]
+
+
+@pytest.mark.parametrize("name,extra,expect", CATALOG_BYPASSES)
+def test_catalog_guard_catches(name, extra, expect):
+    assert any(expect in p for p in catalog_problems(_with(name, extra))), f"not caught: {extra}"
+
+
+def test_catalog_guard_catches_unused_and_repeated_keys():
+    copy = dict(SOURCES)
+    copy[TEXT_JS] = copy[TEXT_JS].replace("var UI_TEXT = {", 'var UI_TEXT = {\n    "tokens.never-used": "x",\n    "tokens.name": "Twice",', 1)
+    problems = catalog_problems(copy)
+    assert any("'tokens.never-used' is used nowhere" in p for p in problems)
+    assert any("repeats the key 'tokens.name'" in p for p in problems)
 
 
 # ---------------------------------------------------------------------------

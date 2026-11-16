@@ -14,7 +14,7 @@ const PAGE = {
 };
 
 function load() {
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.showToast = () => {};
     return ctx;
 }
@@ -96,13 +96,14 @@ test("a conflict keeps the draft and its base until the admin chooses", async ()
 function drawWithProxy(value) {
     const body = { innerHTML: "" };
     const page = { ...PAGE, getElementById: (id) => (id === "settings-body" ? body : null) };
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: page });
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: page });
     const s = ctx.dashSet;
     s.snap = s.baseSnap = snap(0, 120);
     s.snap.proxyNetwork = { envName: "FORWARDED_ALLOW_IPS", value: value };
     s.draft = { maxReq: "120", windowSeconds: "60", exempt: "" };
     ctx.dashSettingsDrawForm();
-    return body.innerHTML;
+    // Catalog text is escaped as a whole in markup: read an apostrophe as the page shows it
+    return body.innerHTML.replace(/&#39;/g, "'");
 }
 
 const WARNING = 'id="set-exempt-warn"';

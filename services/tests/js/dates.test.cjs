@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadScripts } = require("./_load.cjs");
 
-const ui = loadScripts(["js/common.js", "js/ui.js"]);
+const ui = loadScripts(["js/text.js", "js/common.js", "js/ui.js"]);
 const H = 3600 * 1000;
 
 // Probe a zone hour by hour for an offset change in one direction (no dates
@@ -122,6 +122,6 @@ test("formatAgo and counts", () => {
     assert.equal(ui.formatAgo(now - 20 * 1000, now), "just now");
     assert.equal(ui.formatAgo(now - 5 * 60000, now), "5 min ago");
     assert.equal(ui.formatAgo(now + 60000, now), "just now");
-    assert.equal(ui.uiCountLabel(1, "entry", "entries"), "1 entry");
-    assert.match(ui.uiCountLabel(1920, "entry", "entries"), /^1.?920 entries$/);
+    assert.equal(ui.uiCountLabel(1, "logs.count-entries"), "1 entry");
+    assert.match(ui.uiCountLabel(1920, "logs.count-entries"), /^1.?920 entries$/);
 });

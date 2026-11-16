@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>Recovery · Auth Service</title>
-    <meta name="description" content="Fix the database connection of Auth Service" />
+    <title data-t="recovery.recovery-auth-service"></title>
+    <meta name="description" content="" data-t-attr="content:recovery.fix-the-database-connection-of-auth" />
     <meta name="robots" content="noindex" />
     <style>.hidden{display:none}</style>
+    <script src="/js/text.js"></script>
     <script src="/js/theme.js"></script>
     <script src="/js/head.js"></script>
   </head>
@@ -16,44 +17,44 @@
         <div class="ui-login-head">
           <img class="ui-brand-logo" src="/images/favicon.svg" alt="" width="32" height="32" />
           <div>
-            <h1 class="ui-h1">Recovery</h1>
-            <p>Fix the database connection</p>
+            <h1 class="ui-h1" data-t="recovery.recovery"></h1>
+            <p data-t="recovery.fix-the-database-connection"></p>
           </div>
         </div>
-        <div class="ui-loading" role="status" id="rec-loading"><span class="ui-spin" aria-hidden="true"></span><p>Loading...</p></div>
-        <div class="ui-banner ui-banner-ok hidden" id="rec-running"><div><b>The service is running</b>Its database works. <a id="rec-signin" href="/login">Sign in</a></div></div>
-        <div class="ui-banner ui-banner-warn hidden" id="rec-no-key"><div><b>The recovery page needs the master key</b>Set <code>ADMIN_API_KEY</code> in the service's environment, restart the service, then open this page again.</div></div>
+        <div class="ui-loading" role="status" id="rec-loading"><span class="ui-spin" aria-hidden="true"></span><p data-t="recovery.loading"></p></div>
+        <div class="ui-banner ui-banner-ok hidden" id="rec-running"><div><b data-t="recovery.the-service-is-running"></b><span data-t="recovery.its-database-works"></span> <a id="rec-signin" href="/login" data-t="recovery.sign-in"></a></div></div>
+        <div class="ui-banner ui-banner-warn hidden" id="rec-no-key"><div data-t-tpl="recovery.set-in-the-service-s-environment"><b data-t-slot="title" data-t="recovery.the-recovery-page-needs-the-master"></b><code data-t-slot="code" data-t="recovery.admin-api-key"></code></div></div>
         <form id="rec-key-form" class="ui-form hidden" novalidate autocomplete="off">
-          <p>The service cannot use its database. Enter the master key (<code>ADMIN_API_KEY</code>) to see why and fix the connection.</p>
+          <p data-t-tpl="recovery.the-service-cannot-use-its-database"><code data-t-slot="code" data-t="recovery.admin-api-key"></code></p>
           <div class="ui-field">
-            <label class="ui-label" for="rec-key">Master key</label>
+            <label class="ui-label" for="rec-key" data-t="recovery.master-key"></label>
             <div class="ui-pass">
               <input class="ui-input" type="password" id="rec-key" autocomplete="off" spellcheck="false" dir="ltr" data-inventory="recovery.key" />
-              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" aria-label="Show key" title="Show key"></button>
+              <button type="button" class="ui-icon-btn" data-show-password aria-pressed="false" data-t-attr="aria-label:auth.show-key;title:auth.show-key"></button>
             </div>
           </div>
           <p class="ui-error hidden" id="err" role="alert"></p>
-          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block">Continue</button>
+          <button type="submit" class="ui-btn ui-btn-primary ui-btn-block" data-t="recovery.continue"></button>
         </form>
         <form id="rec-form" class="ui-form hidden" novalidate autocomplete="off">
-          <div class="ui-banner ui-banner-warn"><div><b id="rec-why-title">The database cannot be used</b><span id="rec-why"></span></div></div>
+          <div class="ui-banner ui-banner-warn"><div><b id="rec-why-title" data-t="recovery.the-database-cannot-be-used"></b><span id="rec-why"></span></div></div>
           <p class="ui-hint" id="rec-saved"></p>
           <div class="ui-field">
-            <span class="ui-label" id="rec-kind-label">Database</span>
+            <span class="ui-label" id="rec-kind-label" data-t="recovery.database"></span>
             <div class="ui-seg" role="group" aria-labelledby="rec-kind-label">
-              <button type="button" data-db-kind="postgres" aria-pressed="true">PostgreSQL server</button>
-              <button type="button" data-db-kind="sqlite" aria-pressed="false">SQLite file</button>
+              <button type="button" data-db-kind="postgres" aria-pressed="true" data-t="recovery.postgresql-server"></button>
+              <button type="button" data-db-kind="sqlite" aria-pressed="false" data-t="recovery.sqlite-file"></button>
             </div>
           </div>
-          <p class="ui-hint hidden" id="rec-sqlite-note">The file data/auth.db in the service's data directory, for example after you restored it from a backup.</p>
+          <p class="ui-hint hidden" id="rec-sqlite-note" data-t="recovery.the-file-data-auth-db-in"></p>
           <div id="rec-pg-fields"></div>
           <div id="rec-result" aria-live="polite"></div>
           <label class="ui-check-label" id="rec-confirm-row"><input type="checkbox" class="ui-check" id="rec-confirm" data-inventory="recovery.confirm" />
-            <span>This is the latest copy of the database. If it is a restored backup or a replica, I accept that changes made after it was taken are lost.</span></label>
+            <span data-t="recovery.this-is-the-latest-copy-of"></span></label>
           <p class="ui-error hidden" id="rec-err" role="alert"></p>
           <div class="ui-form-row">
-            <button type="button" class="ui-btn" id="rec-check">Check connection</button>
-            <button type="submit" class="ui-btn ui-btn-primary" id="rec-save">Save and connect</button>
+            <button type="button" class="ui-btn" id="rec-check" data-t="recovery.check-connection"></button>
+            <button type="submit" class="ui-btn ui-btn-primary" id="rec-save" data-t="recovery.save-and-connect"></button>
           </div>
         </form>
       </div>

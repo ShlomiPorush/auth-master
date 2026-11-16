@@ -14,7 +14,7 @@ const PAGE = {
 };
 
 function load() {
-    const ctx = loadScripts(["js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
+    const ctx = loadScripts(["js/text.js", "js/common.js", "js/ui.js", "js/dashboard.js"], { document: PAGE });
     ctx.showToast = () => {};
     ctx.uiSetAppZone("UTC");
     ctx.uiSetDatePrefs("dmy", "24");
@@ -172,7 +172,8 @@ test("a report in the tab's own zone, or one without a zone, shows no zone note"
 test("a report zone this browser cannot format is named, not hidden", () => {
     const ctx = load();
     const notes = ctx.dashUseNotices({ ...WEEK, partial: false, timeZone: "Not/AZone" });
-    assert.match(notes, /This browser cannot show this report's time zone[^]*Not\/AZone[^]*UTC/);
+    // Catalog text is escaped as a whole in markup: read an apostrophe as the page shows it
+    assert.match(notes.replace(/&#39;/g, "'"), /This browser cannot show this report's time zone[^]*Not\/AZone[^]*UTC/);
     assert.doesNotMatch(notes, /This report uses another time zone/);
 });
 
