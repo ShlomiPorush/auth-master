@@ -1053,3 +1053,32 @@ def test_adopting_an_older_postgres_database_after_a_move_keeps_its_record(workd
                 assert await svc.app.state.db.fetchval("SELECT migration_id FROM installation") == migration_id
 
     run(go())
+
+
+@needs_pg
+def test_a_file_readable_only_in_part_keeps_the_move_record(workdir, monkeypatch):
+    """After a move the saved password cannot be decrypted (keys changed): the recovery
+    page still refuses SQLite, and a recovery save keeps migrationId."""
+    async def go():
+        async with pg_database() as pg:
+            async with service(monkeypatch) as svc:
+                _admin, totp, c = await _signed_in_sqlite(svc)
+                job = await _move(c, pg, totp)
+                assert job["state"] == "done", job
+                migration_id = svc.config()["migrationId"]
+            path = workdir / "data" / "database.json"
+            data = json.loads(path.read_text())
+            data["postgres"]["passwordEnc"] = "not-decryptable"
+            path.write_text(json.dumps(data))
+            async with service(monkeypatch) as svc:
+                assert svc.runtime.mode == "recovery" and svc.runtime.failure_code == "config_unreadable"
+                r = svc.recovery_client()
+                res = await r.post("/admin/api/recovery/save", json={"backend": "sqlite", "confirm": True})
+                job = await wait_job(r, f"/admin/api/recovery/jobs/{res.json()['job']['id']}")
+                assert job["state"] == "failed" and job["code"] == "database_moved", job
+                res = await r.post("/admin/api/recovery/save", json={"backend": "postgres", "postgres": pg.body(), "confirm": True})
+                job = await wait_job(r, f"/admin/api/recovery/jobs/{res.json()['job']['id']}")
+                assert job["state"] == "done", job
+                assert svc.config()["migrationId"] == migration_id
+
+    run(go())

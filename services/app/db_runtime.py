@@ -515,6 +515,10 @@ class Runtime:
     config: db_config.Config | None = None
     # The installation id the saved file names, when the file could be read only in part.
     known_installation_id: str | None = None
+    # The move from SQLite the saved file records (migrationId, movedFromSqlite), kept the
+    # same way when the file could be read only in part (move_record).
+    known_migration_id: str | None = None
+    known_moved_from: str | None = None
     db: Any = None
     settings_db: Any = None
     close_settings: bool = False
@@ -586,6 +590,7 @@ class Runtime:
             legacy_exists = legacy.exists()
         if error is not None:
             self.known_installation_id = _installation_id_in_file()
+            self.known_migration_id, self.known_moved_from = _move_record_in_file()
             await self._enter_recovery(app, error.code, error.message)
             return
         if cfg is not None:
@@ -897,6 +902,15 @@ class Runtime:
         await installation.activate(db, cfg.installation_id, cfg.migration_id)
         return None
 
+    def move_record(self) -> tuple[str | None, str | None]:
+        """(migration id, SQLite path) of the move from SQLite this installation made, from
+        the configuration in use or, when the saved file could be read only in part, from
+        that file; (None, None) when there was none."""
+        cfg = self.config
+        if cfg is not None and cfg.migration_id:
+            return cfg.migration_id, cfg.moved_from_sqlite
+        return self.known_migration_id, self.known_moved_from
+
     # ── Switching ──
 
     async def switch(
@@ -1158,6 +1172,20 @@ def _installation_id_in_file() -> str | None:
         return iid if isinstance(iid, str) and iid else None
     except Exception:
         return None
+
+
+def _move_record_in_file() -> tuple[str | None, str | None]:
+    """migrationId and movedFromSqlite of a file that cannot be used as a whole."""
+    import json
+
+    try:
+        data = json.loads(db_config.config_path().read_text(encoding="utf-8"))
+        mid, moved = data.get("migrationId"), data.get("movedFromSqlite")
+        if isinstance(mid, str) and mid:
+            return mid, moved if isinstance(moved, str) and moved else None
+    except Exception:
+        pass
+    return None, None
 
 
 def _remove_setup_leftovers() -> None:

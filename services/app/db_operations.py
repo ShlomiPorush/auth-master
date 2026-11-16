@@ -345,7 +345,7 @@ async def run_edit(rt: Runtime, app: Any, job: Job, params: PgParams, confirm_co
     except BaseException:
         await _close(new_db)
         raise
-    new_cfg = _pg_config(cfg.installation_id, params, result.migration_id, cfg)
+    new_cfg = _pg_config(cfg.installation_id, params, result.migration_id, rt)
     before = _public(cfg)
     logged: dict[str, Any] = {}
 
@@ -376,7 +376,7 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
     job.step = "connecting"
     if backend == db_config.SQLITE:
         cfg = rt.config
-        if cfg is not None and cfg.migration_id:
+        if rt.move_record()[0]:
             # The saved configuration records a move to PostgreSQL: a SQLite file at the old
             # path now is a copy from before the move (a restored backup), never the data.
             raise OperationError("database_moved")
@@ -416,7 +416,7 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
         if result.state == db_inspect.OLDER:
             iid = expected or installation.new_id()
             if new_db.is_pg:
-                moved = rt.config.migration_id if rt.config is not None and rt.config.installation_id == iid else None
+                moved = rt.move_record()[0] if rt.known_installation_id == iid else None
                 await _create_postgres_installation(new_db, iid, moved)
                 result.migration_id = moved
             else:
@@ -444,7 +444,7 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
     elif completing is not None:
         new_cfg = Config(db_config.POSTGRES, iid, pg=params, migration_id=completing[0], moved_from_sqlite=completing[1])
     else:
-        new_cfg = _pg_config(iid, params, result.migration_id, rt.config)
+        new_cfg = _pg_config(iid, params, result.migration_id, rt)
     logged: dict[str, Any] = {}
 
     async def after() -> None:
@@ -455,18 +455,20 @@ async def run_recovery(rt: Runtime, app: Any, job: Job, backend: str, params: Pg
     return {"action": action, "warning": logged.get("warning")}
 
 
-def _pg_config(iid: str, params: PgParams, migration_id: str | None, current: Config | None) -> Config:
+def _pg_config(iid: str, params: PgParams, migration_id: str | None, rt: Runtime | None) -> Config:
     """A PostgreSQL configuration that keeps the record of a move from SQLite: the
     installation row keeps the move's id for good, so every later save (a connection change,
-    a recovery) writes it again, and the recovery page keeps refusing the old SQLite file."""
-    if not migration_id and current is not None and current.installation_id == iid:
-        # A row without the move's id (an adopted older database): the current
-        # configuration still knows the installation moved.
-        migration_id = current.migration_id
+    a recovery) writes it again, and the recovery page keeps refusing the old SQLite file.
+    A row without it (an adopted older database) takes it from what the service knows of
+    this installation (Runtime.move_record, also when the saved file was readable only in
+    part)."""
+    known_mid, known_moved = (None, None)
+    if rt is not None and rt.known_installation_id == iid:
+        known_mid, known_moved = rt.move_record()
+    migration_id = migration_id or known_mid
     if not migration_id:
         return Config(db_config.POSTGRES, iid, pg=params)
-    moved = (current.moved_from_sqlite if current is not None and current.migration_id == migration_id
-             and current.moved_from_sqlite else str(db_config.default_sqlite_path()))
+    moved = known_moved if known_moved and known_mid == migration_id else str(db_config.default_sqlite_path())
     return Config(db_config.POSTGRES, iid, pg=params, migration_id=migration_id, moved_from_sqlite=moved)
 
 
@@ -480,8 +482,9 @@ async def _move_to_complete(rt: Runtime, result: CheckResult) -> tuple[str, str]
     if not mid or result.installation_id is None:
         return None
     cfg = rt.config
-    if cfg is not None and cfg.migration_id == mid and cfg.moved_from_sqlite:
-        return mid, cfg.moved_from_sqlite
+    known_mid, known_moved = rt.move_record()
+    if known_mid == mid and known_moved:
+        return mid, known_moved
     candidates = [cfg.sqlite_path] if cfg is not None and cfg.backend == db_config.SQLITE and cfg.sqlite_path else []
     candidates.append(str(db_config.default_sqlite_path()))
     for path in dict.fromkeys(candidates):
