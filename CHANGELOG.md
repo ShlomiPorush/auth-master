@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-16
+
 ### Added
 
 - The **Date format** and **Time format** of every date on the dashboard are server settings
@@ -33,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A database connection change whose answer was lost no longer reads as "nothing running"
   while it still waits for its second-factor check: `GET /admin/api/settings/database` reports
   it as `{"state": "pending"}` until its operation starts or the request ends.
+
+### Upgrade notes
+
+- The Date format and Time format each browser kept in **Preferences** in 2.3.x are no longer
+  read. Every page uses the server setting instead: Browser order and 24-hour until they are
+  set in Settings > General, or by `DATE_FORMAT` and `TIME_FORMAT`.
+- Rolling back to 2.3.x needs nothing: 2.3.x ignores the `display_settings` key in
+  `app_state`, and each browser's earlier Preferences choice applies again.
 
 ## [2.3.0] - 2026-11-16
 
@@ -726,7 +736,8 @@ Initial release. Self-hosted token authentication and authorization service with
 admin dashboard, TOTP-protected sessions, scoped API keys, authorization zones and a
 token validation endpoint.
 
-[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/ShlomiPorush/auth-master/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/ShlomiPorush/auth-master/compare/v2.0.1...v2.1.0
