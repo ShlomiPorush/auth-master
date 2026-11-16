@@ -30,12 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The access and activity logs replace the NUL character with U+FFFD on both backends. Before,
   a `/validate` request with NUL in `area` failed with 500 on PostgreSQL.
 
+### Fixed
+
+- In the Docker image, every PostgreSQL connection failed (setup, the Settings page, the
+  recovery page and `DATABASE_URL`), reported as "The database server cannot be reached":
+  the service ran as uid 10001 with `HOME=/root`, and the PostgreSQL driver stopped with a
+  permission error while it looked for client certificates in `~/.postgresql`. The service
+  now runs with the service user's own home, `/nonexistent`. Affects 2.3.0 and 2.4.0.
+
 ### Upgrade notes
 
 - After a move to PostgreSQL, do not roll back below 2.3: older images open the old SQLite
   file, whose lock refuses their first write at start-up, so they stop (checked with 2.2.0).
-  The published 2.3.0 and 2.4.0 images cannot connect to PostgreSQL (fixed separately), so
-  after a move, do not roll back to them either.
+  Do not roll back to the 2.3.0 or 2.4.0 images either: they cannot connect to PostgreSQL
+  (see Fixed).
 
 ## [2.4.0] - 2026-11-16
 
