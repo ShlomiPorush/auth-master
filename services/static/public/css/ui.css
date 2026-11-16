@@ -749,8 +749,8 @@ body.ui-app { overflow: hidden; }
 .ui-strip-win { position: absolute; top: 0; bottom: 0; border: 1.5px solid var(--ui-accent); border-radius: var(--ui-radius-sm);
     background: color-mix(in srgb, var(--ui-accent) 14%, transparent); cursor: grab; }
 .ui-strip.is-held .ui-strip-win { cursor: grabbing; }
-.ui-strip-edge { position: absolute; top: 4px; z-index: 1; width: 10px; height: 22px; border-radius: var(--ui-radius-mark); background: var(--ui-accent);
-    transform: translateX(-50%); cursor: ew-resize; }
+.ui-strip-edge { position: absolute; top: 4px; z-index: 1; width: 10px; height: 22px; border: 1.5px solid var(--ui-accent); border-radius: var(--ui-radius-xs);
+    background: var(--ui-panel); transform: translateX(-50%); cursor: ew-resize; }
 .ui-strip-edge::before { content: ""; position: absolute; inset: -10px -12px; }
 
 /* ---------- Dialogs (js/ui.js, uiDialog) ---------- */
