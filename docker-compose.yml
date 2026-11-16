@@ -50,6 +50,8 @@ services:
       # true or false here overrides it and locks the field.
       COOKIE_SECURE: ${COOKIE_SECURE-}
     volumes:
+      # The service runs as uid 10001; at start the container gives it ./data. See "Data
+      # directory and file ownership" in README.md.
       - ./data:/app/data
     depends_on:
       redis:
