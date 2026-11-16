@@ -24,13 +24,15 @@ test("t fills placeholders with plain text and keeps unknown ones", () => {
     assert.equal(ctx.t("x.a"), "Hello {name}, {missing}");
 });
 
-test("a missing key gives an empty string and an error naming it", () => {
+test("a missing key gives an empty string, a fixed console error, and is listed in uiTextMissing", () => {
     const errors = [];
     const ctx = text({ console: { ...console, error: (m) => errors.push(m) } });
     assert.equal(ctx.t("no.such.key"), "");
     assert.equal(ctx.tn("no.such.key", 2), "");
     assert.equal(ctx.tHtml("no.such.key"), "");
-    assert.deepEqual(errors.map((m) => m.includes("no.such.key")), [true, true, true]);
+    assert.equal(errors.length, 3);
+    assert.ok(errors.every((m) => !m.includes("no.such.key")), "the console never gets the key itself");
+    assert.deepEqual(Array.from(ctx.uiTextMissing), ["no.such.key"]);
 });
 
 test("tn picks the English one or other form and formats {n} like uiNum", () => {

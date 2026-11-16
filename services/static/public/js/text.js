@@ -1237,10 +1237,15 @@ var UI_TEXT = {
     "zones.zones-whose-names-differ-only-in": "Zone names differ only by case",
 };
 
+// Catalog keys that code asked for and the catalog does not have
+var uiTextMissing = [];
+
 function uiTextValue(key) {
     var v = Object.prototype.hasOwnProperty.call(UI_TEXT, key) ? UI_TEXT[key] : undefined;
     if (v === undefined) {
-        if (typeof console !== "undefined") console.error("UI_TEXT has no key " + key);
+        // Kept in memory for a developer, not printed: the console gets a fixed message only
+        if (uiTextMissing.indexOf(key) === -1) uiTextMissing.push(key);
+        if (typeof console !== "undefined") console.error("UI_TEXT is missing a key; see uiTextMissing");
         return undefined;
     }
     return v;
