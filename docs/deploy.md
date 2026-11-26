@@ -33,8 +33,10 @@ Each image carries two labels that say whether it can replace the running releas
 | `auth-master.compose-sha256` | The sha256 of `docker-compose.yml` in the repository at that release. |
 | `auth-master.rollout-from` | The oldest running release that this image may run beside. |
 
-A release can roll out only when its `auth-master.compose-sha256` equals the running image's, and the
-running release is not older than its `auth-master.rollout-from`. Otherwise, update it by hand (see
+A newer release can roll out only when its `auth-master.compose-sha256` equals the running image's,
+and the running release is not older than its `auth-master.rollout-from`. Going back to an older
+release is always an update by hand: the running release may have changed data that the older one
+cannot use. Otherwise, update it by hand (see
 [Update by hand](#update-by-hand)). docker rollout does not read these labels: compare them before a
 rollout, or let a deployment tool do it. The host's own `docker-compose.yml` is never compared with
 the label: a changed hash means the release changed the example file, so the host's file may need the
@@ -154,6 +156,12 @@ docker pull "ghcr.io/shlomiporush/auth-master:$NEW" &&
 healthy, so the reverse proxy has time to route to the new one before the old one stops. If the new
 container does not become healthy, docker rollout removes it and the old one keeps serving; set
 `VERSION` in `.env` back to the running release.
+
+docker rollout v0.14 also stops the old container when the new one exits right after it starts
+([wowu/docker-rollout#75](https://github.com/wowu/docker-rollout/issues/75)). After a rollout,
+check that `docker compose ps auth-service` shows one healthy container. If it shows none, set
+`VERSION` in `.env` back to the release that ran before and start it with
+`docker compose up -d --wait auth-service`.
 
 ## While two containers run
 

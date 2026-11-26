@@ -28,8 +28,6 @@ jobs:
     concurrency:
       group: docker-publish
       cancel-in-progress: false
-    outputs:
-      newest: ${{ steps.newest.outputs.value }}
 
     steps:
       - name: Checkout repository
@@ -61,8 +59,8 @@ jobs:
       - name: Hash docker-compose.yml
         id: compose
         run: |
-          sha256=$(sha256sum docker-compose.yml | cut -d ' ' -f 1)
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          sum=$(sha256sum docker-compose.yml)
+          echo "sha256=${sum%% *}" >> "$GITHUB_OUTPUT"
 
       # latest moves only to the highest version tag, so a release of an older line, or a run
       # that finishes after a newer release, leaves it where it is.
@@ -71,7 +69,7 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          newest=$(git tag -l 'v*' | sed -n 's/^v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' | sort -V | tail -n 1)
+          newest=$(git tag -l 'v*' | sed -En 's/^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' | sort -V | tail -n 1)
           if [ "$newest" = "$VERSION" ]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
@@ -110,9 +108,10 @@ jobs:
           images: |
             ${{ env.GH_REGISTRY }}/${{ github.repository }}
             ${{ env.DOCKER_HUB_REPO }}
+          flavor: |
+            latest=${{ steps.newest.outputs.value }}
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ steps.newest.outputs.value }}
           labels: |
             auth-master.rollout-from=${{ steps.rollout.outputs.value }}
             auth-master.compose-sha256=${{ steps.compose.outputs.sha256 }}
@@ -141,7 +140,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
-          NEWEST: ${{ needs.build-and-push.outputs.newest }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
@@ -158,11 +156,7 @@ jobs:
             echo "docker pull ${GH_REGISTRY}/${REPOSITORY,,}:${version}"
             echo '```'
             echo ""
-            if [ "$NEWEST" = true ]; then
-              echo "Built for linux/amd64 and linux/arm64. The \`latest\` tag points at this version."
-            else
-              echo "Built for linux/amd64 and linux/arm64. The \`latest\` tag stays on a newer version."
-            fi
+            echo "Built for linux/amd64 and linux/arm64."
           } > release-body.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then

@@ -188,13 +188,6 @@ def _warn_duplicates(groups: list[list[str]]) -> None:
 
 
 async def ensure_zone_name_index(db: "Database") -> None:
-    """Make zone names unique regardless of case in the database, when the data allows it.
-
-    Zones that differ only in case may exist from earlier versions.  Then the index is
-    not created and a warning names them; the service still starts, so an admin can
-    rename or delete them, and the index is created at the first start after that.
-    The checks in create and rename apply either way.
-    """
     if db.is_pg and await pg_index_exists(db, "idx_zones_name_fold"):
         return
     groups = await duplicate_zone_groups(db)
@@ -205,7 +198,6 @@ async def ensure_zone_name_index(db: "Database") -> None:
             )
             return
         except UniqueViolationError:
-            # A zone that differs only in case was added since the scan (an older version).
             groups = await duplicate_zone_groups(db)
     _warn_duplicates(groups)
 
