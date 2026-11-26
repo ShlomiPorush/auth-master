@@ -17,6 +17,8 @@ the Tests workflow first, and pushes the image only when all of them pass.
 | `shlomip/auth-master` (Docker Hub) | `X.Y.Z`, `latest` |
 
 - Every image is built for `linux/amd64` and `linux/arm64`.
+- `latest` moves only to the highest version tag. A release of an older line, or a run that ends
+  after a newer release was published, leaves it where it is.
 - The tag `X.Y.Z` never moves. The workflow refuses to push a version that GHCR already has, also
   when a run is started again. To correct a published release, publish a new version.
 - The image has a health check on `/health`. It passes only when the database and Redis answer.
@@ -24,18 +26,29 @@ the Tests workflow first, and pushes the image only when all of them pass.
 
 ## Image labels
 
-Each image carries two labels that a rollout compares between the running image and the new one:
+Each image carries two labels that say whether it can replace the running release with a rollout:
 
 | Label | Value |
 |---|---|
 | `auth-master.compose-sha256` | The sha256 of `docker-compose.yml` in the repository at that release. |
 | `auth-master.rollout-from` | The oldest running release that this image may run beside. |
 
-A release rolls out only when its `auth-master.compose-sha256` equals the running image's, and the
+A release can roll out only when its `auth-master.compose-sha256` equals the running image's, and the
 running release is not older than its `auth-master.rollout-from`. Otherwise, update it by hand (see
-[Update by hand](#update-by-hand)). The host's own `docker-compose.yml` is never compared with the
-label: a changed hash means the release changed the example file, so the host's file may need the
+[Update by hand](#update-by-hand)). docker rollout does not read these labels: compare them before a
+rollout, or let a deployment tool do it. The host's own `docker-compose.yml` is never compared with
+the label: a changed hash means the release changed the example file, so the host's file may need the
 same change.
+
+To compare them, in the directory with `docker-compose.yml`:
+
+```bash
+NEW=X.Y.Z
+LABELS='{{index .Config.Labels "auth-master.compose-sha256"}} {{index .Config.Labels "auth-master.rollout-from"}}'
+docker inspect --format "running: $LABELS" $(docker compose ps -q auth-service)
+docker pull "ghcr.io/shlomiporush/auth-master:$NEW" &&
+  docker image inspect --format "new: $LABELS" "ghcr.io/shlomiporush/auth-master:$NEW"
+```
 
 Releases published before these labels existed have none. The first release with labels is
 therefore updated by hand; later releases can roll out from it.
@@ -125,6 +138,22 @@ networks:
 VERSION=X.Y.Z
 FORWARDED_ALLOW_IPS=<the proxy's address>
 ```
+
+## Roll out a release
+
+When the labels allow it, in the directory with `docker-compose.yml` and `.env`:
+
+```bash
+NEW=X.Y.Z
+docker pull "ghcr.io/shlomiporush/auth-master:$NEW" &&
+  sed -i "s/^VERSION=.*/VERSION=$NEW/" .env &&
+  docker rollout --timeout 300 --wait-after-healthy 3 auth-service
+```
+
+`--wait-after-healthy` keeps the old container serving for a few seconds after the new one is
+healthy, so the reverse proxy has time to route to the new one before the old one stops. If the new
+container does not become healthy, docker rollout removes it and the old one keeps serving; set
+`VERSION` in `.env` back to the running release.
 
 ## While two containers run
 

@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A version tag publishes its image only after every check of the Tests workflow passed, and
   never pushes a version that GHCR already has, so `X.Y.Z` always names the same image. An empty
   CHANGELOG section now stops the release before anything is pushed, and a tag that is not
-  `vX.Y.Z` with plain numbers is refused.
+  `vX.Y.Z` with plain numbers is refused. `latest` moves only to the highest version, so a
+  release of an older line no longer moves it back.
 
 ### Fixed
 

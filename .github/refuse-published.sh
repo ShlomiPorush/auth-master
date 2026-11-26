@@ -31,7 +31,8 @@ manifest_status() {
 latest=$(manifest_status latest) || cannot_check "the registry did not answer"
 [ "$latest" = 200 ] || cannot_check "the registry answered $latest for latest"
 
-case "$(manifest_status "$version")" in
+status=$(manifest_status "$version") || cannot_check "the registry did not answer"
+case "$status" in
     404) echo "$image:$version is not published yet." ;;
     200)
         echo "$image:$version is already published, and a version tag never moves. Publish a new version." >&2
