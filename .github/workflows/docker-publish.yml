@@ -1,5 +1,8 @@
 name: Build and Publish Docker Image
 
+# A version tag publishes X.Y.Z only after every check in tests.yml passed, and never
+# pushes a version that is already in GHCR, so a version tag never moves. There is no
+# manual trigger. See docs/deploy.md.
 on:
   push:
     tags: [ 'v*.*.*' ]
@@ -9,11 +12,22 @@ env:
   DOCKER_HUB_REPO: shlomip/auth-master
 
 jobs:
+  verify:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+
   build-and-push:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    # One publish at a time across all tags: the published-version check and the move of
+    # latest must not interleave with another run.
+    concurrency:
+      group: docker-publish
+      cancel-in-progress: false
 
     steps:
       - name: Checkout repository
@@ -21,17 +35,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require a changelog entry
+      # The tag reaches the shell through the environment, never through ${{ }} in the script.
+      - name: Version
+        id: version
         env:
           TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          if ! awk -v hdr="## [${TAG#v}]" \
-              'index($0, hdr) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
-            echo "CHANGELOG.md has no '## [${TAG#v}]' section." >&2
-            echo "Describe the release there on main, then move the tag." >&2
-            exit 1
-          fi
+        run: echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Require a changelog entry
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: bash .github/release-notes.sh "$VERSION" > /dev/null
+
+      # The oldest running release this image may run beside in a zero-downtime rollout.
+      - name: Oldest release this image may run beside
+        id: rollout
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: echo "value=$(bash .github/rollout-from.sh "$VERSION")" >> "$GITHUB_OUTPUT"
+
+      - name: Hash docker-compose.yml
+        id: compose
+        run: echo "sha256=$(sha256sum docker-compose.yml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -42,6 +67,14 @@ jobs:
           registry: ${{ env.GH_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse a version that is already published
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          REPOSITORY: ${{ github.repository }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .github/refuse-published.sh "${GH_REGISTRY}/${REPOSITORY,,}" "$VERSION"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -59,6 +92,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
+          labels: |
+            auth-master.rollout-from=${{ steps.rollout.outputs.value }}
+            auth-master.compose-sha256=${{ steps.compose.outputs.sha256 }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -88,18 +124,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
 
-          # Everything between this version's heading and the next one.
-          awk -v hdr="## [${version}]" '
-            index($0, hdr) == 1 { inside = 1; next }
-            inside && /^## / { exit }
-            inside && /^\[[^]]+\]: / { exit }
-            inside { print }
-          ' CHANGELOG.md > notes.md
-
-          if ! grep -q '[^[:space:]]' notes.md; then
-            echo "The '## [${version}]' section in CHANGELOG.md is empty." >&2
-            exit 1
-          fi
+          bash .github/release-notes.sh "$version" > notes.md
 
           {
             cat notes.md
