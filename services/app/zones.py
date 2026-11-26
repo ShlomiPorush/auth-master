@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from app.config import get_settings
 from app.db import UniqueViolationError, write_transaction
 from app.grants import area_matches_zone, fold_area, grant_area
+from app.schema import pg_index_exists
 
 if TYPE_CHECKING:
     from app.db import Database
@@ -194,6 +195,8 @@ async def ensure_zone_name_index(db: "Database") -> None:
     rename or delete them, and the index is created at the first start after that.
     The checks in create and rename apply either way.
     """
+    if db.is_pg and await pg_index_exists(db, "idx_zones_name_fold"):
+        return
     groups = await duplicate_zone_groups(db)
     if not groups:
         try:
