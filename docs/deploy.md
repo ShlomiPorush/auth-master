@@ -76,7 +76,8 @@ files. For a rollout of the service `auth-service`:
 
 - `name: auth-master` at the top of `docker-compose.yml`.
 - `image: ghcr.io/shlomiporush/auth-master:${VERSION}` on `auth-service`.
-- `.env` has exactly one `VERSION=X.Y.Z` line. A rollout changes only that line.
+- `.env` has exactly one `VERSION=X.Y.Z` line. A rollout changes only that line. Do not also set
+  `VERSION` in the shell environment: Compose prefers it to `.env`.
 - `auth-service` has no `container_name`, no `ports`, no `network_mode: host`, no `build`, and one
   replica, because a rollout runs two containers of it at once.
 - No `pull_policy: always` on `auth-service`.
@@ -220,11 +221,11 @@ image already in GHCR. Never build the same version again.
    docker buildx imagetools create -t shlomip/auth-master:X.Y.Z ghcr.io/shlomiporush/auth-master:X.Y.Z
    ```
 
-3. If `latest` on either registry does not point at this version, and no newer version is
-   published, move it:
+3. If `latest` on a registry does not point at this version, no newer version is published, and no
+   publish run is in progress, move it on that registry only, for example on Docker Hub:
 
    ```bash
-   docker buildx imagetools create -t ghcr.io/shlomiporush/auth-master:latest -t shlomip/auth-master:latest ghcr.io/shlomiporush/auth-master:X.Y.Z
+   docker buildx imagetools create -t shlomip/auth-master:latest ghcr.io/shlomiporush/auth-master:X.Y.Z
    ```
 
 4. If the GitHub release is missing, re-run the failed `publish-release` job. If that job was
