@@ -89,6 +89,10 @@ earlier tag is missing, when a newer release tag declares another schema or othe
 (a backport that the newer release's label could cover), and when the tag is not `vX.Y.Z` with plain
 numbers.
 
+A refused version leaves its git tag, and later publishes read that tag's `docker/rollout.txt` too.
+When `docker buildx imagetools inspect` shows the version on neither registry, delete the tag (locally
+and with `git push --delete origin vX.Y.Z`), then publish a corrected release under a new version.
+
 ## What the host needs
 
 The host keeps its own `docker-compose.yml` and `.env`. They are never compared with the repository's
@@ -209,31 +213,27 @@ its image and state:
 docker compose ps --all auth-service --format '{{.ID}} {{.Image}} {{.Status}}'
 ```
 
-The goal is exactly one container in total, healthy and not draining. A container that is not
-running, still starting, or unhealthy gets no traffic from the proxy; stop it with `docker stop` (a
-running one finishes its requests in flight) and then remove it with `docker rm`. For the others:
+The goal is exactly one container in total, running, healthy and not draining. Work in this order:
 
-- Two healthy containers (interrupted before the drain): keep the one on the image that `.env`
-  names. Drain the other first, in the shell where you set `OLD` to its ID:
+1. Choose the container to keep, and set `KEEP` to its ID in your shell. Keep a running container
+   on the image that `.env` names when it is healthy and not draining; otherwise keep the running
+   container of the release that ran before (it may be draining), and set `VERSION` in `.env` back
+   to that release.
+2. Clear a drain marker in the kept container. The command prints `ready` only when it ran in the
+   container; anything else means the container is not running, so stop and check it first:
 
-  ```bash
-  docker exec "$OLD" touch /tmp/drain
-  ```
+   ```bash
+   docker exec "$KEEP" sh -c 'rm -f /tmp/drain && echo ready'
+   ```
 
-  When `docker inspect -f '{{.State.Health.Status}}' "$OLD"` says `unhealthy`, wait 5 seconds and run
-  `docker stop "$OLD" && docker rm "$OLD"`.
-- A healthy new container and an old one that is draining: wait until the old one is unhealthy and
-  5 seconds more, then stop and remove it as above.
-- The container you keep has `/tmp/drain` (the rollout stopped during the hook, the new container
-  is gone): it may still be healthy for a few seconds, but turns unhealthy and leaves the proxy.
-  Remove the file and wait until it is healthy:
+   Then wait until `docker inspect -f '{{.State.Health.Status}}' "$KEEP"` says `healthy`.
+3. Remove every other container. A healthy one still gets traffic: drain it first with
+   `docker exec <ID> touch /tmp/drain`, wait until it is unhealthy and 5 seconds more. Then, for
+   each other container, `docker stop <ID>` (a running one finishes its requests in flight) and
+   `docker rm <ID>`.
 
-  ```bash
-  docker exec "$KEEP" sh -c 'test -e /tmp/drain && rm /tmp/drain'
-  ```
-
-Start a rollout again only when `docker compose ps --all auth-service` shows exactly one container,
-it is healthy, and `docker exec "$KEEP" test -e /tmp/drain` fails.
+Start a rollout again only when `docker compose ps --all auth-service` shows exactly one container
+and it is healthy.
 
 ## While two containers run
 
