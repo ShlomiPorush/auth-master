@@ -61,14 +61,11 @@ async def cleanup_expired_tokens(db, settings_db=None) -> None:
     try:
         if db.is_sqlite:
             rows = await db.fetch("SELECT id, expires_at FROM tokens WHERE expires_at IS NOT NULL")
-            expired_ids = []
             for row in rows:
                 if is_expired(row["expires_at"]):
-                    expired_ids.append(row["id"])
-            
-            if expired_ids:
-                placeholders = ", ".join(f"${i+1}" for i in range(len(expired_ids)))
-                await db.execute(f"DELETE FROM tokens WHERE id IN ({placeholders})", *expired_ids)
+                    await db.execute(
+                        "DELETE FROM tokens WHERE id = $1 AND expires_at = $2", row["id"], row["expires_at"]
+                    )
         else:
             await db.execute("DELETE FROM tokens WHERE expires_at < now()")
     except Exception as e:
