@@ -25,8 +25,12 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
     && chmod 0644 /usr/local/lib/auth-master/data_dir.py
 
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health').read()"
+# Zero-downtime rollout (docs/deploy.md): before docker rollout stops this container it runs
+# the hook, the health check fails while /tmp/drain exists, and the reverse proxy stops
+# routing here. A 10 s interval turns a drained container unhealthy within the hook's sleep.
+LABEL docker-rollout.pre-stop-hook="touch /tmp/drain && sleep 45"
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
+  CMD [ ! -e /tmp/drain ] && python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health').read()"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

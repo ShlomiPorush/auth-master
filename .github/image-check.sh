@@ -224,4 +224,25 @@ healthy i2
     fail "I: a HOME set for the container was replaced"
 stop_cleanly i2
 
+echo "J. the drain a zero-downtime rollout runs before it stops a container"
+[ "$(docker image inspect -f '{{index .Config.Labels "docker-rollout.pre-stop-hook"}}' "$IMAGE")" = "touch /tmp/drain && sleep 45" ] ||
+    fail "J: the image has no docker-rollout.pre-stop-hook label with the drain"
+health_within() {
+    local status=$1 seconds=$2
+    for _ in $(seq "$seconds"); do
+        [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$RUN-j")" = "$status" ] && return 0
+        sleep 1
+    done
+    fail "J: the container was not $status within $seconds seconds"
+}
+j=$(volume j)
+start j -v "$j:/app/data" "$IMAGE"
+health_within healthy 60
+docker exec "$RUN-j" touch /tmp/drain
+health_within unhealthy 40
+docker restart "$RUN-j" >/dev/null
+health_within healthy 60
+docker exec "$RUN-j" test ! -e /tmp/drain || fail "J: /tmp/drain survived a restart"
+stop_cleanly j
+
 echo "All image checks passed."

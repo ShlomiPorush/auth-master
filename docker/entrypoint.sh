@@ -7,6 +7,8 @@ set -eu
 
 data_dir=/usr/local/lib/auth-master/data_dir.py
 
+rm -f /tmp/drain
+
 if [ "$(id -u)" = 0 ]; then
     python -I "$data_dir" take-ownership
     # setpriv keeps the environment, so HOME would stay root's /root, which the service
