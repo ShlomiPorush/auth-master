@@ -130,6 +130,13 @@ def test_a_backport_that_differs_from_a_newer_release_is_refused(repo):
     resolves(repo, "2.7.0", "2.6.0")
 
 
+def test_a_backport_that_adds_a_change_line_a_newer_release_lacks_is_refused(repo):
+    repo.release("2.6.0", "schema aaaaaaaaaaaa")
+    repo.release("2.8.0", "schema aaaaaaaaaaaa")
+    repo.declare("schema aaaaaaaaaaaa", "change session-format")
+    refused(repo, "2.7.0", "v2.8.0 is newer")
+
+
 def test_tags_that_are_not_plain_versions_are_ignored(repo):
     repo.release("2.6.0", "schema aaaaaaaaaaaa")
     repo.release("2.7.0-rc.1", "schema bbbbbbbbbbbb")

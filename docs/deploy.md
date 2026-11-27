@@ -202,11 +202,16 @@ that `docker compose ps auth-service` shows one healthy container. If it shows n
 
 ### A rollout that was interrupted
 
-Before you start a rollout again, look at what runs, with each container's image:
+Before you start a rollout again, look at every container of the service, also stopped ones, with
+its image and state:
 
 ```bash
-docker compose ps auth-service --format '{{.ID}} {{.Image}} {{.Status}}'
+docker compose ps --all auth-service --format '{{.ID}} {{.Image}} {{.Status}}'
 ```
+
+The goal is exactly one container in total, healthy. Remove every other one as follows; a container
+that is not running, or still starting, or unhealthy without `/tmp/drain`, gets no traffic and can be
+removed at once with `docker rm -f <ID>`.
 
 - Two healthy containers (interrupted before the drain): keep the one on the image that `.env`
   names. Drain the other first, wait until it is unhealthy and 5 seconds more, then remove it:
@@ -223,7 +228,8 @@ docker compose ps auth-service --format '{{.ID}} {{.Image}} {{.Status}}'
 - One container, unhealthy because `/tmp/drain` exists: remove the file with
   `docker exec <ID> rm -f /tmp/drain` and wait until it is healthy.
 
-Start a rollout again only when exactly one healthy container runs.
+Start a rollout again only when `docker compose ps --all auth-service` shows exactly one container,
+and it is healthy.
 
 ## While two containers run
 

@@ -14,10 +14,16 @@ declared() {
     sed -E 's/[[:space:]]+$//' | grep -E '^(schema|change) ' || true
 }
 
+has_file() {
+    git cat-file -e "v$1:$file" 2>/dev/null
+}
+
 lines_at() {
-    local text
-    text=$(git show "v$1:$file" 2>/dev/null) || return 1
-    declared <<<"$text"
+    git show "v$1:$file" | declared
+}
+
+changes_of() {
+    grep '^change ' <<<"$1" || true
 }
 
 older() {
@@ -38,8 +44,10 @@ has_all() {
 head_lines=$(declared <"$file")
 [ "$(grep -c '^schema ' <<<"$head_lines")" = 1 ] || fail "$file needs exactly one schema line."
 head_schema=$(grep '^schema ' <<<"$head_lines")
-head_changes=$(grep '^change ' <<<"$head_lines" || true)
+head_changes=$(changes_of "$head_lines")
 
+all_tags=$(git tag -l 'v*')
+release_tags=$(sed -En 's/^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' <<<"$all_tags" | sort -V)
 below=()
 above=()
 while IFS= read -r tag; do
@@ -49,26 +57,30 @@ while IFS= read -r tag; do
     elif older "$version" "$tag"; then
         above+=("$tag")
     fi
-done < <(git tag -l 'v*' | sed -En 's/^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' | sort -V)
+done <<<"$release_tags"
 
 for tag in "${below[@]}"; do
-    tag_lines=$(lines_at "$tag") || continue
-    if ! has_all "$(grep '^change ' <<<"$tag_lines" || true)" "$head_changes"; then
+    has_file "$tag" || continue
+    tag_lines=$(lines_at "$tag")
+    if ! has_all "$(changes_of "$tag_lines")" "$head_changes"; then
         fail "v$tag declares a change line that $file no longer has. Change lines are never removed."
     fi
 done
 
 for tag in "${above[@]}"; do
-    tag_lines=$(lines_at "$tag") || continue
-    if ! grep -qxF -- "$head_schema" <<<"$tag_lines" || ! has_all "$(grep '^change ' <<<"$tag_lines" || true)" "$head_changes"; then
-        fail "v$tag is newer and declares a schema or change that $version lacks, and its rollout-from could cover $version. A backport must keep the newer release's schema and change lines."
+    has_file "$tag" || continue
+    tag_lines=$(lines_at "$tag")
+    tag_changes=$(changes_of "$tag_lines")
+    if ! grep -qxF -- "$head_schema" <<<"$tag_lines" || ! has_all "$tag_changes" "$head_changes" || ! has_all "$head_changes" "$tag_changes"; then
+        fail "v$tag is newer and its schema or change lines differ from $version's, and its rollout-from could cover $version. A backport must declare exactly what the newer release declares."
     fi
 done
 
 rollout_from=$version
 for ((i = ${#below[@]} - 1; i >= 0; i--)); do
     tag=${below[i]}
-    tag_lines=$(lines_at "$tag") || break
+    has_file "$tag" || break
+    tag_lines=$(lines_at "$tag")
     grep -qxF -- "$head_schema" <<<"$tag_lines" || break
     has_all "$head_changes" "$tag_lines" || break
     rollout_from=$tag

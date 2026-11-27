@@ -16,8 +16,9 @@ DECLARATIONS = REPO / "docker" / "rollout.txt"
 sys.path.insert(0, str(SERVICES))
 
 SCHEMA_SOURCE_FILES = ("schema.py", "installation.py")
+FINGERPRINTED_ZONES = {"ensure_zone_name_index", "duplicate_zone_groups", "_name_fold_sql"}
 SINGLE_PROCESS_DDL_FILES = {"db_move.py", "db_operations.py"}
-DDL = re.compile(r"\b(CREATE|ALTER|DROP)\s+(UNIQUE\s+)?(TABLE|INDEX|EXTENSION|TRIGGER|VIEW)\b")
+DDL = re.compile(r"\b(CREATE|ALTER|DROP)\s+(UNIQUE\s+)?(TABLE|INDEX|EXTENSION|TRIGGER|VIEW)\b", re.IGNORECASE)
 LINE = re.compile(r"^(schema [0-9a-f]{12}|change [a-z0-9][a-z0-9-]*)$")
 
 
@@ -38,7 +39,7 @@ def fingerprint(parts: list[tuple[str, str]]) -> str:
 
 
 def declarations(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    return [line.rstrip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
 
 
 def problems(lines: list[str], current: str) -> list[str]:
@@ -74,31 +75,40 @@ def test_the_declarations_name_the_current_start_up_schema():
     assert problems(declarations(DECLARATIONS.read_text(encoding="utf-8")), fingerprint(schema_source_parts())) == []
 
 
-def test_schema_statements_live_only_in_the_fingerprinted_or_single_process_modules():
-    allowed = set(SCHEMA_SOURCE_FILES) | SINGLE_PROCESS_DDL_FILES | {"zones.py"}
+def ddl_outside_checked_code(path: Path, source: str) -> list[str]:
+    tree = ast.parse(source)
+    inside = set()
+    if path.name == "zones.py":
+        for function in ast.walk(tree):
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) and function.name in FINGERPRINTED_ZONES:
+                inside |= {id(node) for node in ast.walk(function)}
+    return [
+        f"{path.name}:{node.lineno}"
+        for node in string_constants_outside_docstrings(tree)
+        if id(node) not in inside and DDL.search(node.value)
+    ]
+
+
+def test_schema_statements_live_only_in_the_fingerprinted_or_single_process_code():
+    skipped = set(SCHEMA_SOURCE_FILES) | SINGLE_PROCESS_DDL_FILES
     offenders = []
     for path in sorted(APP.rglob("*.py")):
-        if path.name in allowed and path.parent == APP:
+        if path.parent == APP and path.name in skipped:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in string_constants_outside_docstrings(tree):
-            if DDL.search(node.value):
-                offenders.append(f"{path.relative_to(SERVICES)}:{node.lineno}")
+        offenders += ddl_outside_checked_code(path, path.read_text(encoding="utf-8"))
     assert offenders == []
 
 
-def test_ddl_in_zones_is_only_in_the_fingerprinted_functions():
-    from app import zones
-
-    fingerprinted = {zones.ensure_zone_name_index.__name__, zones.duplicate_zone_groups.__name__, zones._name_fold_sql.__name__}
-    tree = ast.parse((APP / "zones.py").read_text(encoding="utf-8"))
-    offenders = []
-    for function in ast.walk(tree):
-        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) and function.name not in fingerprinted:
-            for node in string_constants_outside_docstrings(function):
-                if DDL.search(node.value):
-                    offenders.append(f"zones.{function.name}:{node.lineno}")
-    assert offenders == []
+@pytest.mark.parametrize(
+    "source",
+    [
+        'SQL = "alter table tokens add column note text"\n',
+        'INDEX_SQL = "CREATE UNIQUE INDEX IF NOT EXISTS i ON zones (name)"\n'
+        "def ensure_zone_name_index(db):\n    return INDEX_SQL\n",
+    ],
+)
+def test_ddl_outside_the_checked_code_is_found(source):
+    assert ddl_outside_checked_code(Path("zones.py"), source) != []
 
 
 BASE = [("schema.py", "CREATE TABLE IF NOT EXISTS tokens (id TEXT)\n")]
@@ -134,6 +144,7 @@ def test_line_endings_do_not_change_the_fingerprint():
         ["schema 0123456789ab", "breaking session-format"],
         ["schema 0123456789AB"],
         ["schema 0123456789ab", "change Session"],
+        ["schema 0123456789ab", " change session-format"],
     ],
 )
 def test_malformed_declarations_are_refused(lines):
