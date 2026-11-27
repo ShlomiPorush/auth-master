@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Zero-downtime updates** with docker rollout: each image carries the labels
+  `auth-master.compose-sha256` and `auth-master.rollout-from`, which say whether a release can
+  run beside the running one. `docs/deploy.md` describes what the host's Compose file and `.env`
+  need, what happens while two containers run, and how to update by hand.
+- `docker/rollout.txt` declares what an older release cannot run beside: the start-up schema
+  code (a test checks its fingerprint) and other changes by name. `auth-master.rollout-from` is
+  derived from it and the release tags. This release has no earlier release to roll out from and
+  is updated by hand.
+- The old container drains before a rollout stops it: the image's
+  `docker-rollout.pre-stop-hook` label makes its health check fail, so the reverse proxy stops
+  routing to it first.
+
+### Changed
+
+- The image's health check runs every 10 seconds instead of 30, and fails while `/tmp/drain`
+  exists. A Compose `healthcheck` on the service replaces it and with it the drain.
+
+- A version tag publishes its image only after every check of the Tests workflow passed, and
+  never pushes a version that GHCR already has, so `X.Y.Z` always names the same image. An empty
+  CHANGELOG section now stops the release before anything is pushed, and a tag that is not
+  `vX.Y.Z` with plain numbers is refused. `latest` moves only to the highest version, so a
+  release of an older line no longer moves it back.
+
+### Fixed
+
+- On PostgreSQL, a starting service no longer takes table locks for columns and indexes that
+  already exist. A second instance that started while the first one ran a long Usage report or
+  while a VACUUM ran could make `/validate` wait until the report or the VACUUM ended.
+- On SQLite, the expired-token cleanup no longer deletes a token whose expiry was extended after
+  the cleanup read it.
+
 ## [2.5.0] - 2026-11-16
 
 ### Added

@@ -19,7 +19,30 @@ _ONE_ENABLED_ADMIN_MSG = (
 )
 
 
+async def pg_index_exists(db: "Database", name: str) -> bool:
+    return bool(await db.fetchval(
+        "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1", name
+    ))
+
+
+async def _pg_index(db: "Database", name: str, definition: str) -> None:
+    if not await pg_index_exists(db, name):
+        await db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {definition}")
+
+
+async def _pg_add_column(db: "Database", table: str, column: str, definition: str) -> None:
+    exists = await db.fetchval(
+        "SELECT 1 FROM information_schema.columns"
+        " WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2",
+        table, column,
+    )
+    if not exists:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
+
+
 async def _ensure_one_enabled_admin_index(db: "Database", where: str) -> None:
+    if db.is_pg and await pg_index_exists(db, "admin_users_one_enabled"):
+        return
     try:
         await db.execute(
             f"CREATE UNIQUE INDEX IF NOT EXISTS admin_users_one_enabled ON admin_users (totp_enabled) WHERE {where}"
@@ -103,9 +126,9 @@ async def _ensure_pg(db: "Database") -> None:
             last_used_at TIMESTAMPTZ NULL
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_tokens_token_hash ON tokens (token_hash)")
-    await db.execute("ALTER TABLE IF EXISTS tokens ADD COLUMN IF NOT EXISTS token_enc TEXT NULL")
-    await db.execute("ALTER TABLE IF EXISTS tokens ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
+    await _pg_index(db, "idx_tokens_token_hash", "tokens (token_hash)")
+    await _pg_add_column(db, "tokens", "token_enc", "TEXT NULL")
+    await _pg_add_column(db, "tokens", "description", "TEXT NOT NULL DEFAULT ''")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS zones (
@@ -115,8 +138,8 @@ async def _ensure_pg(db: "Database") -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_zones_name ON zones (name)")
-    await db.execute("ALTER TABLE IF EXISTS zones ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
+    await _pg_index(db, "idx_zones_name", "zones (name)")
+    await _pg_add_column(db, "zones", "description", "TEXT NOT NULL DEFAULT ''")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS api_keys (
@@ -128,8 +151,8 @@ async def _ensure_pg(db: "Database") -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys (key_hash)")
-    await db.execute("ALTER TABLE IF EXISTS api_keys ADD COLUMN IF NOT EXISTS key_enc TEXT NULL")
+    await _pg_index(db, "idx_api_keys_key_hash", "api_keys (key_hash)")
+    await _pg_add_column(db, "api_keys", "key_enc", "TEXT NULL")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS activity_logs (
@@ -144,7 +167,7 @@ async def _ensure_pg(db: "Database") -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs (created_at DESC)")
+    await _pg_index(db, "idx_activity_logs_created_at", "activity_logs (created_at DESC)")
 
     await db.execute("""
         CREATE TABLE IF NOT EXISTS access_logs (
@@ -158,12 +181,12 @@ async def _ensure_pg(db: "Database") -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at DESC)")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_token_id ON access_logs (token_id)")
+    await _pg_index(db, "idx_access_logs_created_at", "access_logs (created_at DESC)")
+    await _pg_index(db, "idx_access_logs_token_id", "access_logs (token_id)")
     # The Usage page's summary of access_logs (app.usage_rollup). rolled marks the rows it
     # counts; the partial index finds the rows it does not count yet.
-    await db.execute("ALTER TABLE access_logs ADD COLUMN IF NOT EXISTS rolled BOOLEAN NOT NULL DEFAULT false")
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_unrolled ON access_logs (created_at) WHERE NOT rolled")
+    await _pg_add_column(db, "access_logs", "rolled", "BOOLEAN NOT NULL DEFAULT false")
+    await _pg_index(db, "idx_access_logs_unrolled", "access_logs (created_at) WHERE NOT rolled")
     await db.execute("""
         CREATE TABLE IF NOT EXISTS access_log_rollup (
             slot TIMESTAMPTZ NOT NULL,
@@ -179,7 +202,7 @@ async def _ensure_pg(db: "Database") -> None:
             name_id UUID NULL
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_access_log_rollup_slot ON access_log_rollup (slot)")
+    await _pg_index(db, "idx_access_log_rollup_slot", "access_log_rollup (slot)")
     await db.execute("""
         CREATE TABLE IF NOT EXISTS access_log_rollup_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -230,7 +253,7 @@ async def _ensure_pg(db: "Database") -> None:
             last_used_at TIMESTAMPTZ NULL
         )
     """)
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_passkeys_admin_id ON passkeys (admin_id)")
+    await _pg_index(db, "idx_passkeys_admin_id", "passkeys (admin_id)")
     # The passkey address from the Settings page: one row per saved version, never updated
     # or deleted (app.passkey_settings).  A NULL origin is a version that removed the address.
     await db.execute("""
