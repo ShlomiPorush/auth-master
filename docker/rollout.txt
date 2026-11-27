@@ -1,0 +1,7 @@
+# What a running older release cannot run beside, for zero-downtime rollouts.
+# See "Releases that cannot roll out" in docs/deploy.md. Never remove or edit a change line.
+#
+# schema <fingerprint>  The start-up schema code. services/tests/test_rollout_declarations.py
+#                       names the new value when that code changes; replace this line.
+# change <name>         One line for each other change an older release cannot run beside.
+schema 4d09fbe1f15f
