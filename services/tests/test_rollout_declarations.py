@@ -18,7 +18,11 @@ sys.path.insert(0, str(SERVICES))
 SCHEMA_SOURCE_FILES = ("schema.py", "installation.py")
 FINGERPRINTED_ZONES = {"ensure_zone_name_index", "duplicate_zone_groups", "_name_fold_sql"}
 SINGLE_PROCESS_DDL_FILES = {"db_move.py", "db_operations.py"}
-DDL = re.compile(r"\b(CREATE|ALTER|DROP)\s+(UNIQUE\s+)?(TABLE|INDEX|EXTENSION|TRIGGER|VIEW)\b", re.IGNORECASE)
+DDL = re.compile(
+    r"\b(CREATE|ALTER|DROP)\s+(OR\s+REPLACE\s+)?(UNIQUE\s+)?(MATERIALIZED\s+)?"
+    r"(TABLE|INDEX|EXTENSION|TRIGGER|VIEW|FUNCTION|TYPE|SEQUENCE|SCHEMA)\b",
+    re.IGNORECASE,
+)
 LINE = re.compile(r"^(schema [0-9a-f]{12}|change [a-z0-9][a-z0-9-]*)$")
 
 
@@ -34,12 +38,18 @@ def schema_source_parts() -> list[tuple[str, str]]:
 def fingerprint(parts: list[tuple[str, str]]) -> str:
     digest = hashlib.sha256()
     for name, text in parts:
-        digest.update(name.encode() + b"\0" + text.replace("\r\n", "\n").encode() + b"\0")
+        digest.update(name.encode() + b"\0" + text.encode() + b"\0")
     return digest.hexdigest()[:12]
 
 
-def declarations(text: str) -> list[str]:
-    return [line.rstrip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+def unreadable(data: bytes) -> list[str]:
+    bad = sorted({b for b in data.replace(b"\r\n", b"\n") if b != 0x0A and not 0x20 <= b <= 0x7E})
+    return [f"docker/rollout.txt may hold only printable ASCII and line breaks, found bytes {bad}"] if bad else []
+
+
+def declarations(data: bytes) -> list[str]:
+    text = data.replace(b"\r\n", b"\n").decode("ascii", "replace")
+    return [line.rstrip() for line in text.split("\n") if line.strip() and not line.lstrip().startswith("#")]
 
 
 def problems(lines: list[str], current: str) -> list[str]:
@@ -72,7 +82,8 @@ def string_constants_outside_docstrings(tree: ast.AST) -> list[ast.Constant]:
 
 
 def test_the_declarations_name_the_current_start_up_schema():
-    assert problems(declarations(DECLARATIONS.read_text(encoding="utf-8")), fingerprint(schema_source_parts())) == []
+    data = DECLARATIONS.read_bytes()
+    assert unreadable(data) + problems(declarations(data), fingerprint(schema_source_parts())) == []
 
 
 def ddl_outside_checked_code(path: Path, source: str) -> list[str]:
@@ -103,6 +114,7 @@ def test_schema_statements_live_only_in_the_fingerprinted_or_single_process_code
     "source",
     [
         'SQL = "alter table tokens add column note text"\n',
+        'SQL = "CREATE OR REPLACE TRIGGER t BEFORE INSERT ON tokens FOR EACH ROW EXECUTE FUNCTION f()"\n',
         'INDEX_SQL = "CREATE UNIQUE INDEX IF NOT EXISTS i ON zones (name)"\n'
         "def ensure_zone_name_index(db):\n    return INDEX_SQL\n",
     ],
@@ -131,8 +143,16 @@ def test_any_edit_of_the_schema_source_needs_a_new_schema_line(edit):
     assert problems([f"schema {after}"], after) == []
 
 
-def test_line_endings_do_not_change_the_fingerprint():
-    assert fingerprint([("schema.py", "a\r\nb\r\n")]) == fingerprint([("schema.py", "a\nb\n")])
+@pytest.mark.parametrize("separator", [" ", "\x0c", "\x85", "\r"])
+def test_a_line_break_the_publish_script_does_not_see_is_refused(separator):
+    data = f"# note{separator}change session-format\nschema 0123456789ab\n".encode()
+    assert unreadable(data) != []
+
+
+def test_windows_line_endings_are_read_like_the_publish_script_reads_them():
+    data = b"# note\r\nschema 0123456789ab\r\nchange session-format\r\n"
+    assert unreadable(data) == []
+    assert declarations(data) == ["schema 0123456789ab", "change session-format"]
 
 
 @pytest.mark.parametrize(

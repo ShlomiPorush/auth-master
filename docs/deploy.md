@@ -85,7 +85,7 @@ cannot run beside.
 the release tags `vX.Y.Z` below the version, from the highest down, while each tag has the same
 `schema` line and every `change` line of the version; the lowest tag reached is the label, or the
 version itself when the highest tag already differs. It refuses to publish when a `change` line of an
-earlier tag is missing, when a newer release tag declares a schema or change that the version lacks
+earlier tag is missing, when a newer release tag declares another schema or other change lines
 (a backport that the newer release's label could cover), and when the tag is not `vX.Y.Z` with plain
 numbers.
 
@@ -209,15 +209,14 @@ its image and state:
 docker compose ps --all auth-service --format '{{.ID}} {{.Image}} {{.Status}}'
 ```
 
-The goal is exactly one container in total, healthy. Remove every other one as follows; a container
-that is not running, or still starting, or unhealthy without `/tmp/drain`, gets no traffic and can be
-removed at once with `docker rm -f <ID>`.
+The goal is exactly one container in total, healthy and not draining. A container that is not
+running, still starting, or unhealthy gets no traffic from the proxy; stop it with `docker stop` (a
+running one finishes its requests in flight) and then remove it with `docker rm`. For the others:
 
 - Two healthy containers (interrupted before the drain): keep the one on the image that `.env`
-  names. Drain the other first, wait until it is unhealthy and 5 seconds more, then remove it:
+  names. Drain the other first, in the shell where you set `OLD` to its ID:
 
   ```bash
-  OLD=<the ID of the container to remove>
   docker exec "$OLD" touch /tmp/drain
   ```
 
@@ -225,11 +224,16 @@ removed at once with `docker rm -f <ID>`.
   `docker stop "$OLD" && docker rm "$OLD"`.
 - A healthy new container and an old one that is draining: wait until the old one is unhealthy and
   5 seconds more, then stop and remove it as above.
-- One container, unhealthy because `/tmp/drain` exists: remove the file with
-  `docker exec <ID> rm -f /tmp/drain` and wait until it is healthy.
+- The container you keep has `/tmp/drain` (the rollout stopped during the hook, the new container
+  is gone): it may still be healthy for a few seconds, but turns unhealthy and leaves the proxy.
+  Remove the file and wait until it is healthy:
+
+  ```bash
+  docker exec "$KEEP" sh -c 'test -e /tmp/drain && rm /tmp/drain'
+  ```
 
 Start a rollout again only when `docker compose ps --all auth-service` shows exactly one container,
-and it is healthy.
+it is healthy, and `docker exec "$KEEP" test -e /tmp/drain` fails.
 
 ## While two containers run
 

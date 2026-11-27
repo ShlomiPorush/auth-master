@@ -13,10 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 _TMP_DIR = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 
 for _name, _value in {
-    "ADMIN_API_KEY": secrets.token_urlsafe(32),
     "SESSION_SECRET": secrets.token_urlsafe(48),
     "APP_ENCRYPTION_KEY": secrets.token_hex(16),
-    "REDIS_URL": f"redis://:{secrets.token_hex(32)}@127.0.0.1:6379/0",
 }.items():
     os.environ.setdefault(_name, _value)
 
