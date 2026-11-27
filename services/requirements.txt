@@ -1,4 +1,4 @@
-fastapi==0.162.0
+fastapi==0.165.0
 # Imported directly (RequestBodyLimitMiddleware is new in 1.10); fastapi allows older releases.
 starlette==1.10.0
 uvicorn[standard]==0.54.0
@@ -6,7 +6,7 @@ asyncpg==0.32.0
 aiosqlite==0.22.1
 redis==8.1.0
 bcrypt==5.0.0
-pyotp==2.10.0
+pyotp==2.12.1
 cryptography==50.0.2
-pydantic-settings==2.16.2
+pydantic-settings==2.16.3
 webauthn==3.0.1
